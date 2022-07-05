@@ -209,14 +209,14 @@ module MultivariateNormalCRP
             end
 
             # mean_x::Vector{Float64} = mean(X, dims=1)[1, :]
-            # mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
-            mean_x::Vector{Float64} = zeros(d)
-            for i in 1:d
-                for k in 1:n
-                    mean_x[i] += X[k, i]
-                end
-                mean_x[i] /= n
-            end
+            mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
+            # mean_x::Vector{Float64} = zeros(d)
+            # for i in 1:d
+            #     for k in 1:n
+            #         mean_x[i] += X[k, i]
+            #     end
+            #     mean_x[i] /= n
+            # end
 
             prepsi_c = Array{Float64}(undef, n, d, d)
             @inbounds for i in 1:d
