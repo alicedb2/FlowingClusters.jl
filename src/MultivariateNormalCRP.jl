@@ -55,12 +55,12 @@ module MultivariateNormalCRP
 
         # Recover the dimension of a matrix
         # from the length of the vector
-        # containing elements of the lower triangular
+        # containing elements of the diag + lower triangular
         # part of the matrix. The condition is that
         # length of vector == #els diagonal + #els lower triangular part
         # i.e N == d + (d² - d) / 2 
         # Will fail at Int64() if this condition
-        # cannot be satisfied.
+        # cannot be satisfied for N and d integers
         d = Int64((sqrt(1 + 8 * n) - 1) / 2)
     
         L = LowerTriangular(zeros(d, d))
@@ -119,6 +119,7 @@ module MultivariateNormalCRP
     end
 
     function dimension(params::MNCRPparams)
+        @assert size(params.mu, 1) == size(params.psi, 1) == size(params.psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
         return size(params.mu, 1)
     end
 
@@ -198,33 +199,64 @@ module MultivariateNormalCRP
             # psi_c += sum((x - mean_x) * (x - mean_x)' for x in cluster)
             # psi_c += lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)'
 
+            ###############################
             # Optimized type-stableish(?) version of the 4 lines above
             X::Matrix{Float64} = Array{Float64}(undef, n, d)
-            for (k, x::Vector{Float64}) in enumerate(cluster)
+            @inbounds for (k, x::Vector{Float64}) in enumerate(cluster)
                 for i in 1:d
-                    @inbounds X[k, i] = x[i]
+                    X[k, i] = x[i]
                 end
             end
-            mean_x::Vector{Float64} = sum(X, dims=1)[1, :]/n
-            prepsi_c = Array{Float64}(undef, n, d, d)
+
+            # mean_x::Vector{Float64} = mean(X, dims=1)[1, :]
+            # mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
+            mean_x::Vector{Float64} = zeros(d)
             for i in 1:d
+                for k in 1:n
+                    mean_x[i] += X[k, i]
+                end
+                mean_x[i] /= n
+            end
+
+            prepsi_c = Array{Float64}(undef, n, d, d)
+            @inbounds for i in 1:d
                 for j in 1:i
                     for k in 1:n
-                        @inbounds prepsi_c[k, i, j] = (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
-                        @inbounds prepsi_c[k, j, i] = prepsi_c[k, i, j]
+                        prepsi_c[k, i, j] = (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
+                        prepsi_c[k, j, i] = prepsi_c[k, i, j]
                     end
                 end
             end
+
+            # psi_c = psi
+            # psi_c += lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)'
             psi_c = Array{Float64}(undef, d, d)
-            for i in 1:d
+            @inbounds for i in 1:d
                 for j in 1:i
                     psi_c[i, j] = psi[i, j] + lambda * n / (lambda + n) * (mean_x[i] - mu[i]) * (mean_x[j] - mu[j])
                     psi_c[j, i] = psi_c[i, j]
                 end
             end
-            psi_c += sum(prepsi_c, dims=1)[1, :, :]
-            
-            mu_c::Vector{Float64} = (lambda * mu + n * mean_x) / (lambda + n)
+
+            # psi_c += sum(prepsi_c, dims=1)[1, :, :]
+            @inbounds for i in 1:d
+                for j in 1:i-1
+                    for k in 1:n
+                        psi_c[i, j] += prepsi_c[k, i, j]
+                    end
+                    psi_c[j, i] = psi_c[i, j]
+                end
+                for k in 1:n
+                    psi_c[i, i] += prepsi_c[k, i, i]
+                end
+            end
+            ###############################
+
+            # mu_c::Vector{Float64} = (lambda * mu + n * mean_x) / (lambda + n)
+            mu_c = Array{Float64}(undef, d)
+            @inbounds for i in 1:d
+                mu_c[i] = (lambda * mu[i] + n * mean_x[i]) / (lambda + n)
+            end
 
             return (mu_c, lambda_c, psi_c, nu_c)
         end
@@ -310,7 +342,6 @@ module MultivariateNormalCRP
         # end
         
         # Add single empty cluster to potential choice with its associated weights
-
         empty_set = Set{Vector{Float64}}([])
         push!(list_of_clusters, empty_set)
         push!(crp_log_weights, log(alpha) - log(alpha + Nminus1))
@@ -435,19 +466,19 @@ module MultivariateNormalCRP
             
                 log_weight_Si = log(length(launch_Si))
 
-                log_weight_Si += log_Zniw(union(singleton_e, launch_Si), mu, lambda, psi, nu) 
-                # push!(launch_Si, e)
-                # log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu) 
-                # pop!(launch_Si, e)
+                # log_weight_Si += log_Zniw(union(singleton_e, launch_Si), mu, lambda, psi, nu) 
+                push!(launch_Si, e)
+                log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu) 
+                pop!(launch_Si, e)
 
                 log_weight_Si -= log_Zniw(launch_Si, mu, lambda, psi, nu)
                 log_weight_Si -= d/2 * log(2pi) # Just for the sake of explicitness, will cancel out
 
                 log_weight_Sj = log(length(launch_Sj))
-                log_weight_Sj += log_Zniw(union(singleton_e, launch_Sj), mu, lambda, psi, nu) 
-                # push!(launch_Sj, e)
-                # log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                # pop!(launch_Sj, e)
+                # log_weight_Sj += log_Zniw(union(singleton_e, launch_Sj), mu, lambda, psi, nu) 
+                push!(launch_Sj, e)
+                log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu)
+                pop!(launch_Sj, e)
 
                 log_weight_Sj -= log_Zniw(launch_Sj, mu, lambda, psi, nu)
                 log_weight_Sj -= d/2 * log(2pi)
@@ -488,20 +519,20 @@ module MultivariateNormalCRP
                 singleton_e = Set{Vector{Float64}}([e])
 
                 log_weight_Si = log(length(proposed_Si))
-                log_weight_Si += log_Zniw(union(singleton_e, proposed_Si), mu, lambda, psi, nu) 
-                # push!(proposed_Si, e)
-                # log_weight_Si += log_Zniw(proposed_Si, mu, lambda, psi, nu) 
-                # pop!(proposed_Si, e)
+                # log_weight_Si += log_Zniw(union(singleton_e, proposed_Si), mu, lambda, psi, nu) 
+                push!(proposed_Si, e)
+                log_weight_Si += log_Zniw(proposed_Si, mu, lambda, psi, nu) 
+                pop!(proposed_Si, e)
 
                 log_weight_Si -= log_Zniw(proposed_Si, mu, lambda, psi, nu)
                 # There is no Z0 in the denominator of the predictive posterior
                 log_weight_Si -= d/2 * log(2pi) # Just for the sake of explicitness, will cancel out
             
                 log_weight_Sj = log(length(proposed_Sj))
-                log_weight_Sj += log_Zniw(union(singleton_e, proposed_Sj), mu, lambda, psi, nu) 
-                # push!(proposed_Sj, e)
-                # log_weight_Sj += log_Zniw(proposed_Sj, mu, lambda, psi, nu) 
-                # pop!(proposed_Sj, e)
+                # log_weight_Sj += log_Zniw(union(singleton_e, proposed_Sj), mu, lambda, psi, nu) 
+                push!(proposed_Sj, e)
+                log_weight_Sj += log_Zniw(proposed_Sj, mu, lambda, psi, nu) 
+                pop!(proposed_Sj, e)
 
                 log_weight_Sj -= log_Zniw(proposed_Sj, mu, lambda, psi, nu)
                 log_weight_Sj -= d/2 * log(2pi)
@@ -582,10 +613,10 @@ module MultivariateNormalCRP
 
                 log_weight_Si = log(length(launch_Si))
 
-                log_weight_Si += log_Zniw(union(singleton_e, launch_Si), mu, lambda, psi, nu) 
-                # push!(launch_Si, e)
-                # log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu) 
-                # pop!(launch_Si, e)
+                # log_weight_Si += log_Zniw(union(singleton_e, launch_Si), mu, lambda, psi, nu) 
+                push!(launch_Si, e)
+                log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu) 
+                pop!(launch_Si, e)
 
                 log_weight_Si -= log_Zniw(launch_Si, mu, lambda, psi, nu)
                 # There is no Z0 in the denominator of the predictive posterior
@@ -593,10 +624,10 @@ module MultivariateNormalCRP
             
                 log_weight_Sj = log(length(launch_Sj))
 
-                log_weight_Sj += log_Zniw(union(singleton_e, launch_Sj), mu, lambda, psi, nu) 
-                # push!(launch_Sj, e)
-                # log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu) 
-                # pop!(launch_Sj, e)
+                # log_weight_Sj += log_Zniw(union(singleton_e, launch_Sj), mu, lambda, psi, nu) 
+                push!(launch_Sj, e)
+                log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu) 
+                pop!(launch_Sj, e)
                 
                 log_weight_Sj -= log_Zniw(launch_Sj, mu, lambda, psi, nu)
                 log_weight_Sj -= d/2 * log(2pi)
@@ -892,20 +923,24 @@ module MultivariateNormalCRP
 
     function advance_full_sequential_gibbs!(list_of_clusters::Vector{Set{Vector{Float64}}}, params::MNCRPparams)
 
-        data = Vector{Float64}[datum for cluster in list_of_clusters for datum in cluster]
-        data = data[randperm(size(data, 1))]
+        # data = Vector{Float64}[datum for cluster in list_of_clusters for datum in cluster]
+        # data = data[randperm(size(data, 1))]
+        data = shuffle([element for cluster in list_of_clusters for element in cluster])
 
         empty!(list_of_clusters)
 
-        for datum in data
-            add_to_state_gibbs!(datum, list_of_clusters, params)
+        for element in data
+            add_to_state_gibbs!(element, list_of_clusters, params)
         end
 
     end
 
     function initiate_chain(data::Vector{Vector{Float64}})
-        
-        params = MNCRPparams(size(data[1], 1))
+
+        @assert all(size(e, 1) == size(data[1], 1) for e in data)
+
+        d = size(data[1], 1)
+        params = MNCRPparams(d)
         chain_state = MNCRPchain([], params, [], [], [], [], params, -Inf)
 
         chain_state.params_chain = [params]
@@ -916,6 +951,7 @@ module MultivariateNormalCRP
 
         chain_state.map_pi = deepcopy(chain_state.pi_state)
         chain_state.map_logprob = log_prob(chain_state.pi_state, chain_state.params)
+
         chain_state.logprob_chain = [chain_state.map_logprob]
 
         return chain_state

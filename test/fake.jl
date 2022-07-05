@@ -29,18 +29,23 @@ function fake()
     end
 
 
-    # Seed, initialize, and run the chain for a few steps    
-    seed!(42)
-    chain_state = MultivariateNormalCRP.initiate_chain([1.0 * x for x in eachcol(presences)])
+    # Seed the chain
+    seed!(41)
+    
+    # eachcol returns some very wild type so we explicitly recast it
+    data = Vector{Vector{Float64}}(collect(eachcol(presences)))
+    chain_state = MultivariateNormalCRP.initiate_chain(data)
 
     # Profile split-merge moves
     @time @profview MultivariateNormalCRP.advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_paramsmh=0, fullseq_prob=0.0)
-    
+
     # Profile Gibbs moves
     # @time @profview MultivariateNormalCRP.advance_chain!(chain_state, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_paramsmh=0, fullseq_prob=0.0)
 
     # Profile Metropolis-Hastings moves for parameters
     # @time @profview MultivariateNormalCRP.advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=0, nb_paramsmh=10, fullseq_prob=0.0)
+
+    return chain_state
 end
 
-fake()
+chain_state = fake();
