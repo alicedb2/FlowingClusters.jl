@@ -14,4 +14,4 @@ Of note is the method we use to sample the precision matrix hyperparameter Psi o
 
 $$\left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert_{i\ge j, k\ge l} = 2^d \vert L_{11}\vert^d \vert L_{22}\vert^{d - 1}\ldots \vert L_{dd}\vert$$
 
-to construct a Hastings factor. In other words symmetric moves in the elements of L plus the Hastings factor gives us a scheme to uniformly explore the space of positive-definite matrices. This is the matrix equivalent of the scalar case whereby one translates symmetric moves over x into uniform moves over y=x<sup>2</sup>. As far as we are aware there is no reference of this simple approach in the literature.
+to construct a Hastings factor. In other words symmetric moves in the elements of L plus the Hastings factor give us a scheme to uniformly explore the space of positive-definite matrices. This is the matrix equivalent of how in the scalar case one can translate uniform symmetric moves over x on the real axis into uniform moves over y=x<sup>2</sup> on the positive real axis. As far as we are aware there is no reference to this simple approach in the literature.
