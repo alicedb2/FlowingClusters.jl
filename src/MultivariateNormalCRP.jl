@@ -210,8 +210,9 @@ module MultivariateNormalCRP
 
             # mean_x::Vector{Float64} = mean(X, dims=1)[1, :]
             mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
-            # mean_x::Vector{Float64} = zeros(d)
-            # for i in 1:d
+            # mean_x = Array{Float64}(undef, d)
+            # @inbounds for i in 1:d
+            #     mean_x[i] = 0.0
             #     for k in 1:n
             #         mean_x[i] += X[k, i]
             #     end
@@ -308,7 +309,15 @@ module MultivariateNormalCRP
             log_z_niw += log_Zniw(c, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - length(c) * d/2 * log(2pi) 
         end
 
-        return crp + log_z_niw
+        log_hyperpriors = 0.0 # mu0 and psi0 have flat hyperpriors
+        log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
+        log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
+        
+        # nu0 ~ gamma(3, 1) hyperprior
+        a, b = 3.0, 1.0
+        log_hyperpriors += (a - 1) * log(nu - (d - 1)) - b * (nu - (d - 1)) 
+
+        return crp + log_z_niw + log_hyperpriors
     
     end
 
@@ -767,7 +776,7 @@ module MultivariateNormalCRP
         
         # log_acc += proposed_loglambda - log(params.lambda)  # uniform in lambda
         # log_acc += log(params.lambda) - proposed_loglambda  # jeffreys
-        # ... they cancel??? fine. that's weird
+        # ... they cancel??? fine. that's weird (it's log moves => 1/x prior)
 
         log_acc = min(0.0, log_acc)
         
@@ -780,11 +789,6 @@ module MultivariateNormalCRP
     
     end
 
-
-    # This step moves uniformly in L, which is not the same as uniformly in psi
-    # One can thing of it as moving uniformly in x while the parameter in the model is x^2
-    # I would like to move uniformly in psi but I can't figure out the Hastings factor.
-    # g(psi|psi')/g(psi'|psi) = sqrt(det(psi')) / sqrt(det(psi)) ???
     function advance_psi!(list_of_clusters::Vector{Set{Vector{Float64}}}, params::MNCRPparams;
                           random_order=true, step_scale=0.1, step_type="gaussian")
     
@@ -824,7 +828,7 @@ module MultivariateNormalCRP
                         for c in list_of_clusters)
                 
             # Go from symmetric and uniform in L to uniform in psi
-            # det(del psi/del L) = 2^d |L_11^n * L_22^(n-1) ... L_nn|
+            # det(del psi/del L) = 2^d |L_11^d * L_22^(d-1) ... L_nn|
             # 2^d's cancel in the Hastings ratio
             log_hastings = sum((d:-1:1) .* (log.(abs.(diag(proposed_L))) - log.(abs.(diag(params.L)))))
             log_acc += log_hastings
@@ -958,7 +962,7 @@ module MultivariateNormalCRP
 
     end
 
-    function advance_chain!(chain_state::MNCRPchain; nb_steps=100, nb_splitmerge=5, nb_gibbs=10, nb_paramsmh=10, fullseq_prob=0.03)
+    function advance_chain!(chain_state::MNCRPchain; nb_steps=100, nb_splitmerge=5, splitmerge_t=5, nb_gibbs=10, nb_paramsmh=10, fullseq_prob=0.03)
 
         print(".."); flush(stdout)
 
@@ -974,7 +978,7 @@ module MultivariateNormalCRP
             else
             
                 for i in 1:nb_splitmerge
-                    advance_clusters_JNrestrictedsplitmerge!(chain_state.pi_state, chain_state.params)
+                    advance_clusters_JNrestrictedsplitmerge!(chain_state.pi_state, chain_state.params, t=splitmerge_t)
                 end
             
             end
