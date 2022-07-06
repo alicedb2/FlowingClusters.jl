@@ -12,6 +12,6 @@ The generative model is sampled using MCMC. Our MCMC algorithm uses three kinds 
 
 Of note is the method we use to sample the precision matrix hyperparameter Psi of the NIW given a flat hyperprior. Indeed it is not immediately obvious what a flat prior over positive definite matrices looks like. To do so we use the Cholesky decomposition Psi = L * L' which allows us to perform uniform symmetric moves on the lower triangular elements of L. To translate those symmetric uniform moves over L into uniform moves over Psi we use the absolute value of the determinant of the Jacobian
 
-$$\left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert_{i\ge j, k\ge l}} = 2^d \vert L_{11}\vert^d \vert L_{22}\vert^{d - 1}\ldots \vert L_{dd}\vert$$
+$$\left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert_{{i\ge j, k\ge l}} = 2^d \vert L_{11}\vert^d \vert L_{22}\vert^{d - 1}\ldots \vert L_{dd}\vert$$
 
 to construct a Hastings factor. In other words symmetric moves in the elements of L plus the Hastings factor gives us a scheme to uniformly explore the space of positive-definite matrices. As far as we are aware there is no reference of this simple approach in the literature.
