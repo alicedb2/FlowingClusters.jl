@@ -6,7 +6,7 @@ It differs from traditional KDE in that it is a clustering algorithm where sampl
 
  One salient feature of the model is that, as mentionned above, the number of mixture components is arbitrary and itself a distribution infered from the data and so is the covariance matrix for each of those components independently.
 
-The model uses a non-parametric Chinese Restaurant Process (CRP) prior (Aldous 1983) over the number of mixture components and assignments of sample points to those components. For the base distribution of the CRP we use the Normal-Inverse-Wishart (NIW) distribution given that it is the conjugate prior to our data likelihood a multivariate normal distribution with unknown mean and covariance. Conjugacy is desirable because it greatly simplifies the accompanying algorithm.
+The model uses a non-parametric Chinese Restaurant Process (CRP) prior (Aldous 1983) over partitions of the sample points, i.e. over both the number of mixture components and over the assignments of sample points to those components. For the base distribution of the CRP we use the Normal-Inverse-Wishart (NIW) distribution given that it is the conjugate prior to our data likelihood the multivariate normal distribution with unknown mean and covariance. Conjugacy is desirable because it greatly simplifies the accompanying algorithm.
 
 The generative model is sampled using MCMC. Our MCMC algorithm uses three kinds of sampling strategies. For sampling the CRP we use traditional Gibbs sampling (Neal 2000, algorithm 3) together with restricted split-merge moves (Jain & Neal 2004). Hyperparameters of the model for both the CRP and the NIW base distributions have their own hyperpriors, some improper and some proper, which we sample using traditional Metropolis-Hastings moves.
 
