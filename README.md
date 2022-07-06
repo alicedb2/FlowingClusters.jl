@@ -10,8 +10,8 @@ The model uses a non-parametric Chinese Restaurant Process (CRP) prior (Aldous 1
 
 The generative model is sampled using MCMC. Our MCMC algorithm uses three kinds of sampling strategies. For sampling the CRP we use traditional Gibbs sampling (Neal 2000, algorithm 3) together with restricted split-merge moves (Jain & Neal 2004). Hyperparameters of the model for both the CRP and the NIW base distributions have their own hyperpriors, some improper and some proper, which we sample using traditional Metropolis-Hastings moves.
 
-Of note is the method we use to sample the precision matrix hyperparameter Psi of the NIW over a flat hyperprior. Since the precision matrix is positive definite, we use the Cholesky decomposition Psi = L * L' which allows us to perform uniform symmetric moves on the diagonal and lower triangular elements of L. To transform those symmetric moves over L into uniform moves over Psi, we use the absolute value of the determinant of the Jacobian
+Of note is the method we use to sample the precision matrix hyperparameter Psi of the NIW given a flat hyperprior. Indeed it is not immediately obvious what a flat prior over positive definite matrices look like. To do so we use the Cholesky decomposition Psi = L * L' which allows us to perform uniform symmetric moves on the diagonal and lower triangular elements of L. To translate those symmetric uniform moves over L into uniform moves over Psi we use the absolute value of the determinant of the Jacobian
 
 $$\left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert = 2^d \vert L_{11}\vert^d \vert L_{22}\vert^{d - 1}\ldots \vert L_{dd}\vert$$
 
-to construct the Hastings factor. In other words this gives us a scheme to uniformly explore the space of positive-definite matrices. As far as we are aware there is no reference to this simple approach in the literature.
+to construct a Hastings factor. In other words symmetric moves in the elements of L plus the Hastings factor gives us a scheme to uniformly explore the space of positive-definite matrices. As far as we are aware there is no reference of this simple approach in the literature.
