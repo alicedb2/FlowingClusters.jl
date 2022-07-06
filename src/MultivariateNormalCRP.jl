@@ -209,7 +209,7 @@ module MultivariateNormalCRP
             end
 
             # mean_x::Vector{Float64} = mean(X, dims=1)[1, :]
-            mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
+            mean_x::Vector{Float64} = sum(X, dims=1)[1, :] ./ n
             # mean_x = Array{Float64}(undef, d)
             # @inbounds for i in 1:d
             #     mean_x[i] = 0.0
@@ -253,7 +253,7 @@ module MultivariateNormalCRP
             end
             ###############################
 
-            # mu_c::Vector{Float64} = (lambda * mu + n * mean_x) / (lambda + n)
+            # mu_c = (lambda * mu + n * mean_x) / (lambda + n)
             mu_c = Array{Float64}(undef, d)
             @inbounds for i in 1:d
                 mu_c[i] = (lambda * mu[i] + n * mean_x[i]) / (lambda + n)
@@ -280,7 +280,7 @@ module MultivariateNormalCRP
     
         mu, lambda, psi, nu = updated_niw_params(cluster, mu, lambda, psi, nu)
         
-        lognum = d/2 * log(2pi) + nu*d/2 * log(2) + logmvgamma(d, nu/2)
+        lognum = d/2 * log(2pi) + nu * d/2 * log(2) + logmvgamma(d, nu/2)
     
         logdenum = d/2 * log(lambda) + nu/2 * log(det(psi))
 
@@ -313,8 +313,8 @@ module MultivariateNormalCRP
         log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
         log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
         
-        # nu0 ~ gamma(3, 1) hyperprior
-        a, b = 3.0, 1.0
+        # nu - (d - 1) ~ gamma(1, 0.333) hyperprior (max entropy with mean 3)
+        a, b = 1.0, 0.333
         log_hyperpriors += (a - 1) * log(nu - (d - 1)) - b * (nu - (d - 1)) 
 
         return crp + log_z_niw + log_hyperpriors
@@ -341,7 +341,7 @@ module MultivariateNormalCRP
                           - log_Zniw(c, mu, lambda, psi, nu)
                           - d/2 * log(2pi)) for c in list_of_clusters]
         
-        # Is noticeably faster but somehow doesn't give the same chain??!
+        # Actually slower
         # niw_log_weights = Array{Float64}(undef, length(list_of_clusters))
         # for (i, c) in enumerate(list_of_clusters)
         #     push!(c, element)
@@ -473,6 +473,8 @@ module MultivariateNormalCRP
             
                 singleton_e = Set{Vector{Float64}}([e])
             
+                #############
+
                 log_weight_Si = log(length(launch_Si))
 
                 # log_weight_Si += log_Zniw(union(singleton_e, launch_Si), mu, lambda, psi, nu) 
@@ -483,7 +485,10 @@ module MultivariateNormalCRP
                 log_weight_Si -= log_Zniw(launch_Si, mu, lambda, psi, nu)
                 log_weight_Si -= d/2 * log(2pi) # Just for the sake of explicitness, will cancel out
 
+                #############
+
                 log_weight_Sj = log(length(launch_Sj))
+
                 # log_weight_Sj += log_Zniw(union(singleton_e, launch_Sj), mu, lambda, psi, nu) 
                 push!(launch_Sj, e)
                 log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu)
@@ -491,6 +496,8 @@ module MultivariateNormalCRP
 
                 log_weight_Sj -= log_Zniw(launch_Sj, mu, lambda, psi, nu)
                 log_weight_Sj -= d/2 * log(2pi)
+
+                #############
 
                 unnorm_logp = [log_weight_Si, log_weight_Sj]
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
@@ -527,7 +534,10 @@ module MultivariateNormalCRP
 
                 singleton_e = Set{Vector{Float64}}([e])
 
+                #############
+
                 log_weight_Si = log(length(proposed_Si))
+
                 # log_weight_Si += log_Zniw(union(singleton_e, proposed_Si), mu, lambda, psi, nu) 
                 push!(proposed_Si, e)
                 log_weight_Si += log_Zniw(proposed_Si, mu, lambda, psi, nu) 
@@ -537,7 +547,10 @@ module MultivariateNormalCRP
                 # There is no Z0 in the denominator of the predictive posterior
                 log_weight_Si -= d/2 * log(2pi) # Just for the sake of explicitness, will cancel out
             
+                #############
+
                 log_weight_Sj = log(length(proposed_Sj))
+
                 # log_weight_Sj += log_Zniw(union(singleton_e, proposed_Sj), mu, lambda, psi, nu) 
                 push!(proposed_Sj, e)
                 log_weight_Sj += log_Zniw(proposed_Sj, mu, lambda, psi, nu) 
@@ -545,6 +558,8 @@ module MultivariateNormalCRP
 
                 log_weight_Sj -= log_Zniw(proposed_Sj, mu, lambda, psi, nu)
                 log_weight_Sj -= d/2 * log(2pi)
+
+                #############
 
                 unnorm_logp = [log_weight_Si, log_weight_Sj]
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
@@ -620,6 +635,7 @@ module MultivariateNormalCRP
 
                 singleton_e = Set{Vector{Float64}}([e])
 
+                #############
                 log_weight_Si = log(length(launch_Si))
 
                 # log_weight_Si += log_Zniw(union(singleton_e, launch_Si), mu, lambda, psi, nu) 
@@ -631,6 +647,8 @@ module MultivariateNormalCRP
                 # There is no Z0 in the denominator of the predictive posterior
                 log_weight_Si -= d/2 * log(2pi) # Just for the sake of explicitness, will cancel out
             
+                #############
+                
                 log_weight_Sj = log(length(launch_Sj))
 
                 # log_weight_Sj += log_Zniw(union(singleton_e, launch_Sj), mu, lambda, psi, nu) 
@@ -640,6 +658,8 @@ module MultivariateNormalCRP
                 
                 log_weight_Sj -= log_Zniw(launch_Sj, mu, lambda, psi, nu)
                 log_weight_Sj -= d/2 * log(2pi)
+
+                #############
 
                 unnorm_logp = [log_weight_Si, log_weight_Sj]
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
@@ -881,8 +901,10 @@ module MultivariateNormalCRP
 
         # gamma prior on (nu - (d - 1)) with mean 3, so that mean(nu) = d + 2
         # and thus mean(Sigma) = Psi (from Inverse-Wishart mean(Sigma) = Psi/(nu - d - 1))
-        a = 3.0
-        b = 1.0
+        # We choose a = 1.0 and b = 0.333 because it gives the gamma distribution
+        # with the largest entropy given a/b = 3
+        # ................it's an exponential distribution *facepalm*
+        a, b = 1.0, 0.333
         log_acc += (a - 1) * log(proposed_nu - (d - 1)) - b * (proposed_nu - (d - 1))
         log_acc -= (a - 1) * log(nu - (d - 1)) - b * (nu - (d - 1))
 
