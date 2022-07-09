@@ -1,11 +1,17 @@
 module MultivariateNormalCRP
     using Distributions: logpdf, MvNormal, InverseWishart, Normal, Cauchy, Uniform, Binomial
     using Random: randperm, shuffle, seed!
-    using StatsFuns: log1pexp, logsumexp, logmvgamma
+    using StatsFuns: logsumexp, logmvgamma
     using StatsBase: sample, mean, Weights
     using LinearAlgebra: det, LowerTriangular, cholesky, diag, tr, diagm
-    using SpecialFunctions: loggamma, polygamma
-    using Optim: optimize, minimizer, summary, minimum, BFGS
+    using SpecialFunctions: loggamma #, polygamma
+    using Base.Iterators: cycle
+    using ColorSchemes: Paired_12
+    using Plots: plot, scatter!
+    # using Optim: optimize, minimizer, summary, minimum, BFGS
+
+    export advance_chain!, initiate_chain, plot_pi_state, drawNIW
+    export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain
 
     mutable struct MNCRPparams
         alpha::Float64
@@ -29,9 +35,18 @@ module MultivariateNormalCRP
         map_pi::Vector{Set{Vector{Float64}}}
         map_params::MNCRPparams
         map_logprob::Float64
+        map_idx::Int64
 
     end
 
+    alpha_chain(chain::MNCRPchain) = [p.alpha for p in chain.params_chain]
+    mu_chain(chain::MNCRPchain) = [p.mu for p in chain.params_chain]
+    mu_chain(chain::MNCRPchain, i) = [p.mu[i] for p in chain.params_chain]
+    lambda_chain(chain::MNCRPchain) = [p.lambda for p in chain.params_chain]
+    psi_chain(chain::MNCRPchain) = [p.psi for p in chain.params_chain]
+    psi_chain(chain::MNCRPchain, i, j) = [p.psi[i, j] for p in chain.params_chain]
+    nu_chain(chain::MNCRPchain) = [p.nu for p in chain.params_chain]
+    
     function flattenL(L::LowerTriangular{Float64})
         
         d = size(L, 1)
@@ -310,7 +325,8 @@ module MultivariateNormalCRP
         end
 
         log_hyperpriors = 0.0 # mu0 and psi0 have flat hyperpriors
-        log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
+        # log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
+        log_hyperpriors -= 1/2 * log(alpha) # 1/sqrt(alpha) hyperprior
         log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
         
         # nu - (d - 1) ~ gamma(1, 0.333) hyperprior (max entropy with mean 3)
@@ -718,8 +734,14 @@ module MultivariateNormalCRP
     
         alpha = params.alpha
     
-        proposed_alpha = exp(log(params.alpha) + rand(step_dist))
-        log_acc = length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha) 
+        # 1/x improper hyperprior on alpha
+        # proposed_alpha = exp(log(params.alpha) + rand(step_dist))
+        
+        # "Jeffreys" 1/sqrt(x) improper hyperprior on alpha
+        coin_flip = 2 * Int(rand() < 0.5) - 1
+        proposed_alpha = (coin_flip * sqrt(params.alpha) + rand(step_dist))^2
+
+        log_acc = length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
         log_acc -= length(list_of_clusters) * log(alpha) - loggamma(alpha + N) + loggamma(alpha)
         log_acc = min(0, log_acc)
 
@@ -967,16 +989,21 @@ module MultivariateNormalCRP
 
         d = size(data[1], 1)
         params = MNCRPparams(d)
-        chain_state = MNCRPchain([], params, [], [], [], [], params, -Inf)
+        chain_state = MNCRPchain([], params, [], [], [], [], params, -Inf, 1)
 
         chain_state.params_chain = [params]
 
+        # will be suffled and replaced rightaway full_sequential_gibbs move
         chain_state.pi_state = [Set(data)]
         advance_full_sequential_gibbs!(chain_state.pi_state, chain_state.params)
         chain_state.nbclusters_chain = [length(chain_state.pi_state)]
 
         chain_state.map_pi = deepcopy(chain_state.pi_state)
-        chain_state.map_logprob = log_prob(chain_state.pi_state, chain_state.params)
+        lp = log_prob(chain_state.pi_state, chain_state.params)
+        chain_state.map_logprob = lp
+        chain_state.logprob_chain = [lp]
+        # map_params=params and map_idx=1 have already been 
+        # specified when calling MNCRPchain
 
         chain_state.logprob_chain = [chain_state.map_logprob]
 
@@ -1029,6 +1056,7 @@ module MultivariateNormalCRP
             end
 
             push!(chain_state.params_chain, deepcopy(chain_state.params))
+            push!(chain_state.nbclusters_chain, length(chain_state.pi_state))
 
             logprob = log_prob(chain_state.pi_state, chain_state.params)
             push!(chain_state.logprob_chain, logprob)
@@ -1037,12 +1065,30 @@ module MultivariateNormalCRP
                 chain_state.map_logprob = logprob
                 chain_state.map_pi = deepcopy(chain_state.pi_state)
                 chain_state.map_params = deepcopy(chain_state.params)
+                chain_state.map_idx = lastindex(chain_state.logprob_chain)
                 print("^"); flush(stdout)
             end
 
         end
 
         print("$(length(chain_state.pi_state))"); flush(stdout)
+
+    end
+
+    function plot_pi_state(pi_state::Vector{Set{Vector{Float64}}}; plot_kw...)
+        p = plot(
+            legend_position=:outertopright, grid=:no, 
+            showaxis=:no, ticks=:false; 
+            plot_kw...)
+
+        pi_state = sort(pi_state, by=x -> length(x), rev=true)
+        for (cluster, color) in zip(pi_state, cycle(Paired_12))
+            scatter!(collect(Tuple.(cluster)), label="$(length(cluster))", 
+            color=color, markerstrokewidth=0)
+        end
+        
+        display(p)
+        return p
 
     end
 
