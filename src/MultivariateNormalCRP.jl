@@ -10,7 +10,7 @@ module MultivariateNormalCRP
     using Plots: plot, scatter!
     # using Optim: optimize, minimizer, summary, minimum, BFGS
 
-    export advance_chain!, initiate_chain, plot_pi_state, drawNIW
+    export advance_chain!, initiate_chain, plot_pi_state, drawNIW, stats
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain
 
     mutable struct MNCRPparams
@@ -325,8 +325,10 @@ module MultivariateNormalCRP
         end
 
         log_hyperpriors = 0.0 # mu0 and psi0 have flat hyperpriors
+        
         # log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
         log_hyperpriors -= 1/2 * log(alpha) # 1/sqrt(alpha) hyperprior
+
         log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
         
         # nu - (d - 1) ~ gamma(1, 0.333) hyperprior (max entropy with mean 3)
@@ -722,23 +724,23 @@ module MultivariateNormalCRP
     function advance_alpha!(
         list_of_clusters::Vector{Set{Vector{Float64}}}, params::MNCRPparams;
         step_type="gaussian", step_scale=0.1)
-        
-        N = sum(length(c) for c in list_of_clusters)
-    
+            
         # No Cauchy because it's a very bad idea on a log scale
         if step_type == "gaussian"
             step_dist = Normal(0.0, step_scale)
         elseif step_type == "uniform"
             step_dist = Uniform(-step_scale/2, step_scale/2)
         end
-    
+
+        N = sum(length(c) for c in list_of_clusters)
+
         alpha = params.alpha
     
         # 1/x improper hyperprior on alpha
         # proposed_alpha = exp(log(params.alpha) + rand(step_dist))
         
         # "Jeffreys" 1/sqrt(x) improper hyperprior on alpha
-        coin_flip = 2 * Int(rand() < 0.5) - 1
+        coin_flip = 1 # 2 * Int(rand() < 0.5) - 1
         proposed_alpha = (coin_flip * sqrt(params.alpha) + rand(step_dist))^2
 
         log_acc = length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
@@ -1078,7 +1080,7 @@ module MultivariateNormalCRP
     function plot_pi_state(pi_state::Vector{Set{Vector{Float64}}}; plot_kw...)
         p = plot(
             legend_position=:outertopright, grid=:no, 
-            showaxis=:no, ticks=:false; 
+            showaxis=:no, ticks=:true; 
             plot_kw...)
 
         pi_state = sort(pi_state, by=x -> length(x), rev=true)
@@ -1092,4 +1094,23 @@ module MultivariateNormalCRP
 
     end
 
+    function stats(chain_state::MNCRPchain)
+        println("Mean..")
+        println(" #cluster: $(mean(chain_state.nbclusters_chain))")
+        println("    alpha: $(mean(alpha_chain(chain_state)))")
+        println("       mu: $(mean(mu_chain(chain_state)))")
+        println("   lambda: $(mean(lambda_chain(chain_state)))")
+        println("      psi:")
+        display(mean(psi_chain(chain_state)))
+        println("       nu: $(mean(nu_chain(chain_state)))")
+        println()
+        println("MAP..")
+        println(" #cluster: $(length(chain_state.map_pi))")
+        println("    alpha: $(chain_state.map_params.alpha)")
+        println("       mu: $(chain_state.map_params.mu)")
+        println("   lambda: $(chain_state.map_params.lambda)")
+        println("      psi:")
+        display(chain_state.map_params.psi)
+        println("       nu: $(chain_state.map_params.nu)")
+    end
 end
