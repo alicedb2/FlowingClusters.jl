@@ -23,7 +23,7 @@ function fake()
     for i in 1:nb_clusters
         # Draw mean and covariance matrix from Normal-Inverse-Wishart distribution
         # and sample from a multivariate normal with this mean and covariance matrix
-        mu, sigma = MultivariateNormalCRP.drawNIW(mu0, lambda0, psi0, nu0)
+        mu, sigma = drawNIW(mu0, lambda0, psi0, nu0)
         samples = rand(MultivariateNormal(mu, sigma), samples_per_cluster)
         presences = hcat(presences, samples)
         push!(fake_state, Set([1.0 * col for col in eachcol(samples)]))
@@ -34,23 +34,23 @@ function fake()
     
     # eachcol returns some very wild type so we explicitly recast it
     data = Vector{Vector{Float64}}(collect(eachcol(presences)))
-    chain_state = MultivariateNormalCRP.initiate_chain(data)
+    chain_state = initiate_chain(data)
 
     # Profile split-merge moves
-    @time @profview MultivariateNormalCRP.advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_paramsmh=0, fullseq_prob=0.0)
+    @time @profview advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_paramsmh=0, fullseq_prob=0.0)
 
     # Profile Gibbs moves
-    # @time @profview MultivariateNormalCRP.advance_chain!(chain_state, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_paramsmh=0, fullseq_prob=0.0)
+    # @time @profview advance_chain!(chain_state, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_paramsmh=0, fullseq_prob=0.0)
 
     # Profile Metropolis-Hastings moves for parameters
-    # @time @profview MultivariateNormalCRP.advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=0, nb_paramsmh=10, fullseq_prob=0.0)
+    # @time @profview advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=0, nb_paramsmh=10, fullseq_prob=0.0)
 
     return fake_state, chain_state
 end
 
 fake_state, chain_state = fake();
-MultivariateNormalCRP.plot_pi_state(fake_state, title="Fake data")
+plot_pi_state(fake_state, title="Fake data")
 
-# MultivariateNormalCRP.advance_chain!(chain_state)
-# MultivariateNormalCRP.plot_pi_state(chain_state.map_pi, title="MAP state")
-# MultivariateNormalCRP.plot_pi_state(chain_state.pi_state, title="Current chain state")
+# advance_chain!(chain_state)
+# plot_pi_state(chain_state.map_pi, title="MAP state")
+# plot_pi_state(chain_state.pi_state, title="Current chain state")
