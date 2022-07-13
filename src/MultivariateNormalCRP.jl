@@ -4,14 +4,23 @@ module MultivariateNormalCRP
     using StatsFuns: logsumexp, logmvgamma
     using StatsBase: sample, mean, Weights
     using LinearAlgebra: det, LowerTriangular, cholesky, diag, tr, diagm
-    using SpecialFunctions: loggamma #, polygamma
+    using SpecialFunctions: loggamma, polygamma
     using Base.Iterators: cycle
     using ColorSchemes: Paired_12
-    using Plots: plot, scatter!
+    using Plots: plot, vline!, hline!, scatter!, @layout, grid
     # using Optim: optimize, minimizer, summary, minimum, BFGS
 
-    export advance_chain!, initiate_chain, plot_pi_state, drawNIW, stats
+    export advance_chain!, initiate_chain, plot_pi_state, drawNIW, stats, plot_chain
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain
+
+    # gamma hyperprior on (nu - (d - 1)) with mean 3, so that mean(nu) = d + 2
+    # and thus mean(Sigma) = Psi (from Inverse-Wishart mean(Sigma) = Psi/(nu - d - 1))
+    # We choose a = 1.0 and b = 0.333 because it gives the gamma distribution
+    # with the largest entropy given a/b = 3
+    # ............a = 1.0 mean it's an exponential distribution *facepalm*
+    const a_nu0 = 1.0
+    const b_nu0 = 0.333
+    # So annoying, can't find a good hyperprior on nu
 
     mutable struct MNCRPparams
         alpha::Float64
@@ -25,13 +34,18 @@ module MultivariateNormalCRP
 
     mutable struct MNCRPchain
 
+        # Current state of the partition over samples
+        # from the Chinese Restaurant Process
         pi_state::Vector{Set{Vector{Float64}}}
+        # Current value of hyperparameters
         params::MNCRPparams
 
+        # Some chains of interests
         nbclusters_chain::Vector{Int64}
         params_chain::Vector{MNCRPparams}
         logprob_chain::Vector{Float64}
 
+        # Maximum a-posteriori state and location
         map_pi::Vector{Set{Vector{Float64}}}
         map_params::MNCRPparams
         map_logprob::Float64
@@ -47,7 +61,7 @@ module MultivariateNormalCRP
     psi_chain(chain::MNCRPchain, i, j) = [p.psi[i, j] for p in chain.params_chain]
     nu_chain(chain::MNCRPchain) = [p.nu for p in chain.params_chain]
     
-    function flattenL(L::LowerTriangular{Float64})
+    function flatten(L::LowerTriangular{Float64})
         
         d = size(L, 1)
     
@@ -64,7 +78,7 @@ module MultivariateNormalCRP
         return flatL
     end
 
-    function foldflatL(flatL::Vector{Float64})
+    function foldflat(flatL::Vector{Float64})
         
         n = size(flatL, 1)
 
@@ -99,7 +113,7 @@ module MultivariateNormalCRP
             error("Dimension mismatch, flatL should have length $flatL_d")
         end
 
-        L = foldflatL(flatL)
+        L = foldflat(flatL)
         psi = L * L'
     
         return MNCRPparams(alpha, mu, lambda, flatL, L, psi, nu)
@@ -112,7 +126,7 @@ module MultivariateNormalCRP
         end
     
         psi = L * L'
-        flatL = flattenL(L)
+        flatL = flatten(L)
     
         return MNCRPparams(alpha, mu, lambda, flatL, L, psi, nu)
     end
@@ -124,7 +138,7 @@ module MultivariateNormalCRP
         end
     
         L = cholesky(psi).L
-        flatL = flattenL(L)
+        flatL = flatten(L)
     
         return MNCRPparams(alpha, mu, lambda, flatL, L, psi, nu)
     end
@@ -144,7 +158,7 @@ module MultivariateNormalCRP
             error("Dimension mismatch, value should have length $(Int64(d*(d+1)/2))")
         end
         params.flatL = copy(value) # Just making sure?
-        params.L = foldflatL(params.flatL)
+        params.L = foldflat(params.flatL)
         params.psi = params.L * params.L'
     end
 
@@ -154,7 +168,7 @@ module MultivariateNormalCRP
             error("Dimension mismatch, value shoud have size $d x $d")
         end
         params.L = LowerTriangular(value)
-        params.flatL = flattenL(params.L)
+        params.flatL = flatten(params.L)
         params.psi = params.L * params.L'
     end
 
@@ -214,8 +228,11 @@ module MultivariateNormalCRP
             # psi_c += sum((x - mean_x) * (x - mean_x)' for x in cluster)
             # psi_c += lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)'
 
+
             ###############################
             # Optimized type-stableish(?) version of the 4 lines above
+            ###############################
+
             X::Matrix{Float64} = Array{Float64}(undef, n, d)
             @inbounds for (k, x::Vector{Float64}) in enumerate(cluster)
                 for i in 1:d
@@ -233,8 +250,14 @@ module MultivariateNormalCRP
             #     end
             #     mean_x[i] /= n
             # end
-
+                        
+            
             prepsi_c = Array{Float64}(undef, n, d, d)
+
+            # It is somehow marginally faster to allocate 
+            # psi_c here than after the loop over prepsi_c
+            psi_c = Array{Float64}(undef, d, d)
+
             @inbounds for i in 1:d
                 for j in 1:i
                     for k in 1:n
@@ -246,7 +269,7 @@ module MultivariateNormalCRP
 
             # psi_c = psi
             # psi_c += lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)'
-            psi_c = Array{Float64}(undef, d, d)
+            # psi_c = Array{Float64}(undef, d, d)
             @inbounds for i in 1:d
                 for j in 1:i
                     psi_c[i, j] = psi[i, j] + lambda * n / (lambda + n) * (mean_x[i] - mu[i]) * (mean_x[j] - mu[j])
@@ -319,12 +342,11 @@ module MultivariateNormalCRP
         # and Normal-Inverse-Wishart base distribution of the CRP
         
         log_z_niw = 0.0
-
         for c in list_of_clusters
             log_z_niw += log_Zniw(c, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - length(c) * d/2 * log(2pi) 
         end
 
-        log_hyperpriors = 0.0 # mu0 and psi0 have flat hyperpriors
+        log_hyperpriors = 0.0 # mu0 has a flat hyperpriors
         
         # log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
         log_hyperpriors -= 1/2 * log(alpha) # 1/sqrt(alpha) hyperprior
@@ -332,8 +354,15 @@ module MultivariateNormalCRP
         log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
         
         # nu - (d - 1) ~ gamma(1, 0.333) hyperprior (max entropy with mean 3)
-        a, b = 1.0, 0.333
-        log_hyperpriors += (a - 1) * log(nu - (d - 1)) - b * (nu - (d - 1)) 
+        log_hyperpriors += (a_nu0 - 1) * log(nu - (d - 1)) - b_nu0 * (nu - (d - 1)) 
+        
+        # nu hyperprior, works for smaller nu in synthetic data
+        # byt diverges again when nu is too big
+        # log_hyperpriors += log(niw_unnorm_jeffreys_nu(nu, d))
+
+        # sqrt(nu/2)/det(psi) hyperprior
+        log_hyperpriors += 1/2 * log(nu/2) - log(det(psi))
+
 
         return crp + log_z_niw + log_hyperpriors
     
@@ -737,14 +766,21 @@ module MultivariateNormalCRP
         alpha = params.alpha
     
         # 1/x improper hyperprior on alpha
-        # proposed_alpha = exp(log(params.alpha) + rand(step_dist))
+        proposed_alpha = exp(log(params.alpha) + rand(step_dist))
+        
+        log_hastings = log(proposed_alpha) - log(alpha)
         
         # "Jeffreys" 1/sqrt(x) improper hyperprior on alpha
-        coin_flip = 1 # 2 * Int(rand() < 0.5) - 1
-        proposed_alpha = (coin_flip * sqrt(params.alpha) + rand(step_dist))^2
+        # coin_flip = 1 # 2 * Int(rand() < 0.5) - 1
+        # proposed_alpha = (coin_flip * sqrt(params.alpha) + rand(step_dist))^2
 
-        log_acc = length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
+        log_acc = 1/2 * (-log(proposed_alpha) + log(alpha))
+
+        log_acc += length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
         log_acc -= length(list_of_clusters) * log(alpha) - loggamma(alpha + N) + loggamma(alpha)
+        
+        log_acc += log_hastings
+
         log_acc = min(0, log_acc)
 
         if log(rand()) < log_acc
@@ -818,9 +854,9 @@ module MultivariateNormalCRP
                     - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(nothing, mu, lambda, psi, nu) 
                      for c in list_of_clusters)
         
-        # log_acc += proposed_loglambda - log(params.lambda)  # uniform in lambda
-        # log_acc += log(params.lambda) - proposed_loglambda  # jeffreys
-        # ... they cancel??? fine. that's weird (it's log moves => 1/x prior)
+
+        # We leave loghastings = 0.0 because apparently the
+        # Jeffreys priori of lambda is the logarithmic prior
 
         log_acc = min(0.0, log_acc)
         
@@ -864,7 +900,7 @@ module MultivariateNormalCRP
         
             proposed_flatL[i] = proposed_flatL[i] + rand(step_dist)
         
-            proposed_L = foldflatL(proposed_flatL)
+            proposed_L = foldflat(proposed_flatL)
             proposed_psi = proposed_L * proposed_L'
         
             log_acc = sum(log_Zniw(c, mu, lambda, proposed_psi, nu) - log_Zniw(nothing, mu, lambda, proposed_psi, nu)
@@ -877,10 +913,8 @@ module MultivariateNormalCRP
             log_hastings = sum((d:-1:1) .* (log.(abs.(diag(proposed_L))) - log.(abs.(diag(params.L)))))
             log_acc += log_hastings
 
-            # Wishart prior on psi
-            # wishart_nu = d
-            # log_acc += (wishart_nu - d - 1)/2 * (log(det(proposed_psi)) - log(det(params.psi)))
-            # log_acc += -1/2 * (tr(proposed_psi) - tr(params.psi))
+            # Jeffreys prior in the determinant. Marvelous.
+            log_acc +=  -log(det(proposed_psi)) + log(det(params.psi))
             
             # aesthetic, not necessary since if log_acc >= 1.0
             # the following if always evaluate to true
@@ -923,16 +957,11 @@ module MultivariateNormalCRP
         # Convert back to uniform moves on the positive real line nu > d - 1
         log_acc += proposed_logx - current_logx 
 
-        # gamma prior on (nu - (d - 1)) with mean 3, so that mean(nu) = d + 2
-        # and thus mean(Sigma) = Psi (from Inverse-Wishart mean(Sigma) = Psi/(nu - d - 1))
-        # We choose a = 1.0 and b = 0.333 because it gives the gamma distribution
-        # with the largest entropy given a/b = 3
-        # ................it's an exponential distribution *facepalm*
-        a, b = 1.0, 0.333
-        log_acc += (a - 1) * log(proposed_nu - (d - 1)) - b * (proposed_nu - (d - 1))
-        log_acc -= (a - 1) * log(nu - (d - 1)) - b * (nu - (d - 1))
+        log_acc += (a_nu0 - 1) * log(proposed_nu - (d - 1)) - b_nu0 * (proposed_nu - (d - 1))
+        log_acc -= (a_nu0 - 1) * log(nu - (d - 1)) - b_nu0 * (nu - (d - 1))
 
-        # l1, l2 = log(niw_unnorm_jeffreys_nu(proposed_nu, d)), log(niw_unnorm_jeffreys_nu(nu, d))
+        # jeffreys prior is still unstable
+        # for synthetic data with large nu
         # log_acc += log(niw_unnorm_jeffreys_nu(proposed_nu, d)) - log(niw_unnorm_jeffreys_nu(nu, d))
 
         log_acc = min(0.0, log_acc)
@@ -946,30 +975,14 @@ module MultivariateNormalCRP
     
     end
 
-    # Unfortunately lead to improper a-posteriori probability in nu and psi
-    # function niw_unnorm_jeffreys_nu(nu::Float64, d::Int64)
+    # Cute result but unfortunately lead to 
+    # improper a-posteriori probability in nu and psi
+    function niw_unnorm_jeffreys_nu(nu::Float64, d::Int64)
 
-    #     return 1/2 * sqrt(sum(polygamma.(1, nu/2 .+ 1/2 .- 1/2 * (1:d))))
+        return 1/2 * sqrt(sum(polygamma.(1, nu/2 .+ 1/2 .- 1/2 * (1:d))))
 
-    # end
+    end
 
-    # function optimize_nu!(list_of_clusters::Vector{Set{Vector{Float64}}}, params::MNCRPparams)
-
-    #     d = size(params.mu, 1)
-
-    #     temp_params = deepcopy(params)
-        
-    #     function objfun(logx::Vector{Float64})
-    #         temp_params.nu = d - 1 + exp(logx[1])
-    #         return -log_prob(list_of_clusters, temp_params)
-    #     end
-        
-    #     optres = optimize(objfun, [log(params.nu - (d - 1))], BFGS())
-    
-    #     params.nu = d - 1 + exp(minimizer(optres)[1])
-    
-    #     return (minimizer(optres)[1], d - 1 + exp(minimizer(optres)[1]), minimum(optres))
-    # end
 
     function advance_full_sequential_gibbs!(list_of_clusters::Vector{Set{Vector{Float64}}}, params::MNCRPparams)
 
@@ -1013,11 +1026,31 @@ module MultivariateNormalCRP
 
     end
 
-    function advance_chain!(chain_state::MNCRPchain; nb_steps=100, nb_splitmerge=5, splitmerge_t=5, nb_gibbs=10, nb_paramsmh=10, fullseq_prob=0.03)
+    function advance_chain!(chain_state::MNCRPchain; nb_steps=100, nb_splitmerge=5, splitmerge_t=5, nb_gibbs=10, nb_paramsmh=10, fullseq_prob=0.01)
 
         print(".."); flush(stdout)
 
         for step in 1:nb_steps
+
+            # Metropolis-Hastings over each parameter
+            for i in 1:nb_paramsmh
+                advance_alpha!(chain_state.pi_state, chain_state.params, 
+                                step_type="gaussian", step_scale=0.7)
+                
+                advance_mu!(chain_state.pi_state, chain_state.params, 
+                            step_type="gaussian", step_scale=1.0)
+                
+                advance_lambda!(chain_state.pi_state, chain_state.params, 
+                                step_type="gaussian", step_scale=0.7)
+
+                advance_psi!(chain_state.pi_state, chain_state.params, 
+                            step_type="gaussian", step_scale=1.0)
+
+                advance_nu!(chain_state.pi_state, chain_state.params, 
+                            step_type="gaussian", step_scale=0.5)
+            end
+
+            push!(chain_state.params_chain, deepcopy(chain_state.params))
 
             # Large moves
             if rand() < fullseq_prob
@@ -1039,25 +1072,6 @@ module MultivariateNormalCRP
                 advance_clusters_gibbs!(chain_state.pi_state, chain_state.params)
             end
 
-            # Metropolis-Hastings over each parameter
-            for i in 1:nb_paramsmh
-                advance_alpha!(chain_state.pi_state, chain_state.params, 
-                                step_type="gaussian", step_scale=0.7)
-                
-                advance_mu!(chain_state.pi_state, chain_state.params, 
-                            step_type="gaussian", step_scale=1.0)
-                
-                advance_lambda!(chain_state.pi_state, chain_state.params, 
-                                step_type="gaussian", step_scale=0.7)
-
-                advance_psi!(chain_state.pi_state, chain_state.params, 
-                            step_type="gaussian", step_scale=1.0)
-
-                advance_nu!(chain_state.pi_state, chain_state.params, 
-                            step_type="gaussian", step_scale=0.5)
-            end
-
-            push!(chain_state.params_chain, deepcopy(chain_state.params))
             push!(chain_state.nbclusters_chain, length(chain_state.pi_state))
 
             logprob = log_prob(chain_state.pi_state, chain_state.params)
@@ -1089,22 +1103,56 @@ module MultivariateNormalCRP
             color=color, markerstrokewidth=0)
         end
         
-        display(p)
+        # display(p)
         return p
 
     end
 
-    function stats(chain_state::MNCRPchain)
-        println("Mean..")
-        println(" #cluster: $(mean(chain_state.nbclusters_chain))")
-        println("    alpha: $(mean(alpha_chain(chain_state)))")
-        println("       mu: $(mean(mu_chain(chain_state)))")
-        println("   lambda: $(mean(lambda_chain(chain_state)))")
-        println("      psi:")
-        display(mean(psi_chain(chain_state)))
-        println("       nu: $(mean(nu_chain(chain_state)))")
-        println()
-        println("MAP..")
+    function plot_chain(chain_state::MNCRPchain; burn=0)
+        p_map = plot_pi_state(chain_state.map_pi, title="MAP state")
+        p_current = plot_pi_state(chain_state.pi_state, title="Current state")
+        
+        lpc = chain_state.logprob_chain
+        p_logprob = plot(burn+1:length(lpc), lpc[burn+1:end], grid=:no, label=nothing, title="log probability chain")
+        vline!(p_logprob, [chain_state.map_idx], label=nothing, color=:gray)
+        hline!(p_logprob, [chain_state.map_logprob], label=nothing, color=:gray)
+
+        ac = alpha_chain(chain_state)
+        p_alpha = plot(burn+1:length(ac), ac[burn+1:end], grid=:no, label=nothing, title="α chain")
+        vline!(p_alpha, [chain_state.map_idx], label=nothing, color=:gray)
+
+        muc = reduce(hcat, mu_chain(chain_state))'
+        p_mu = plot(burn+1:size(muc, 1), muc[burn+1:end, :], grid=:no, label=nothing, title="μ chain")
+        vline!(p_mu, [chain_state.map_idx], label=nothing, color=:gray)
+
+        lc = lambda_chain(chain_state)
+        p_lambda = plot(burn+1:length(lc), lc[burn+1:end], grid=:no, label=nothing, title="λ chain")
+        vline!(p_lambda, [chain_state.map_idx], label=nothing, color=:gray)
+        
+        pc = flatten.(LowerTriangular.(psi_chain(chain_state)))
+        pc = reduce(hcat, pc)'
+        p_psi = plot(burn+1:size(pc, 1), pc[burn+1:end, :], grid=:no, label=nothing, title="Ψ chain")
+        vline!(p_psi, [chain_state.map_idx], label=nothing, color=:gray)
+
+        nc = nu_chain(chain_state)
+        p_nu = plot(burn+1:length(nc), nc[burn+1:end], grid=:no, label=nothing, title="ν chain")
+        vline!(p_nu, [chain_state.map_idx], label=nothing, color=:gray)
+
+        sz = (1200, 1200)
+        lo = @layout [a{0.5h} b; c d; e f; g h]
+        p = plot(
+        p_current, p_map, 
+        p_logprob, p_alpha, 
+        p_mu, p_lambda, 
+        p_psi, p_nu,
+        size=(1200, 1200), layout=lo)
+
+        return p
+    end
+
+    function stats(chain_state::MNCRPchain; burn=0)
+        println("MAP state")
+        println(" log prob: $(chain_state.map_logprob)")
         println(" #cluster: $(length(chain_state.map_pi))")
         println("    alpha: $(chain_state.map_params.alpha)")
         println("       mu: $(chain_state.map_params.mu)")
@@ -1112,5 +1160,15 @@ module MultivariateNormalCRP
         println("      psi:")
         display(chain_state.map_params.psi)
         println("       nu: $(chain_state.map_params.nu)")
+        println()
+        println("Mean..")
+        println(" #cluster: $(mean(chain_state.nbclusters_chain[burn+1:end]))")
+        println("    alpha: $(mean(alpha_chain(chain_state)[burn+1:end]))")
+        println("       mu: $(mean(mu_chain(chain_state)[burn+1:end]))")
+        println("   lambda: $(mean(lambda_chain(chain_state)[burn+1:end]))")
+        println("      psi:")
+        display(mean(psi_chain(chain_state)[burn+1:end]))
+        println("       nu: $(mean(nu_chain(chain_state)[burn+1:end]))")
+        println()
     end
 end
