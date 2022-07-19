@@ -18,9 +18,18 @@ module MultivariateNormalCRP
     # We choose a = 1.0 and b = 0.333 because it gives the gamma distribution
     # with the largest entropy given a/b = 3
     # ............a = 1.0 mean it's an exponential distribution *facepalm*
-    const a_nu0 = 1.0
-    const b_nu0 = 0.333
-    # So annoying, can't find a good hyperprior on nu
+    
+    # a_nu0 = 0.5 to mimick the sqrt(nu - d + 1) dependence of the jeffreys prior
+    # b_nu > 0 to reign in runaway fluctuations 
+    # a_nu0/b_nu0 = 3 so that mean(sigma) = psi
+    a_nu0 = 0.5
+    b_nu0 = 0.166
+
+    a_lambda0 = 0.001 # 1/lambda near 0
+    b_lambda0 = 0.001 # Mimic long tail at larger lambda
+                      # mean(lambda0) = 1.0
+
+    # So annoying, can't find a good hyperprior for nu
 
     mutable struct MNCRPparams
         alpha::Float64
@@ -215,7 +224,6 @@ module MultivariateNormalCRP
         @assert size(mu, 1) == size(psi, 1) == size(psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
   
         if cluster === nothing || length(cluster) == 0
-        # if length(cluster) == 0
             return (mu, lambda, psi, nu)
         else
             d = size(mu, 1)
@@ -223,11 +231,11 @@ module MultivariateNormalCRP
             lambda_c = lambda + n
             nu_c = nu + n
 
+            # Slow but explicit
             # mean_x = mean(cluster)
             # psi_c = psi
             # psi_c += sum((x - mean_x) * (x - mean_x)' for x in cluster)
             # psi_c += lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)'
-
 
             ###############################
             # Optimized type-stableish(?) version of the 4 lines above
@@ -253,7 +261,6 @@ module MultivariateNormalCRP
                         
             
             prepsi_c = Array{Float64}(undef, n, d, d)
-
             # It is somehow marginally faster to allocate 
             # psi_c here than after the loop over prepsi_c
             psi_c = Array{Float64}(undef, d, d)
@@ -348,21 +355,29 @@ module MultivariateNormalCRP
 
         log_hyperpriors = 0.0 # mu0 has a flat hyperpriors
         
-        # log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
-        log_hyperpriors -= 1/2 * log(alpha) # 1/sqrt(alpha) hyperprior
-
-        log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
+        # alpha hyperprior
+        log_hyperpriors += log(niw_unnorm_jeffreys_alpha(alpha, N))
+        # lambda hyperprior
+        log_hyperpriors += 1/2 * log(d/2) - log(lambda)
+        # psi hyperprior
+        log_hyperpriors += 1/2 * log(nu/2) - log(det(psi))
+        # nu hyperprior
+        log_hyperpriors += log(niw_unnorm_jeffreys_nu(nu, d))
         
+        # sqrt(nu/2)/det(psi) hyperprior
+        # log_hyperpriors += 1/2 * log(nu/2) - log(det(psi))
+
+        # log_hyperpriors -= log(alpha)  # 1/alpha hyperprior
+        # log_hyperpriors -= 1/2 * log(alpha) # 1/sqrt(alpha) hyperprior
+
+        # log_hyperpriors -= log(lambda) # 1/lambda0 hyperprior
+        # log_hyperpriors += a_lambda0 * log(b_lambda0) - loggamma(a_lambda0) + (a_lambda0 - 1) * log(lambda) - b_lambda0 * lambda
+
         # nu - (d - 1) ~ gamma(1, 0.333) hyperprior (max entropy with mean 3)
-        log_hyperpriors += (a_nu0 - 1) * log(nu - (d - 1)) - b_nu0 * (nu - (d - 1)) 
+        # log_hyperpriors += a_nu0 * log(b_nu0) - loggamma(a_nu0) + (a_nu0 - 1) * log(nu - (d - 1)) - b_nu0 * (nu - (d - 1)) 
         
         # nu hyperprior, works for smaller nu in synthetic data
         # byt diverges again when nu is too big
-        # log_hyperpriors += log(niw_unnorm_jeffreys_nu(nu, d))
-
-        # sqrt(nu/2)/det(psi) hyperprior
-        log_hyperpriors += 1/2 * log(nu/2) - log(det(psi))
-
 
         return crp + log_z_niw + log_hyperpriors
     
@@ -766,15 +781,26 @@ module MultivariateNormalCRP
         alpha = params.alpha
     
         # 1/x improper hyperprior on alpha
-        proposed_alpha = exp(log(params.alpha) + rand(step_dist))
+        proposed_logalpha = log(alpha) + rand(step_dist)
+        proposed_alpha = exp(proposed_logalpha)
         
-        log_hastings = log(proposed_alpha) - log(alpha)
+        log_acc = 0.0
+
+        # log_acc += -3/2 * (proposed_logalpha - log(alpha))
+
+        log_acc = log(niw_unnorm_jeffreys_alpha(proposed_alpha, N)) - log(niw_unnorm_jeffreys_alpha(alpha, N))
+
+        log_hastings = log(alpha) - proposed_logalpha
+
+        ####### NO! it's (approx) logarithmic ########
+        # log_hastings = log(proposed_alpha) - log(alpha)
         
         # "Jeffreys" 1/sqrt(x) improper hyperprior on alpha
         # coin_flip = 1 # 2 * Int(rand() < 0.5) - 1
         # proposed_alpha = (coin_flip * sqrt(params.alpha) + rand(step_dist))^2
 
-        log_acc = 1/2 * (-log(proposed_alpha) + log(alpha))
+        # log_acc = 1/2 * (-log(proposed_alpha) + log(alpha))
+        ##############################################
 
         log_acc += length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
         log_acc -= length(list_of_clusters) * log(alpha) - loggamma(alpha + N) + loggamma(alpha)
@@ -847,16 +873,22 @@ module MultivariateNormalCRP
         
         mu, lambda, psi, nu = params.mu, params.lambda, params.psi, params.nu
     
-        proposed_loglambda = log(params.lambda) + rand(step_dist)
+        proposed_loglambda = log(lambda) + rand(step_dist)
         proposed_lambda = exp(proposed_loglambda)
         
         log_acc = sum(log_Zniw(c, mu, proposed_lambda, psi, nu) - log_Zniw(nothing, mu, proposed_lambda, psi, nu)
                     - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(nothing, mu, lambda, psi, nu) 
                      for c in list_of_clusters)
-        
-
         # We leave loghastings = 0.0 because apparently the
         # Jeffreys priori of lambda is the logarithmic prior
+
+        # No actual lets regulate lambda with a gamma prior
+        # log_acc += proposed_loglambda - log(lambda)
+        # log_hastings = log(lambda) - proposed_loglambda
+        # log_acc += (a_lambda0 - 1) * log(proposed_lambda) - b_lambda0 * (proposed_lambda)
+        # log_acc -= (a_lambda0 - 1) * log(lambda) - b_lambda0 * lambda
+        
+        # log_acc += log_hastings
 
         log_acc = min(0.0, log_acc)
         
@@ -903,9 +935,9 @@ module MultivariateNormalCRP
             proposed_L = foldflat(proposed_flatL)
             proposed_psi = proposed_L * proposed_L'
         
-            log_acc = sum(log_Zniw(c, mu, lambda, proposed_psi, nu) - log_Zniw(nothing, mu, lambda, proposed_psi, nu)
-                        - log_Zniw(c, mu, lambda, params.psi, nu) + log_Zniw(nothing, mu, lambda, params.psi, nu) 
-                        for c in list_of_clusters)
+            log_acc = sum(log_Zniw(cluster, mu, lambda, proposed_psi, nu) - log_Zniw(nothing, mu, lambda, proposed_psi, nu)
+                        - log_Zniw(cluster, mu, lambda, params.psi, nu) + log_Zniw(nothing, mu, lambda, params.psi, nu) 
+                        for cluster in list_of_clusters)
                 
             # Go from symmetric and uniform in L to uniform in psi
             # det(del psi/del L) = 2^d |L_11^d * L_22^(d-1) ... L_nn|
@@ -916,8 +948,6 @@ module MultivariateNormalCRP
             # Jeffreys prior in the determinant. Marvelous.
             log_acc +=  -log(det(proposed_psi)) + log(det(params.psi))
             
-            # aesthetic, not necessary since if log_acc >= 1.0
-            # the following if always evaluate to true
             log_acc = min(0.0, log_acc)
         
             if log(rand()) < log_acc
@@ -955,14 +985,20 @@ module MultivariateNormalCRP
                     for c in list_of_clusters)
         
         # Convert back to uniform moves on the positive real line nu > d - 1
-        log_acc += proposed_logx - current_logx 
+        # log_acc += proposed_logx - current_logx 
+        log_hastings = current_logx - proposed_logx
 
-        log_acc += (a_nu0 - 1) * log(proposed_nu - (d - 1)) - b_nu0 * (proposed_nu - (d - 1))
-        log_acc -= (a_nu0 - 1) * log(nu - (d - 1)) - b_nu0 * (nu - (d - 1))
+        # log_acc += (a_nu0 - 1) * log(proposed_nu - (d - 1)) - b_nu0 * (proposed_nu - (d - 1))
+        # log_acc -= (a_nu0 - 1) * log(nu - (d - 1)) - b_nu0 * (nu - (d - 1))
 
         # jeffreys prior is still unstable
-        # for synthetic data with large nu
-        # log_acc += log(niw_unnorm_jeffreys_nu(proposed_nu, d)) - log(niw_unnorm_jeffreys_nu(nu, d))
+        # for synthetic data with "large" nu
+        log_acc += log(niw_unnorm_jeffreys_nu(proposed_nu, d)) - log(niw_unnorm_jeffreys_nu(nu, d))
+
+        log_acc += log_hastings
+        # approx jeffrey's sqrt(d/2)/sqrt(nu)
+        # log_acc += 1/2 * (-log(proposed_nu - d + 1) + log(nu - d + 1))
+
 
         log_acc = min(0.0, log_acc)
         
@@ -973,6 +1009,12 @@ module MultivariateNormalCRP
             return 0
         end
     
+    end
+
+    function niw_unnorm_jeffreys_alpha(alpha::Float64, n::Int64)
+
+        return sqrt((polygamma(0, alpha + n) - polygamma(0, alpha))/alpha + polygamma(1, alpha) - polygamma(1, alpha + n))
+
     end
 
     # Cute result but unfortunately lead to 
@@ -1032,6 +1074,28 @@ module MultivariateNormalCRP
 
         for step in 1:nb_steps
 
+            ## Large moves ##
+            if rand() < fullseq_prob
+                
+                advance_full_sequential_gibbs!(chain_state.pi_state, chain_state.params)
+
+                print("f"); flush(stdout)
+            
+            end
+
+            for i in 1:nb_splitmerge
+                advance_clusters_JNrestrictedsplitmerge!(chain_state.pi_state, chain_state.params, t=splitmerge_t)
+            end
+            #################
+
+            # Gibbs sweep
+            for i in 1:nb_gibbs
+                advance_clusters_gibbs!(chain_state.pi_state, chain_state.params)
+            end
+
+            push!(chain_state.nbclusters_chain, length(chain_state.pi_state))
+
+
             # Metropolis-Hastings over each parameter
             for i in 1:nb_paramsmh
                 advance_alpha!(chain_state.pi_state, chain_state.params, 
@@ -1052,28 +1116,7 @@ module MultivariateNormalCRP
 
             push!(chain_state.params_chain, deepcopy(chain_state.params))
 
-            # Large moves
-            if rand() < fullseq_prob
-                
-                advance_full_sequential_gibbs!(chain_state.pi_state, chain_state.params)
-
-                print("f"); flush(stdout)
-            
-            else
-            
-                for i in 1:nb_splitmerge
-                    advance_clusters_JNrestrictedsplitmerge!(chain_state.pi_state, chain_state.params, t=splitmerge_t)
-                end
-            
-            end
-
-            # Gibbs sweep
-            for i in 1:nb_gibbs
-                advance_clusters_gibbs!(chain_state.pi_state, chain_state.params)
-            end
-
-            push!(chain_state.nbclusters_chain, length(chain_state.pi_state))
-
+            # logprob and MAP
             logprob = log_prob(chain_state.pi_state, chain_state.params)
             push!(chain_state.logprob_chain, logprob)
             
