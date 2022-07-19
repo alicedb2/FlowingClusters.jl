@@ -3,21 +3,25 @@ using Distributions: MultivariateNormal
 using LinearAlgebra: diagind
 using StatsBase: mean
 using MultivariateNormalCRP
+using Plots
+using Revise
 
 function fake()
     
     # Seed the fake data
-    seed!(2345)
+    seed!(234)
     # Generate some test data
     d = 2
     nb_clusters = 8
     samples_per_cluster = 50
     mu0 = fill(0.0, d)
-    lambda0 = 0.03
+    lambda0 = 0.05
     psi0 = -1.0 * rand(d, d)
     psi0 = 0.5 * (psi0 + psi0')
     psi0[diagind(psi0)] = 10.0 * rand(d)
-    nu0 = d - 1.0 + 17.0
+    nu0 = d - 1.0 + 25.0
+
+    println("Synthetic precision matrix Ψ")
     display(psi0)
 
     presences = zeros(d, 0)
