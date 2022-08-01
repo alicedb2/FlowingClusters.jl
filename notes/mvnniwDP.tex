@@ -263,7 +263,7 @@ For hyperparameters $\mu_0$, $\lambda_0$, $\nu_0$, and $\alpha$ we proceed in th
 \subsubsection{Moves for $\mu_0$}
 For $\mu_0$ we proceed one component $\mu_{0i}$ at a time. Since $\mu_0\in\mathbb{R}^d$, we can use a Gaussian or uniform kernel with some width $\epsilon$ and, since these kernels are symmetric, the Hastings ratio is 1. The acceptance probability is therefore
 $$P_{acc}(\mu_{0i}\rightarrow\mu'_{0i}) = \min\left[1, \frac{g(\mu_{0i}~\vert~\mu'_{0i})}{g(\mu'_{0i}~\vert~\mu_{0i})}\frac{P_{gen}(\mu'_{0i})}{P_{gen}(\mu_{0i})}\frac{J_{\mu_0}(\mu'_{0i})}{J_{\mu_0}(\mu_{0i})}\right] =  \min\left[1, \frac{P_{gen}(\mu'_{0i})}{P_{gen}(\mu_{0i})}\right]$$
-where $\mu'_{0i} = \mu_{0i} + \varepsilon$ with $\varepsilon \sim\operatorname{SymmetricDist}$.
+where $\mu'_{0i} = \mu_{0i} + \varepsilon$ with $\varepsilon \sim\operatorname{AnySymmetricDist}$.
 
 \subsubsection{Moves for $\lambda_0$}
 For $\lambda_0$ we use symmetric moves in logarithmic space $\log\lambda_0$ because $\lambda_0 > 0$. To transform those moves into uniform moves over the positive real line, we can find the Hastings ratio using the law of conservation of probability, namely
@@ -276,17 +276,17 @@ Interestingly,
 $$\frac{J_{\lambda_0}(\lambda'_0)}{J_{\lambda_0}(\lambda_0)} = \frac{1}{\lambda'_0}\frac{\lambda_0}{1}$$
 and therefore the ratio of Jeffreys priors cancels the Hastings ratio. This is to be expected since the hyperprior $J_{\lambda_0}$ is logarithmic and we could have skipped both previous steps. We are left with
 $$P_{acc}(\lambda_0\rightarrow\lambda'_0) = \min\left[1, \frac{g(\lambda_{0}~\vert~\lambda'_{0})}{g(\lambda'_{0}~\vert~\lambda_{0})}\frac{P_{gen}(\lambda'_{0})}{P_{gen}(\lambda_{0})}\frac{J_{\lambda_0}(\lambda'_{0})}{J_{\lambda_0}(\lambda_{0})}\right] =  \min\left[1, \frac{P_{gen}(\lambda'_{0})}{P_{gen}(\lambda_{0})}\right]$$
-where $\log\lambda'_0 = \log\lambda_0 + \varepsilon$ with $\varepsilon \sim\operatorname{SymmetricDist}$.
+where $\log\lambda'_0 = \log\lambda_0 + \varepsilon$ with $\varepsilon \sim\operatorname{AnySymmetricDist}$.
 
 \subsubsection{Moves for $\nu_0$}
 For $\nu_0$ we once more use symmetric moves in logarithmic space, but since $\nu_0 > d - 1$, the moves are actually over the shifted logarithmic space $\log(\nu_0 - d + 1)$. Since $d\log(\nu_0 - d + 1)/d(\nu_0 - d + 1) = 1/(\nu_0 - d + 1)$ we as in the case for $\lambda_0$ that
 $$\frac{g(\nu_0~\vert~\nu'_0)}{g(\nu'_0~\vert~\nu_0)} = \frac{\nu'_0 - d + 1}{\nu_0 - d + 1},$$
 and therefore
 $$P_{acc}(\nu_0\rightarrow\nu'_0) = \min\left[1, \frac{\nu'_0 - d + 1}{\nu_0 - d + 1}\frac{P_{gen}(\nu'_{0})}{P_{gen}(\nu_{0})}\frac{J_{\nu_0}(\nu'_0)}{J_{\nu_0}(\nu_0)}\right],$$
-where $\log(\nu'_0 - d + 1) = \log(\nu_0 - d + 1) + \varepsilon$ with $\varepsilon \sim\operatorname{SymmetricDist}$.
+where $\log(\nu'_0 - d + 1) = \log(\nu_0 - d + 1) + \varepsilon$ with $\varepsilon \sim\operatorname{AnySymmetricDist}$.
 
 \subsubsection{Moves for $\Psi_0$}
-For $\Psi_0$ the Hastings ratio is substantially more complicated. Since $\Psi_0$ is positive definite we can first use the Cholesky decomposition $\Psi_0 = L L^T$ where $L$ is a lower triangular matrix with entries $L_{ij}\in\mathbb{R}$ for all $i \ge j$ and $0$ otherwise. We know it is easy to make symmetric moves $L_{ij}\rightarrow L_{ij} + \varepsilon$ with $\varepsilon\sim\operatorname{SymmetricDist}$. While making symmetric moves in the space of lower triangular matrices is therefore straightforward, how can we these into uniform moves in the space of positive definite matrices $\Psi_0$? We know that the general case
+For $\Psi_0$ the Hastings ratio is substantially more complicated. Since $\Psi_0$ is positive definite we can first use the Cholesky decomposition $\Psi_0 = L L^T$ where $L$ is a lower triangular matrix with entries $L_{ij}\in\mathbb{R}$ for all $i \ge j$ and $0$ otherwise. We know it is easy to make symmetric moves $L_{ij}\rightarrow L_{ij} + \varepsilon$ with $\varepsilon\sim\operatorname{AnySymmetricDist}$. While making symmetric moves in the space of lower triangular matrices is therefore straightforward, how can we these into uniform moves in the space of positive definite matrices $\Psi_0$? We know that the general case
 $$\frac{g(\Psi_0~\vert~\Psi'_0)d\Psi_0}{g(\Psi'_0~\vert~\Psi_0)d\Psi'_0} = \frac{g(L~\vert~L')dL}{g(L'~\vert~L)dL'}.$$
 and thus
 $$\frac{g(\Psi_0~\vert~\Psi'_0)}{g(\Psi'_0~\vert~\Psi_0)} = \frac{\left\vert\frac{d\Psi'_0}{dL'}\right\vert}{\left\vert\frac{d\Psi_0}{dL}\right\vert}.$$
@@ -313,14 +313,14 @@ and we claim without proof that in dimension $d$
 $$\left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert = 2^d \vert L_{11}\vert^d \vert L_{22}\vert^{d-1}\ldots \vert L_{dd}\vert.$$
 The Hastings ratio we will form using this expression for the determinant of the Jacobian allows us to uniformly explore the space of positive definite matrices using easy symmetric moves in $L$. The acceptance probability, remembering Eq.~\ref{eq:jeffpsi},
 $$P_{acc}(\Psi_0\rightarrow\Psi'_0) = \min\left[1, \frac{\vert L'_{11}\vert^d \vert L'_{22}\vert^{d-1}\ldots \vert L'_{dd}\vert}{\vert L_{11}\vert^d \vert L_{22}\vert^{d-1}\ldots \vert L_{dd}\vert}\frac{P_{gen}(\Psi'_0)}{P_{gen}(\Psi_0)}\frac{\vert\Psi_0\vert^d}{\vert\Psi'_0\vert^d}\right].$$
-where $L'_{ij} = L_{ij} + \varepsilon$ and $\varepsilon\sim\operatorname{SymmetricDist}$.
+where $L'_{ij} = L_{ij} + \varepsilon$ and $\varepsilon\sim\operatorname{AnySymmetricDist}$.
 
 \subsubsection{Moves for $\alpha$}
 Since $\alpha$ also takes value on the positive real line $\alpha > 0$, we use once again symmetric moves in logarithmic space but because the hyperprior $J_\alpha$ is not logarithmic we use the Hastings ratio
 $$\frac{g(\alpha~\vert~\alpha')}{g(\alpha'~\vert~\alpha)} = \frac{\alpha'}{\alpha}.$$
 The acceptance probability
 $$P_{acc}(\alpha\rightarrow\alpha') = \min\left[1, \frac{\alpha'}{\alpha}\frac{P_{gen}(\alpha')}{P_{gen}(\alpha)}\frac{J_{\alpha}(\alpha')}{J_\alpha(\alpha)}\right] = \frac{\alpha'^{K+1}}{\alpha^{K+1}}\frac{\Gamma(\alpha + N)}{\Gamma(\alpha)}\frac{\Gamma(\alpha')}{\Gamma(\alpha' + N)}\frac{J_\alpha(\alpha')}{J_\alpha(\alpha)}$$
-where $\log\alpha' = \log\alpha + \varepsilon$ and $\varepsilon\sim\operatorname{SymmetricDist}$.
+where $\log\alpha' = \log\alpha + \varepsilon$ and $\varepsilon\sim\operatorname{AnySymmetricDist}$.
 \end{document}
 
 
