@@ -1,8 +1,9 @@
 # MultivariateNormalCRP
 
-![Example of chain with approximate MAP state for synthetic data with pseudoabsences](mvcrp.png)
+![Example of chain](mvcrp.png)
+Figure. Example of a chain with synthetic data. An approximate MAP state is shown on the top-right.
 
-This non-parametric generative model performs density estimation in arbitrary dimension using mixtures of Dirichlet processes (Escobar & West 1994, MacEarchern 1994). It models a cloud of sample points using a mixture of multivariate normal distributions with an arbitrary number of components.
+This non-parametric generative model performs density estimation in arbitrary dimension using mixtures of Dirichlet processes (Escobar & West 1994, MacEachern 1994). It models a cloud of sample points using a mixture of multivariate normal distributions with an arbitrary number of components.
 
 One can think of this approach as as alternative to kernel density estimation (KDE).It differs from KDE in that it is a clustering algorithm where sample points are assigned to mixture components and each mixture component has its own covariance matrix. This latter property can be thought of as a more flexible generalization of the bandwidth in KDE.
 
