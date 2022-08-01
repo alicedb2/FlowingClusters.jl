@@ -1,0 +1,343 @@
+\documentclass[11pt, oneside]{article}   	% use "amsart" instead of "article" for AMSLaTex format
+\usepackage{geometry}                		% See geometry.pdf to learn the layout options. There are lots.
+\geometry{letterpaper}                   		% ... or a4paper or a5paper or ... 
+%\geometry{landscape}                		% Activate for rotated page geometry
+%\usepackage[parfill]{parskip}    		% Activate to begin paragraphs with an empty line rather than an indent
+\usepackage{graphicx}				% Use pdf, png, jpg, or eps§ with pdflatex; use eps in DVI mode
+\usepackage{grffile}
+\usepackage{hyperref}
+
+\usepackage{caption}
+\usepackage{subcaption} %% doesn't play nice with hyperref
+\usepackage{xcolor}
+\usepackage{bm}
+								% Tex will automatically convert eps --> pdf in pdflatex		
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{mathabx}
+\usepackage{bbold}
+
+%SetFonts
+
+%SetFonts
+\DeclareMathOperator{\Tr}{Tr}
+\DeclareMathOperator{\NIW}{NIW}
+\DeclareMathOperator{\MvN}{MvN}
+
+\title{Density estimation in arbitrary dimension using a Dirichlet process mixture of multivariate normal with normal-inverse-Wishart base distribution}
+\author{Alice Doucet Beaupr\'e}
+%\date{}							% Activate to display a given date or no date
+
+\begin{document}
+\maketitle
+\section{Model}
+Our non-parametric generative model performs density estimation in arbitrary dimension using "mixtures of Dirichlet processes" (Escobar \& West 1994, MacEarchern 1994). This is a bit of a misnomer given that there is only a single Dirichlet process which controls the number of components in a mixture of multivariate normal distributions.
+
+One can think of this approach as as alternative to kernel density estimation (KDE).It differs from KDE in that it is a clustering algorithm where sample points are assigned to mixture components and each mixture component has its own covariance matrix. This latter property can be thought of as a more flexible generalization of the bandwidth in KDE.
+
+One salient feature of the model is that, as mentionned above, the number of mixture components is arbitrary and itself a distribution inferred from the data and so is the covariance matrix of each component.
+
+The model uses a non-parametric Chinese Restaurant Process (CRP) prior (Aldous 1983) over partitions of the sample points, i.e. over both the number of mixture components and over the assignments of sample points to those components. For the base distribution of the CRP we use the normal-inverse-Wishart (NIW) distribution given that it is the conjugate prior to our data likelihood the multivariate normal distribution (MvN) with unknown mean and covariance. Conjugacy is desirable because it greatly simplifies the accompanying algorithm because we are able to integrate exactly over the parameters—the mean and covariance—of each mixture component.
+
+Diving straight into it, the generative model is given by
+\begin{equation}\begin{aligned}
+\pi~\vert~\alpha & \sim \operatorname{CRP}(\alpha), \\
+\mu_\omega, \Sigma_\omega ~\vert~\pi,\mu_0, \lambda_0, \Psi_0, \nu_0 & \sim \operatorname{normal-inverse-Wishart}(\mu_0, \lambda_0, \Psi_0, \nu_0), &\omega\in\pi,\\
+x_j~\vert~\omega, \mu_\omega, \Sigma_\omega & \sim \operatorname{Multivariate-Normal}(\mu_0^\omega, \Sigma_\omega),& j\in\omega.
+\label{eq:model}\end{aligned}\end{equation}
+Here $\pi$ is a partition over the set of sample points $\lbrace x_j\rbrace_{j=1}^N$. $\omega$ are parts, or clusters, of the partition $\pi$ such that $\bigcup_{\omega\in\pi}\omega = \lbrace x_j\rbrace_{j=1}^N$ and $\omega \cap\omega' = \emptyset$ for $\omega$ and $\omega'$ distincts. Means $\mu_0^\omega$ and sample points $x_j$ are vectors in $d$-dimensions. The precision matrix $\Psi_0$ and covariances $\Sigma_\omega$ are $d$-dimensional positive-definite matrices.
+
+\subsection{The normal-inverse-Wishart distribution}
+The probability distribution function of the NIW is given by
+\begin{equation}
+\NIW(\mu, \Sigma~\vert~\mu_0, \lambda_0,\Psi_0,\nu_0) = \frac{1}{Z_{\NIW}^0} \vert\Sigma\vert^{-\frac{\nu_0 + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0\Sigma^{-1} - \frac{\lambda_0}{2}(\mu - \mu_0)^T\Sigma^{-1}(\mu - \mu_0)},
+\label{eq:NIW}\end{equation}
+where 
+$$Z_{\NIW}^0 = \frac{(2\pi)^{d/2} 2^{\nu_0 d/2} \Gamma_d(\frac{\nu_0}{2})}{\lambda_0^{d/2}\vert\Psi_0\vert^{\nu_0/2}},$$
+and $\Gamma_d(x)$ is the multivariate gamma function
+$$\Gamma_d(x) = \pi^{d(d-1)/4}\prod_{i=1}^d\Gamma(a + (1 - i)/2).$$
+
+The NIW distribution is the conjugate prior to the multivariate normal distribution. This means that the product between the NIW prior and a MvN data likelihood gives us back a NIW distribution with updated parameters, namely
+\begin{equation}\NIW(\mu, \Sigma~\vert~ \mu_0, \lambda_0,\Psi_0,\nu_0)\prod_{j\in\omega}\operatorname{MvN}(x_j~\vert~\mu,\Sigma)~\propto~\NIW(\mu,\Sigma~\vert~\mu_0^\omega,\lambda_0^\omega,\Psi_0^\omega,\nu_0^\omega),
+\label{eq:conjugation}\end{equation}
+where hyperparameters subscripted $\omega$ depend on $x_j$'s in $\omega$ and the original hyperparameters. Let the sample mean of a cluster $\bar x = \frac{1}{\vert\omega\vert}\sum_{j\in\omega} x_j$. Updated hyperparameters are given by
+\begin{equation}\begin{split}
+\mu_0^\omega &= \frac{\lambda_0 \mu_0 + \vert\omega\vert \bar x}{\lambda_0 + \vert\omega\vert}, \\
+\lambda_0^\omega &= \lambda_0 + \vert\omega\vert,\\
+\Psi_0^\omega &= \Psi_0 + \sum_{j\in\omega}(x_j - \bar x)(x_j - \bar x)^T + \frac{\lambda_0\vert\omega\vert}{\lambda_0 + \vert\omega\vert}(\bar x - \mu_0)(\bar x - \mu_0)^T,\\
+\nu_0^\omega &= \nu_0 + \vert\omega\vert.
+\label{eq:updatedhp}\end{split}\end{equation}
+\subsubsection{Derivation of updated hyperparameters}
+Let
+$$Z_{\MvN} = (2\pi)^{d/2}.$$
+From the definitions of the NIW Eq.~\ref{eq:NIW} and the MvN, lets assume that Eq.~\ref{eq:conjugation} can indeed be rewritten
+\begin{equation}\begin{split}
+&\NIW(\mu, \Sigma~\vert~ \mu_0, \lambda_0,\Psi_0,\nu_0)\prod_{j\in\omega}\operatorname{MvN}(x_j~\vert~\mu,\Sigma)\\
+& = \frac{1}{Z^0_{\NIW}}\vert\Sigma\vert^{-\frac{\nu_0 + d + 2}{2}} e^{-\frac{1}{2}\Tr\Psi_0\Sigma^{-1}-\frac{\lambda_0}{2}(\mu - \mu_0)^T \Sigma^{-1}(\mu - \mu_0)}\frac{1}{Z_{\MvN}^{\vert\omega\vert}}\vert\Sigma\vert^{-\frac{\vert\omega\vert}{2}} e^{-\frac{1}{2}\sum_{j\in\omega}(x_j - \mu)^T\Sigma^{-1}(x_j - \mu)},\\
+&=  \frac{Z^\omega_{\NIW}}{Z^0_{\NIW}}\frac{1}{Z_{\MvN}^{\vert\omega\vert}} \frac{1}{Z^\omega_{\NIW}}\vert\Sigma\vert^{-\frac{\nu_0^\omega + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0^\omega\Sigma^{-1} - \frac{\lambda_0^\omega}{2}(\mu - \mu_0^\omega)^T\Sigma^{-1}(\mu - \mu_0^\omega)},\\
+&= \frac{Z^\omega_{\NIW}}{Z^0_{\NIW} Z_{\MvN}^{\vert\omega\vert}} \NIW(\mu,\Sigma~\vert~\mu_0^\omega,\lambda_0^\omega,\Psi_0^\omega,\nu_0^\omega).
+\label{eq:niw}\end{split}\end{equation}
+Combining powers of the determinant $\vert\Sigma\vert$ we find the updated
+$$\nu_0^\omega = \nu_0 + \vert\omega\vert.$$
+Expanding the second and third lines above and gathering the powers of $\mu$, which we highlight in parentheses, we obtain four equalities by inspection, namely
+\begin{equation}\begin{split}
+(\lambda_0 + \sum_{j\in\omega} 1)\left(\mu^T\Sigma^{-1}\mu\right) &= \lambda_0^\omega\left(\mu^T\Sigma^{-1}\mu\right),\\
+\left(\mu^T\Sigma^{-1}\right)(\lambda_0\mu_0 + \sum_{j\in\omega} 1 ) &= \left(\mu^T\Sigma^{-1}\right)\lambda_0^\omega \mu_0^\omega,\\
+(\lambda_0\mu_0 + \sum_{j\in\omega} 1)\left(\Sigma^{-1}\mu\right) &= \lambda_0^\omega \mu_0^\omega\left(\Sigma^{-1}\mu\right),\\
+\Tr\Psi_0\Sigma^{-1} + \lambda_0\mu_0^T\Sigma^{-1}\mu_0 + \sum_j x_j^T\Sigma^{-1} x_j &= \Tr\Psi_0^\omega\Sigma^{-1} + \lambda_0^\omega(\mu_0^\omega)^T\Sigma^{-1}\mu_0^\omega.
+\end{split}\end{equation}
+From the first equality we can read off
+$$\lambda_0^\omega = \lambda_0 + \vert\omega\vert.$$
+Letting the sample mean $\bar x = \frac{1}{\vert\omega\vert}\sum_{j\in\omega}x_j$, the second and third equalities equivalently give us
+$$\mu_0^\omega = \frac{\lambda_0\mu_0 + \vert\omega\vert\bar x}{\lambda_0 + \vert\omega\vert}.$$
+Finally the third equality for $\Psi_0^\omega$ requires a bit more algebra. First, using the cyclicity of the trace and the trace identity $\Tr(b a^T) = a^T b$ for $a$ and $b$ two column vectors we can write, after dropping the trace operator, that
+\begin{equation}
+\Psi_0^\omega = \Psi_0 + \lambda_0\mu_0\mu_0^T + \sum_{j\in\omega} x_j x_j^T - \lambda_0^\omega\mu_0^\omega(\mu_0^\omega)^T,
+\end{equation}
+which we can rewrite
+\begin{equation}\begin{split}
+\Psi_0^\omega &= \Psi_0 + \sum_{j\in\omega}(x_j  - \bar x) (x_j - \bar x)^T + \vert\omega\vert\bar x\bar x^T + \lambda_0\mu_0\mu_0^T -\lambda_0^\omega \mu_0^\omega(\mu_0^\omega)^T,\\
+&= \Psi_0 + \sum_{j\in\omega}(x_j  - \bar x) (x_j - \bar x)^T + \frac{\lambda_0 \vert\omega\vert}{\lambda_0 + \vert\omega\vert}\left(\mu_0\mu_0^T - \bar x\bar x^T - \bar x\mu_0^T - \lambda_0 \bar x^T\right),\\
+&= \Psi_0 +  \sum_{j\in\omega}(x_j  - \bar x) (x_j - \bar x)^T + \frac{\lambda_0 \vert\omega\vert}{\lambda_0 + \vert\omega\vert}(\bar x - \mu_0)(\bar x - \mu_0)^T.
+\end{split}\end{equation}
+This completes the derivation of Eq.~\ref{eq:updatedhp}. Notice in passing that as the number $\vert\omega\vert$ of samples $x_i\in\omega$ increases, all updated hyperparameters become overwhelmed by the data. Indeed the updated mean $\mu_0^\omega \rightarrow \bar x$, the udpated scale parameter $\lambda_0^\omega \rightarrow \vert\omega\vert$, the updated precision matrix $\Psi_0^\omega\rightarrow \sum_{j\in\omega}(x_j - \bar x)(x_j - \bar x)^T$, and the updated number of degrees of freedom $\nu_0^\omega \rightarrow \vert\omega\vert$, all strictly function of the data.
+\subsubsection{Hyperpriors}
+The model specification Eq.~\ref{eq:model} contains five hyperparameters: $\alpha$, $\mu_0$, $\lambda_0$, $\Psi_0$, and $\nu_0$. As it stands, these hyperparameters have to be fixed to some values in order to completely specify the model. We could use an empirical Bayes approach but we don't like the idea of "double-dipping" in the data. There are some suggestions in the literature for fixed choices of the hyperparameters of the NIW but none of them are completely satisfactory. For $\alpha$, a vague logarithmic prior is sometimes used but this also seems arbitrary and solely base on the fact that $\alpha > 0$. We would like instead to close the hierarchy by introducing hyperpriors for hyperparameters and in doing so make the model parameter-free. We choose instead to use the (improper) independence Jeffreys prior, i.e. the product of the five one-parameter Jeffreys prior
+$$P_{hyper}(\alpha,\mu_0,\lambda_0,\Psi_0,\nu_0)=J_\alpha (\alpha) J_{\mu_0}(\mu_0) J_{\lambda_0}(\lambda_0) J_{\Psi_0}(\Psi_0) J_{\nu_0}(\nu_0),$$
+where $J_{\vec \theta}(\vec \theta)~\propto~\sqrt{\vert\mathcal I(\vec \theta)\vert}$ and the Fisher information matrix $\mathcal I(\vec\theta) = -E[\partial_{\theta_i}\partial_{\theta_j} \log P(\vec\theta)]$. This is a well behaved alternative to the full multi-parameters Jeffreys prior which unfortunately we found to be no only improper by divergent in $\lambda_0$ and $\nu_0$ and to depend on the ordering of the parameters.
+
+For $\alpha$, we recall the probability distribution of the CRP
+$$P(\pi) = \frac{\alpha^K}{\alpha^{(N)}}\prod_{\lambda\in\pi}(\vert\lambda\vert - 1)!,$$
+where $K = \vert\pi\vert$ and $\alpha^{(N)} = \Gamma(\alpha + N)/\Gamma(\alpha)$ is the Pochhammer symbol.
+The $1\times 1$ Fisher information matrix is given by
+\begin{equation}\begin{split}
+-E[\partial^2_\alpha \log P(\pi)] &= E\left[\frac{K}{\alpha^2} + \partial^2_\alpha \log\Gamma(\alpha + N) - \partial^2_\alpha\log\Gamma(\alpha)\right],\\
+&= E\left[\frac{K}{\alpha^2} + \psi'(\alpha + N) - \psi'(\alpha)\right],\\
+&= \frac{E[K]}{\alpha^2} + \psi'(\alpha + N) - \psi'(\alpha),
+\end{split}\end{equation}
+where $\psi(x)$ is the digamma function and $\psi'(x)$ its derivative. The expectation value of the number of clusters $K$ in a partition $\pi$ distributed according the the CRP is given by a sum of Bernouilli variables, each parametrized by the probability that the $m$'th customer sits at a new table, namely
+\begin{equation}\begin{split}
+E[K] &= \sum_{m = 1}^N E[b_m],\\
+\text{where}\quad b_m~&\sim~\operatorname{Bernoulli}\left[\frac{\alpha}{m - 1 + \alpha}\right],\\
+\Rightarrow E[K] &=  \sum_{m=1}^N \frac{\alpha}{m - 1 + \alpha},\\
+&= \alpha(\psi(\alpha + N) - \psi(\alpha)).
+\end{split}\end{equation}
+We have therefore the Jeffreys prior for $\alpha$
+\begin{equation}
+J_\alpha(\alpha)~\propto~\sqrt{\frac{\psi(\alpha + N) - \psi(\alpha)}{\alpha} + \psi'(\alpha +N) - \psi'(\alpha)}.
+\label{eq:jeffalpha}
+\end{equation}
+This prior differs from the logarithmic prior $1/\alpha$ in that close to $\alpha = 0$ it behaves as $\alpha\sim \alpha^{-1/2}$ and for $\alpha\rightarrow\infty$ it behaves as $\alpha\sim\alpha^{-3/2}$. In other words in gives more weight than the logarithmic prior at small $\alpha$ and less weight at large $\alpha$.
+
+For $\mu_0$, the $d\times d$ Fisher information matrix
+\begin{equation}\begin{split}
+-E\left[\partial_{\mu_{0i}}\partial_{\mu_{0j}} \log \NIW(\mu,\Sigma~\vert~\mu_0,\lambda_0,\Psi_0,\nu_0)\right] &= \frac{\lambda_0}{2}E[\partial_{\mu_i}\partial_{\mu_j}(\mu - \mu_0)^T\Sigma^{-1}(\mu - \mu_0)],\\
+&= \lambda_0 E[\Sigma^{-1}],\\
+&= \lambda_0\nu_0\Psi_0^{-1}.
+\end{split}\end{equation}
+The last equality was obtained from the correspondance between the inverse-Wishart and Wishart distributions. Now notice that it does not depend on $\mu_0$ and therefore
+$$J_{\mu_0}(\mu_0)~\propto~1$$
+the uniform prior over $\mathbb{R}^d$.
+
+For $\lambda_0$, the $1\times 1$ Fisher information matrix is straightforward. Notice that the only term in the logarithm of the NIW that does not disappear under the second derivative w.r.t. $\lambda_0$ is in the normalization constant. Indeed
+\begin{equation}\begin{split}
+-E\left[\partial^2_{\lambda_0}\log \NIW(\mu,\Sigma~\vert~\mu_0,\lambda_0,\Psi_0,\nu_0)\right] &= -\frac{d}{2}E[\partial^2_{\lambda_0}\log \lambda_0],\\
+&= \frac{d}{2}\frac{1}{\lambda_0^2},
+\end{split}\end{equation}
+and therefore
+$$J_{\lambda_0}(\lambda_0)~\propto~\frac{1}{\lambda_0}$$
+the logarithmic prior.
+
+For $\Psi_0$, which we will write $\Psi$ for now, the Fisher information matrix is a bit more interesting. Indeed
+\begin{equation}\begin{split}
+-E\left[\partial_{\Psi_{ij}}\partial_{\Psi_{kl}}\log \NIW(\mu,\Sigma~\vert~\mu_0,\lambda_0,\Psi,\nu_0)\right] &= -\frac{\nu_0}{2}E[\partial_{\Psi_{ij}}\partial_{\Psi_{kl}}\log\vert\Psi\vert], \\
+&=-\frac{\nu_0}{2}\partial_{\Psi_{ij}}\frac{1}{\vert\Psi\vert}\partial_{\Psi_{kl}}\vert\Psi\vert,\\
+&= -\frac{\nu_0}{2}\partial_{\Psi_{ij}}\frac{1}{\vert\Psi\vert}\vert\Psi\vert \Psi^{-1}_{kl},\\
+&=-\frac{\nu_0}{2} \partial_{\Psi_{ij}}\Psi_{kl}^{-1}.
+\end{split}\end{equation}
+We can show by taking the derivative of $A^{-1} A = \mathbb{1}$ that $\partial_A A^{-1} = -A^{-1}\otimes A^{-1}$ and therefore
+$$-E\left[\partial^2_{\Psi_{0}}\log \NIW(\mu,\Sigma~\vert~\mu_0,\lambda_0,\Psi_0,\nu_0)\right] = \frac{\nu_0}{2}\Psi_0^{-1}\otimes\Psi_0^{-1}.$$
+It follows that the Jeffreys prior
+\begin{equation}\begin{split}
+J_{\Psi_0}(\Psi_0)~&\propto~ \sqrt{\left\vert\Psi_0^{-1}\otimes\Psi_0^{-1}\right\vert},\\
+&= \frac{1}{\left\vert\Psi_0\right\vert^d}.
+\end{split}\label{eq:jeffpsi}\end{equation}
+
+Finally for $\nu_0$, the $1\times 1$ Fisher information matrix
+$$-E\left[\partial^2_{\nu_0}\log \NIW(\mu,\Sigma~\vert~\mu_0,\lambda_0,\Psi_0,\nu_0)\right] = \partial^2_{\nu_0}\log\Gamma_d(\nu_0/2)$$
+where the multivariate gamma function
+$$\Gamma_d(x) = \pi^{d(d-1)/4}\prod_{i=1}^d\Gamma\left(x + \frac{1 - i}{2}\right).$$
+Thus
+$$\partial^2_{\nu_0}\log\Gamma_d(\nu_0/2) = \frac{1}{4}\sum_{i=1}^d \psi'\left(\frac{\nu_0}{2} + \frac{1 - i}{2}\right),$$
+and the Jeffreys prior
+$$J_{\nu_0}(\nu_0)~\propto~\sqrt{\sum_{i=1}^d \psi'\left(\frac{\nu_0}{2} + \frac{1 - i}{2}\right)}.$$
+The behavior of this prior is such that $\nu_0 - d + 1\sim (\nu_0 - d + 1)^{-1}$ and for $\nu_0\rightarrow\infty$ we have $\nu_0\sim \nu_0^{-1/2}$. 
+
+Combining all single-parameter hyperpriors we found above, the full independence Jeffreys prior for the model
+\begin{equation}\begin{split}
+P_{hyper}(\alpha,\mu_0,\lambda_0,\Psi_0,\nu_0)~&\propto~\frac{1}{\lambda_0}\frac{1}{\vert\Psi_0\vert^d} \\
+&\times \sqrt{\frac{\psi(\alpha + N) - \psi(\alpha)}{\alpha} + \psi'(\alpha +N) - \psi'(\alpha)}\\
+&\times \sqrt{\sum_{i=1}^d \psi'\left(\frac{\nu_0}{2} + \frac{1 - i}{2}\right)}.
+\end{split}\end{equation}
+This hyperprior closes the hierarchy of hyperparameters and makes the model completely parameter-free.
+
+\subsubsection{Inadequacy of the multi-parameters Jeffreys prior}
+To give a sense of how badly behaved the full multi-parameters Jeffreys prior is, let us first look at the Fisher information matrix with parameter ordering $\vec\theta = \lbrace\Psi_0, \nu_0, \lambda_0, \mu_0\rbrace$ and ignoring $\alpha$. The only difference is the appearance of off-diagonal blocks in $\partial_{\nu_0}\partial_{\Psi_{0ij}}$ and it is given by
+\begin{equation}
+\newcommand*{\leftvert}[1]{\multicolumn{1}{|c}{#1}}
+\renewcommand{\arraystretch}{2}
+\mathcal I(\vec\theta)=
+\left(
+\begin{array}{cccc}
+\frac{\nu_0}{2}\Psi_0^{-1}\otimes\Psi_0^{-1} & \leftvert{-\frac{1}{2}\operatorname{vec}\Psi_0^{-1}} & & \\ \cline{1-2}
+-\frac{1}{2}\left(\operatorname{vec}\Psi_0^{-1}\right)^T & \leftvert{\frac{1}{4}\sum_{i=1}^d\psi'(\frac{\nu_0}{2}+\frac{1-i}{2})} & \leftvert{} & \\ \cline{2-3}
+ & & \leftvert{\frac{d}{2}\frac{1}{\lambda_0^2}} & \leftvert{} \\ \cline{3-4}
+ &  &  & \leftvert{\lambda_0\nu_0\Psi_0^{-1}}
+\end{array}\right),
+\end{equation}
+where $\operatorname{vec}(M)$ is the vectorization operator. Using the determinant identity for block matrices
+$$\left\vert\begin{array}{cc}
+A & B\\
+C & D
+\end{array}\right\vert
+= \vert A\vert \vert D - C A^{-1} B\vert
+$$
+together with $(A\otimes B)^{-1} = A^{-1}\otimes B^{-1}$, we get
+\begin{equation}
+\vert\mathcal I(\vec\theta)\vert = \frac{d}{2}\frac{1}{\lambda_0^2}\left\vert\lambda_0\nu_0\Psi_0^{-1}\right\vert\left\vert \frac{\nu_0}{2}\Psi_0^{-1}\otimes\Psi_0^{-1}\right\vert\left\vert D - \frac{1}{2\nu_0}(\operatorname{vec}\Psi_0^{-1})^T(\Psi_0\otimes\Psi_0)\operatorname{vec}\Psi_0^{-1} \right\vert.
+\end{equation}
+where $D = \frac{1}{4}\sum_{i=1}^d\psi'(\nu/2+(1-i)/2)$. Now using the symmetry of $\Psi_0$ and identities $(A\otimes B) v = \operatorname{vec}(B(\operatorname{vec}^{-1} v) A^T)$ and $(\operatorname{vec} A)^T \operatorname{vec} B = \Tr A^T B$, we rewrite
+\begin{equation}\begin{split}
+(\operatorname{vec}\Psi_0^{-1})^T(\Psi_0\otimes\Psi_0)\operatorname{vec}\Psi_0^{-1} &=  (\operatorname{vec}\Psi_0^{-1})^T\operatorname{vec}(\Psi_0 \Psi_0^{-1}\Psi_0) ,\\
+&= (\operatorname{vec}\Psi_0^{-1})^T\operatorname{vec}\Psi_0,\\
+&= \Tr\Psi_0^{-1}\Psi_0,\\
+&= d.
+\end{split}\end{equation}
+Therefore
+\begin{equation}\begin{split}
+\vert\mathcal I(\vec\theta)\vert &= \frac{d}{2}\frac{1}{\lambda_0^2}\frac{(\lambda_0\nu_0)^d}{\vert\Psi_0\vert}\left(\frac{\nu_0}{2}\right)^{d^2}\frac{1}{\vert\Psi_0\vert^{2d}}\left(D - \frac{d}{2\nu_0}\right), \\
+&= \frac{d}{2^{d^2 + 1}}\frac{\lambda_0^{d-2}\nu_0^{d(d + 1)}}{\vert\Psi_0\vert^{2d + 1}}\left(D -\frac{d}{2\nu_0}\right).
+\end{split}\end{equation}
+and thus the multi-parameters Jeffreys prior
+$$J_{multi}(\vec\theta)~\propto~ \sqrt{\vert\mathcal I(\vec\theta)\vert}~\propto~\lambda_0^{\frac{d}{2}-1}\nu_0^{\frac{d(d+1)}{2}}\frac{1}{\vert\Psi_0\vert^{d+\frac{1}{2}}}\sqrt{D - \frac{d}{2\nu_0}}.$$
+Notice how terms in $\lambda_0$ for $d > 2$ and especially in $\nu_0$ diverge rather dramatically, making the prior not only improper, but ill-defined for those two parameters. The divergence stems from the fact that we cannot immediately get rid of the factors $\nu_0$ and $\lambda_0\nu_0$ in the blocks of $\Psi_0$ and $\mu_0$ after taking the determinant and claiming the proportionality between the Jeffreys prior and the square-root of the determinant of the Fisher information matrix. There is no apparent remedy to this problem and we therefore stick with the independence Jeffreys prior.
+
+\section{Algorithm}
+The generative model is sampled using MCMC. Our MCMC algorithm uses three kinds of sampling strategies. For sampling the CRP we use both traditional Gibbs sampling (Neal 2000, algorithm 3) and the more ambitious split-merge moves (Jain \& Neal 2004). Hyperparameters of the model for both the CRP and the NIW base distributions have their own hyperpriors which we sample using a traditional Metropolis-Hastings approach.
+
+We must begin with the expression for full generative model (omitting the hyperpriors). Letting $K = \vert\pi\vert$ and $N = \vert\lbrace x_j\rbrace\vert = \sum_{\omega\in\pi}\vert\omega\vert$,
+\begin{equation}\begin{split}
+&P_{gen}(\pi, \lbrace\mu_\omega\rbrace, \lbrace\Sigma_\omega\rbrace)\\
+&= \left[\frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)!\right]\left[\prod_{\omega\in\pi}\NIW(\mu_\omega,\Sigma_\omega~\vert~\mu_0,\lambda_0,\Psi_0,\nu_0)\prod_{x_j\in\omega} \operatorname{MvN}(x_j~\vert~\mu_\omega,\Sigma_\omega)\right],\\
+&= \left[\frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)!\right]\prod_{\omega\in\pi}\frac{Z^\omega_{\NIW}}{Z_{\NIW}^0 Z_{\MvN}^{\vert\omega\vert}}\NIW(\mu_\omega,\Sigma_\omega~\vert~\mu_0^\omega, \lambda_0^\omega, \Psi_0^\omega, \nu_0^\omega).
+\end{split}\end{equation}
+Notice how the conjugacy allows us to easily marginalize over $\mu_\omega$ and $\Sigma_\omega$. Indeed
+\begin{equation}\begin{split}
+P_{gen}(\pi) &= \left[\prod_{\omega\in\pi}\int d\mu_\omega d\Sigma_\omega\right]P(\pi, \lbrace x_j\rbrace, \lbrace\mu_0^\omega\rbrace, \lbrace\Sigma_\omega\rbrace),\\
+&= \left[\frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)!\right]\prod_{\omega\in\pi}\frac{Z^\omega_{\NIW}}{Z_{\NIW}^0 Z_{\MvN}^{\vert\omega\vert}}\int d\mu_\omega d\Sigma_\omega \NIW(\mu_\omega,\Sigma_\omega~\vert~\mu_0^\omega, \lambda_0^\omega, \Psi_0^\omega, \nu_0^\omega),\\
+&= \frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)! \frac{Z^\omega_{\NIW}}{Z_{NIW}^0 Z_{\MvN}^{\vert\omega\vert}}.
+\end{split}\end{equation}
+This is the central expression from which we can derive the Gibbs moves as described in algorithm 3 of Neal 2000, which we do next.
+
+\subsection{Gibbs sampling of partitions}
+Let $\pi_{-i}$ be the partition where we remove the sample point $x_i$ from whichever cluster in $\pi$ it was in. We now want to reassign $x_i$ to either an existing cluster in $\pi_{-i}$ or to its own new cluster. This reassignment gives rise to a new partition $\pi'$. There are two possibilities: either we reassign $x_i$ to an existing cluster $c$ in $\pi_{-i}$, namely $\pi' = \pi_{-i} - c + c\cup\lbrace x_i\rbrace$, or to its own cluster, namely $\pi' = \pi_{-i} + \lbrace x_i\rbrace$. Let's start with the second case where $x_i$ is assigned its own cluster. Cancelling common factors in the numerator and denominator,
+\begin{equation}\begin{aligned}
+P_{gen}(\pi'~\vert~\pi_{-i}) &= \frac{P_{gen}(\pi')}{P_{gen}(\pi_{-i})}, &  \pi' = \pi_{-i} + \lbrace x_i\rbrace,\\
+&=\frac{\alpha^K 0!}{\alpha^{(N)}}\frac{\alpha^{(N-1)}}{\alpha^{K-1}}\frac{Z^{\lbrace x_i\rbrace}_{\NIW}}{Z_{NIW}^0 Z_{\MvN}},\\
+&= \frac{\alpha}{\alpha + N - 1}\frac{Z^{\lbrace x_i\rbrace}_{\NIW}}{Z_{NIW}^0 Z_{\MvN}}.
+\end{aligned}\label{eq:gibbsnewcluster}\end{equation}
+Now for the first case, the probability that $x_i$ gets assigned to a cluster $c\in\pi_{-i}$, namely that $\pi' = \pi_{-i} - c + c\cup\lbrace x_i\rbrace$, is given by
+\begin{equation}\begin{split}
+P_{gen}(\pi'~\vert~\pi_{-i}) &= \frac{P_{gen}(\pi')}{P_{gen}(\pi_{-i})}, \\
+&=\frac{\alpha^K}{\alpha^{(N)}}\frac{\alpha^{(N-1)}}{\alpha^{K}}\frac{\vert c\vert!}{(\vert c\vert - 1)!}\frac{Z^{c\cup\lbrace x_i\rbrace}_{\NIW}}{Z_{\NIW}^0 Z_{\MvN}^{\vert c\vert + 1}}\frac{Z_{\NIW}^0 Z_{\MvN}^{\vert c\vert}}{Z_{\NIW}^{c}},\\
+&= \frac{\vert c\vert}{\alpha + N - 1}\frac{Z_{\NIW}^{c\cup\lbrace x_i\rbrace}}{Z_{\NIW}^c Z_{\MvN}}.
+\end{split}\label{eq:gibbsoldcluster}\end{equation}
+The algorithm for the Gibbs sampling is therefore straightforward. Pick a sample $x_i$ at random and remove it from its cluster. Then draw at random either one of the remaining existing cluster $c\in\pi_{-i}$, each of which is assigned the probability Eq.~\ref{eq:gibbsoldcluster}, or a new empty cluster with probability Eq.~\ref{eq:gibbsnewcluster}. Add the sample $x_i$ to this cluster. Repeat for all samples either at random with replacement or without replacement. We elect to sample without replacement because it guarantees that every sample is redrawn after one sweep. If one instead draws samples at random without replacement, the probability $p$ that a given samples is picked at least once after $x$ of sweeps, i.e. $Nx$ draws, satisfies $1 - p = 1 - (1 - 1/N)^{Nx}$, and therefore $x = 1/N \log(1 - p)/\log(1 - 1/N)$. For large $N$, the number or sweeps $x\rightarrow -\log(1 -p)$. To give an idea of what this means, the number of sweeps with replacement necessary to be 95\% sure that every sample has been picked up at least once is roughly 3. To be 99\% sure one would need around 5 sweeps with replacement. Using sweeps with replacement therefore lead to an algorithm with slower mixing time than using sweeps without replacement. This is somewhat obvious.
+\subsection{Restricted Gibbs split-merge moves}
+Because Gibbs sample proceeds one sample at a time, it often gets stuck around false minima because samples gets reassigned to the same clusters they were in with high probability. This lead to very slow mixing time and poor exploration of the set of possible partitions. To counteract this issue one can use more ambitious moves whereby an "ambiguous" cluster can split into two, or two "nearby" clusters can merge into one. These moves are of the Metropolis-Hastings type because split-merge moves are proposed and accepted according to some acceptance probability rather than accepted with probability one as in Gibbs sampling. Indeed while it is easy to enumerate the full set of possible moves for a single sample---there are as many possible move as there are clusters, which is of order $\alpha \log N$---enumerating all possible ways to split a cluster is very often combinatorially explosive. We note though that there are only two possibilities when performing a merge move: either merge the two clusters under consideration or leave them as is. Therefore in this case Metropolis-Hastings is equivalent to Gibbs sampling.
+
+\subsection{Metropolis-Hastings move over hyperparameters}
+For hyperparameters $\mu_0$, $\lambda_0$, $\nu_0$, and $\alpha$ we proceed in the usual manner. 
+
+\subsubsection{Moves for $\mu_0$}
+For $\mu_0$ we proceed one component $\mu_{0i}$ at a time. Since $\mu_0\in\mathbb{R}^d$, we can use a Gaussian or uniform kernel with some width $\epsilon$ and, since these kernels are symmetric, the Hastings ratio is 1. The acceptance probability is therefore
+$$P_{acc}(\mu_{0i}\rightarrow\mu'_{0i}) = \min\left[1, \frac{g(\mu_{0i}~\vert~\mu'_{0i})}{g(\mu'_{0i}~\vert~\mu_{0i})}\frac{P_{gen}(\mu'_{0i})}{P_{gen}(\mu_{0i})}\frac{J_{\mu_0}(\mu'_{0i})}{J_{\mu_0}(\mu_{0i})}\right] =  \min\left[1, \frac{P_{gen}(\mu'_{0i})}{P_{gen}(\mu_{0i})}\right]$$
+where $\mu'_{0i} = \mu_{0i} + \varepsilon$ with $\varepsilon \sim\operatorname{SymmetricDist}$.
+
+\subsubsection{Moves for $\lambda_0$}
+For $\lambda_0$ we use symmetric moves in logarithmic space $\log\lambda_0$ because $\lambda_0 > 0$. To transform those moves into uniform moves over the positive real line, we can find the Hastings ratio using the law of conservation of probability, namely
+\begin{equation}\begin{split}
+\frac{g(\lambda_0~\vert~\lambda'_0) d\lambda_0}{g(\lambda'_0~\vert~\lambda_0)d\lambda'_0} &= \frac{g(\log\lambda_0~\vert~\log\lambda'_0) d\log\lambda_0}{g(\log\lambda'_0~\vert~\log\lambda_0)d\log\lambda'_0},\\
+\Rightarrow\quad\frac{g(\lambda_0~\vert~\lambda'_0)}{g(\lambda'_0~\vert~\lambda_0)} &= \frac{g(\log\lambda_0~\vert~\log\lambda'_0)}{g(\log\lambda'_0~\vert~\log\lambda_0)} \frac{\left\vert\frac{d\log\lambda_0}{d\lambda_0}\right\vert}{\left\vert\frac{d\log\lambda'_0}{d\lambda'_0}\right\vert},\\
+&= \frac{\lambda'_0}{\lambda_0}.
+\end{split}\end{equation}
+Interestingly,
+$$\frac{J_{\lambda_0}(\lambda'_0)}{J_{\lambda_0}(\lambda_0)} = \frac{1}{\lambda'_0}\frac{\lambda_0}{1}$$
+and therefore the ratio of Jeffreys priors cancels the Hastings ratio. This is to be expected since the hyperprior $J_{\lambda_0}$ is logarithmic and we could have skipped both previous steps. We are left with
+$$P_{acc}(\lambda_0\rightarrow\lambda'_0) = \min\left[1, \frac{g(\lambda_{0}~\vert~\lambda'_{0})}{g(\lambda'_{0}~\vert~\lambda_{0})}\frac{P_{gen}(\lambda'_{0})}{P_{gen}(\lambda_{0})}\frac{J_{\lambda_0}(\lambda'_{0})}{J_{\lambda_0}(\lambda_{0})}\right] =  \min\left[1, \frac{P_{gen}(\lambda'_{0})}{P_{gen}(\lambda_{0})}\right]$$
+where $\log\lambda'_0 = \log\lambda_0 + \varepsilon$ with $\varepsilon \sim\operatorname{SymmetricDist}$.
+
+\subsubsection{Moves for $\nu_0$}
+For $\nu_0$ we once more use symmetric moves in logarithmic space, but since $\nu_0 > d - 1$, the moves are actually over the shifted logarithmic space $\log(\nu_0 - d + 1)$. Since $d\log(\nu_0 - d + 1)/d(\nu_0 - d + 1) = 1/(\nu_0 - d + 1)$ we as in the case for $\lambda_0$ that
+$$\frac{g(\nu_0~\vert~\nu'_0)}{g(\nu'_0~\vert~\nu_0)} = \frac{\nu'_0 - d + 1}{\nu_0 - d + 1},$$
+and therefore
+$$P_{acc}(\nu_0\rightarrow\nu'_0) = \min\left[1, \frac{\nu'_0 - d + 1}{\nu_0 - d + 1}\frac{P_{gen}(\nu'_{0})}{P_{gen}(\nu_{0})}\frac{J_{\nu_0}(\nu'_0)}{J_{\nu_0}(\nu_0)}\right],$$
+where $\log(\nu'_0 - d + 1) = \log(\nu_0 - d + 1) + \varepsilon$ with $\varepsilon \sim\operatorname{SymmetricDist}$.
+
+\subsubsection{Moves for $\Psi_0$}
+For $\Psi_0$ the Hastings ratio is substantially more complicated. Since $\Psi_0$ is positive definite we can first use the Cholesky decomposition $\Psi_0 = L L^T$ where $L$ is a lower triangular matrix with entries $L_{ij}\in\mathbb{R}$ for all $i \ge j$ and $0$ otherwise. We know it is easy to make symmetric moves $L_{ij}\rightarrow L_{ij} + \varepsilon$ with $\varepsilon\sim\operatorname{SymmetricDist}$. While making symmetric moves in the space of lower triangular matrices is therefore straightforward, how can we these into uniform moves in the space of positive definite matrices $\Psi_0$? We know that the general case
+$$\frac{g(\Psi_0~\vert~\Psi'_0)d\Psi_0}{g(\Psi'_0~\vert~\Psi_0)d\Psi'_0} = \frac{g(L~\vert~L')dL}{g(L'~\vert~L)dL'}.$$
+and thus
+$$\frac{g(\Psi_0~\vert~\Psi'_0)}{g(\Psi'_0~\vert~\Psi_0)} = \frac{\left\vert\frac{d\Psi'_0}{dL'}\right\vert}{\left\vert\frac{d\Psi_0}{dL}\right\vert}.$$
+We therefore need, writing once more $\Psi$ instead of $\Psi_0$ for the moment, the determinant of the Jacobian
+$$\left\vert\left[\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right]_{ij,kl}\right\vert = \left\vert\left[\frac{\partial\sum_{k}L_{ik}L_{jk}}{\partial L_{mn}}\right]_{ij,kl}\right\vert = \left\vert\left[L_{in}\delta_{jm} + L_{jn}\delta_{im}\right]_{ij,kl}\right\vert,\quad i\ge j, m\ge n.$$
+For $d=1,2,3$ we have
+\begin{equation}\begin{aligned}
+d = 1 & \Rightarrow & \left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert &= 2 \vert L_{11}\vert,\\
+d = 2 & \Rightarrow & \left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert = \left\vert\begin{array}{ccc}
+2L_{11} & 0 & 0\\
+L_{21} & L_{11} & 0 \\
+0 & 2L_{21} & 2L_{22}
+\end{array}\right\vert &= 2^2 \vert L_{11}\vert^2 \vert L_{22}\vert\\
+d = 3 & \Rightarrow &  \left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert = \left\vert\begin{array}{cccccc}
+2L_{11} & 0 & 0 & 0 & 0 & 0 \\
+L_{21} & L_{11} & 0 & 0 & 0 & 0 \\
+L_{31} & 0 & L_{11} & 0 & 0 & 0 \\
+0 & 2 L_{21} & 0 & 2 L_{22} & 0 & 0 \\
+0 & L_{31} & L_{21} & L_{32} & L_{22} & 0\\
+0 & 0 & 2L_{31} & 0 & 2 L_{32} & L_{33}
+\end{array}\right\vert &= 2^3 \vert L_{11}\vert^3 \vert L_{22}\vert^2 \vert L_{33}\vert
+\end{aligned}\end{equation}
+and we claim without proof that in dimension $d$
+$$\left\vert\frac{\partial\Psi_{ij}}{\partial L_{kl}}\right\vert = 2^d \vert L_{11}\vert^d \vert L_{22}\vert^{d-1}\ldots \vert L_{dd}\vert.$$
+The Hastings ratio we will form using this expression for the determinant of the Jacobian allows us to uniformly explore the space of positive definite matrices using easy symmetric moves in $L$. The acceptance probability, remembering Eq.~\ref{eq:jeffpsi},
+$$P_{acc}(\Psi_0\rightarrow\Psi'_0) = \min\left[1, \frac{\vert L'_{11}\vert^d \vert L'_{22}\vert^{d-1}\ldots \vert L'_{dd}\vert}{\vert L_{11}\vert^d \vert L_{22}\vert^{d-1}\ldots \vert L_{dd}\vert}\frac{P_{gen}(\Psi'_0)}{P_{gen}(\Psi_0)}\frac{\vert\Psi_0\vert^d}{\vert\Psi'_0\vert^d}\right].$$
+where $L'_{ij} = L_{ij} + \varepsilon$ and $\varepsilon\sim\operatorname{SymmetricDist}$.
+
+\subsubsection{Moves for $\alpha$}
+Since $\alpha$ also takes value on the positive real line $\alpha > 0$, we use once again symmetric moves in logarithmic space but because the hyperprior $J_\alpha$ is not logarithmic we use the Hastings ratio
+$$\frac{g(\alpha~\vert~\alpha')}{g(\alpha'~\vert~\alpha)} = \frac{\alpha'}{\alpha}.$$
+The acceptance probability
+$$P_{acc}(\alpha\rightarrow\alpha') = \min\left[1, \frac{\alpha'}{\alpha}\frac{P_{gen}(\alpha')}{P_{gen}(\alpha)}\frac{J_{\alpha}(\alpha')}{J_\alpha(\alpha)}\right] = \frac{\alpha'^{K+1}}{\alpha^{K+1}}\frac{\Gamma(\alpha + N)}{\Gamma(\alpha)}\frac{\Gamma(\alpha')}{\Gamma(\alpha' + N)}\frac{J_\alpha(\alpha')}{J_\alpha(\alpha)}$$
+where $\log\alpha' = \log\alpha + \varepsilon$ and $\varepsilon\sim\operatorname{SymmetricDist}$.
+\end{document}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
