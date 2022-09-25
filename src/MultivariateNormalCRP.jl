@@ -20,8 +20,6 @@ module MultivariateNormalCRP
 
     Cluster = Set{Vector{Float64}}
 
-    global psi_data_c = Vector{Array{Float64}}([])
-
     mutable struct MNCRPhyperparams
         alpha::Float64
         mu::Vector{Float64}
@@ -346,8 +344,6 @@ module MultivariateNormalCRP
                         for k in 1:n
                             psi_data_c[k, i, j] = (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
                             psi_data_c[k, j, i] = psi_data_c[k, i, j]
-                            # psi_data_c[1][k, i, j] = (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
-                            # psi_data_c[1][k, j, i] = psi_data_c[1][k, i, j]
                         end
                     end
                 end
@@ -365,8 +361,7 @@ module MultivariateNormalCRP
                 @inbounds for i in 1:d
                     for j in 1:i
                         for k in 1:n
-                            # psi_c[i, j] += psi_data_c[k, i, j]
-                            psi_c[i, j] += psi_data_c[1][k, i, j]
+                            psi_c[i, j] += psi_data_c[k, i, j]
                         end
                         psi_c[j, i] = psi_c[i, j]
                     end
