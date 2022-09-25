@@ -1,10 +1,11 @@
+using Revise
 using Random: seed!
 using Distributions: MultivariateNormal
 using LinearAlgebra: diagind, LowerTriangular
 using StatsBase: mean
 using MultivariateNormalCRP
 using Plots
-using Revise
+using StatsFuns
 
 include("../src/PseudoAbsences.jl")
 
@@ -15,7 +16,7 @@ function synthetic(;nb_pseudoabsences=0)
     # Generate some test data
     d = 2
     nb_clusters = 16
-    samples_per_cluster = 25
+    samples_per_cluster = 40
     mu0 = fill(0.0, d)
     lambda0 = 0.03
     psi0 = -1.0 * rand(d, d)
@@ -35,7 +36,7 @@ function synthetic(;nb_pseudoabsences=0)
         mu, sigma = drawNIW(mu0, lambda0, psi0, nu0)
         cluster_samples = rand(MultivariateNormal(mu, sigma), samples_per_cluster)
         samples = hcat(samples, cluster_samples)
-        push!(synthetic_state, Set([1.0 * col for col in eachcol(cluster_samples)]))
+        push!(synthetic_state, Set(Vector{Float64}(col) for col in eachcol(cluster_samples)))
     end
 
     if nb_pseudoabsences > 0
@@ -45,33 +46,49 @@ function synthetic(;nb_pseudoabsences=0)
         samples = hcat(samples, pseudoabsences)
     end
 
-    display(plot_pi_state(synthetic_state, title="Fake data"))
+    display(plot_clusters_2d(synthetic_state, title="Fake data"))
 
     # Seed the MCMC
     seed!(41)
     
     # eachcol returns some very wild type so we explicitly recast it
-    data = Vector{Vector{Float64}}(collect(eachcol(samples)))
-    chain_state = initiate_chain(data)
+    data = Vector{Vector{Float64}}([Vector{Float64}(col) for col in eachcol(samples)])
+    synthetic_chain = initiate_chain(data)
 
     # Profile split-merge moves
-    # @time @profview advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_paramsmh=0, fullseq_prob=0.03)
+    @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_hyperparamsmh=0, fullseq_prob=0.0)
 
     # Profile Gibbs moves
-    # @time @profview advance_chain!(chain_state, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_paramsmh=0, fullseq_prob=0.0)
+    # @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_hyperparamsmh=0, fullseq_prob=0.0)
 
     # Profile Metropolis-Hastings moves for parameters
-    # @time @profview advance_chain!(chain_state, nb_steps=20, nb_gibbs=0, nb_splitmerge=0, nb_paramsmh=10, fullseq_prob=0.0)
+    # @time @profview advance_chain!(synthetic_chain, nb_steps=200, nb_gibbs=0, nb_splitmerge=0, nb_hyperparamsmh=10, fullseq_prob=0.0)
 
     # Profile all
-    # @time @profview advance_chain!(chain_state, nb_steps=20)
+    # @time @profview advance_chain!(synthetic_chain, nb_steps=20)
 
-    return synthetic_state, chain_state
+    return synthetic_state, synthetic_chain
 end
 
-# synthetic_state, chain_state = synthetic(nb_pseudoabsences=16 * 25); nothing;
-synthetic_state, chain_state = synthetic(); nothing;
+# synthetic_state, synthetic_chain = synthetic(nb_pseudoabsences=16 * 25); nothing;
+synthetic_state, synthetic_chain = synthetic(); nothing;
 
 
-# advance_chain!(chain_state, nb_steps=300)
-# plot_chain(chain_state, burn=100)
+# advance_chain!(synthetic_chain, nb_steps=300)
+# plot_chain(synthetic_chain, burn=100)
+
+
+# foo = [0.1, 0.2]
+# cs = synthetic_chain.clusters
+# params = synthetic_chain.hyperparams
+# lps1 = []
+# for c in cs
+#     push!(c, foo)
+#     push!(lps1, log_Pgenerative(cs, ps))
+#     pop!(c, foo)
+# end
+# push!(cs, Set{Vector{Float64}}([foo]))
+# push!(lps1, log_Pgenerative(cs, ps))
+# pop!(cs)
+
+# log_Pgenerative(cs, params), logsumexp(lps1)
