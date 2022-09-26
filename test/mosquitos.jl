@@ -40,7 +40,7 @@ dataset = 1.0 * collect(eachrow(hcat(unique_obs.normalized_temperature, unique_o
 shuffled_dataset = dataset[randperm(length(dataset))]
 
 # draw without replacement
-nb_subsamples = 700
+nb_subsamples = 1000
 subsampled_dataset = shuffled_dataset[1:nb_subsamples]
 
 #######################################
@@ -51,16 +51,22 @@ advance_chain!(chain_state, nb_steps=100, nb_splitmerge=50, splitmerge_t=2, nb_g
 #######################################
 
 obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
+sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2])
 
 fig = Figure(resolution=(2000, 1500));
-
 ga = GeoAxis(
     fig[1, 1]; # any cell of the figure's layout
     dest = "+proj=wintri", # the CRS in which you want to plot
     coastlines = true # plot coastlines from Natural Earth, as a reference.
 );
-_cluster = obs_clusters[8]
-GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude)
+
+# _cluster = obs_clusters[sorted_clusters[end-4][1]]
+# GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude, markersize=4)
+
+for (ci, _) in sorted_clusters[end:-1:end-10]
+    _cluster = obs_clusters[ci]
+    GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude, markersize=4)
+end
 display(fig)
 #######################################
 
