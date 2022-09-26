@@ -21,50 +21,64 @@ filter!(row -> !ismissing(row.decimalLatitude) && !ismissing(row.decimalLongitud
 obs.temperature = temperature[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
 obs.precipitation = precipitation[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
 filter!(row -> !isnothing(row.temperature) && !isnothing(row.precipitation), obs)
+obs.temperature = Vector{Float64}(obs.temperature)
+obs.precipitation = Vector{Float64}(obs.precipitation)
+
+obs.normalized_temperature = (obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature)
+obs.normalized_precipitation = (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation)
+
 # Keep records with unique temps/precs
 # (although they'll naturally be dropped
 # because clusters are Sets)
-unique!(obs, [:temperature, :precipitation])
+
+unique_obs = unique(obs, [:normalized_temperature, :normalized_precipitation])
+unique_clusters = groupby(obs, [:normalized_temperature, :normalized_precipitation])
+unique2nonunique = Dict([Vector{Float64}(group[1, [:normalized_temperature, :normalized_precipitation]]) => group for group in unique_clusters])
 
 # Prepare dataset for MultivariateNormalCRP
-dataset = 1.0 * collect(eachrow(hcat(obs.temperature, obs.precipitation)))
-# draw without replacement
-nb_subsamples = 300
-
+dataset = 1.0 * collect(eachrow(hcat(unique_obs.normalized_temperature, unique_obs.normalized_precipitation)))
 shuffled_dataset = dataset[randperm(length(dataset))]
+
+# draw without replacement
+nb_subsamples = 700
 subsampled_dataset = shuffled_dataset[1:nb_subsamples]
 
-m, s = mean(subsampled_dataset), std(subsampled_dataset)
-subsampled_dataset = [(x .- m) ./ s for x in subsampled_dataset]
+#######################################
 
-
-# to_beat = -Inf
-# nb_trial_suitors = 5
-# for suitor in 1:nb_trial_suitors
-#     chain_state = initiate_chain(subsampled_dataset)
-#     if chain_state.map_logprob > to_beat
-#         to_beat = chain_state.map_logprob
-#     end
-# end
-# while true
-#     chain_state = initiate_chain(subsampled_dataset)
-#     if chain_state.map_logprob > to_beat
-#         break
-#     end
-# end
 chain_state = initiate_chain(subsampled_dataset)
 advance_chain!(chain_state, nb_steps=100, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1)
 
-_mu0, _lambda0, _psi0, _nu0 = chain_state.map_hyperparams.mu, chain_state.map_hyperparams.lambda, chain_state.map_hyperparams.psi, chain_state.map_hyperparams.nu
+#######################################
+
+obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
+
+fig = Figure(resolution=(2000, 1500));
+
+ga = GeoAxis(
+    fig[1, 1]; # any cell of the figure's layout
+    dest = "+proj=wintri", # the CRS in which you want to plot
+    coastlines = true # plot coastlines from Natural Earth, as a reference.
+);
+_cluster = obs_clusters[8]
+GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude)
+display(fig)
+#######################################
+
+
+
+_clusters = chain_state.map_clusters
+_hyperparams = chain_state.map_hyperparams
+
+_mu0, _lambda0, _psi0, _nu0 = _hyperparams.mu, _hyperparams.lambda, _hyperparams.psi, _hyperparams.nu
 _d = size(_mu0, 1)
 
 updated_cluster_mus = []
 updated_cluster_psis = []
 updated_cluster_sigma_modes = []
 cluster_weights = []
-total_weight = sum(length(c) for c in chain_state.map_clusters)
+total_weight = sum(length(c) for c in _clusters)
 
-for c in chain_state.map_clusters
+for c in _clusters
     mu_c, lambda_c, psi_c, nu_c = MultivariateNormalCRP.updated_niw_hyperparams(c, _mu0, _lambda0, _psi0, _nu0)
     push!(updated_cluster_mus, mu_c)
     push!(updated_cluster_psis, psi_c)
@@ -90,7 +104,7 @@ for i in 1:n
 end
 distance_matrix
 
-# p = plot_pi_state_2d(chain_state.map_clusters, axis=:none)
+# p = plot_pi_state_2d(_clusters, axis=:none)
 # p = histogram2d((obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature), (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation), fmt=:png, bins=100, legend=:false, axis=:false)
 # x = [m[1] for m in updated_cluster_mus]
 # y = [m[2] for m in updated_cluster_mus]
@@ -105,14 +119,14 @@ distance_matrix
 # end
 # display(p)
 
-# mupsis = [([x.re, x.im], local_average_covariance([x.re, x.im], chain_state.map_clusters, chain_state.map_hyperparams)) for x in exp.(1im * range(0.0, 2pi, 20)[1:end-1])]
+# mupsis = [([x.re, x.im], local_average_covariance([x.re, x.im], _clusters, _hyperparams)) for x in exp.(1im * range(0.0, 2pi, 20)[1:end-1])]
 # for (mu, psi) in mupsis
 #     covellipse!(mu, psi, fillcolor=:false, fillalpha=0.0, legend=:false, linecolor=:white, linewidth=2, linealpha=0.5)
 # end
 # display(p)
 
-# text = [i for (i, _) in enumerate(chain_state.map_clusters)]
-# text = ["$(round(cluster_weights[i]; digits=2, base=10))" for (i, _) in enumerate(chain_state.map_clusters)]
+# text = [i for (i, _) in enumerate(_clusters)]
+# text = ["$(round(cluster_weights[i]; digits=2, base=10))" for (i, _) in enumerate(_clusters)]
 # annotate!(x, y, text, annotationfontsize=8)
 # tresh = 1.5
 # for i in 1:n
@@ -124,17 +138,20 @@ distance_matrix
 #     end
 # end
 
+#######################################
 
-# p = histogram2d((obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature), (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation), fmt=:png, bins=100, legend=:false, axis=:false)
-p = plot_clusters_2d(chain_state.map_clusters, legend=false)
 pds = ripserer(distance_matrix, alg=:homology)
+plot(pds)
+p = histogram2d((obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature), (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation), fmt=:png, bins=100, legend=:false, axis=:false)
+# p = plot_clusters_2d(_clusters, legend=false)
+
 c = ColorSchemes.magma[200];
-birth_threshold = 0.0
-death_threshold = 1.5
-# plot_cluster_covellipses!(chain_state.map_clusters, chain_state.map_hyperparams,
+birth_threshold = 2
+death_threshold = 0.0
+# plot_cluster_covellipses!(_clusters, _hyperparams,
 # lowest_weight=10,
 # linewidth=2, linecolor=c, fillalpha=0.0, linealpha=1.0)
-persistence_intervals = pds[1]
+persistence_intervals = pds[2]
 for h in persistence_intervals
     if death(h) <= death_threshold
         plot!(death_simplex(h), 
@@ -153,22 +170,25 @@ for h in persistence_intervals
 end
 display(p)
 
+#######################################
 
 p = histogram2d((obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature), 
 (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation),
  fmt=:png, bins=100, legend=:false, axis=:false)
 
-plot_clusters_covellipses!(chain_state.map_clusters, chain_state.map_hyperparams, 
+plot_clusters_covellipses!(_clusters, _hyperparams, 
 lowest_weight=10, n_std=2,
 legend=:false, fillcolor=:false, fillalpha=0.0, 
 linewidth=1, linealpha=1.0, linecolor=:yellowgreen)
 
 display(p)
 
+#######################################
+
 mupsis = [
     ([x.re, x.im], 
     local_average_covariance([x.re, x.im],
-    chain_state.map_clusters, chain_state.map_hyperparams)) 
+    _clusters, _hyperparams)) 
     for x in exp.(1im * range(0.0, 2pi, 20)[1:end-1])
     ]
 
