@@ -3,7 +3,7 @@ module MultivariateNormalCRP
     using Random: randperm, shuffle, seed!
     using StatsFuns: logsumexp, logmvgamma
     using StatsBase: sample, mean, Weights, std, percentile, quantile
-    using LinearAlgebra: det, LowerTriangular, cholesky, diag, tr, diagm, inv, norm, eigen
+    using LinearAlgebra: det, LowerTriangular, cholesky, diag, tr, diagm, inv, norm, eigen, svd
     using SpecialFunctions: loggamma, polygamma
     using Base.Iterators: cycle
     using ColorSchemes: Paired_12
@@ -12,10 +12,10 @@ module MultivariateNormalCRP
     using LoopVectorization
     import RecipesBase: plot
 
-    export initiate_chain, advance_chain!, reset_map!
+    export initiate_chain, advance_chain!, attempt_map!, reset_map!
     export log_Pgenerative, drawNIW, stats
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain
-    export plot, plot_clusters_2d, plot_clusters_covellipses!
+    export plot, covellipses!
     export local_average_covariance, wasserstein2_distance, wasserstein1_distance_bound
     export clear_diagnostics!
 
@@ -1223,10 +1223,12 @@ module MultivariateNormalCRP
 
                 map_attempt_total += 1
                 
-                attempt_success = attempt_map!(chain_state)
+                attempt_success1 = attempt_map!(chain_state)
+                # Push the attempt a little further still
+                attempt_success2 = attempt_map!(chain_state)
                 
-                if attempt_success
-                    println("  a:$(map_attempt_total)  ^  "); flush(stdout)
+                if attempt_success1 || attempt_success2
+                    println("  a:$(map_attempt_total)  !  "); flush(stdout)
                 end
             end
 
@@ -1260,7 +1262,7 @@ module MultivariateNormalCRP
         chain_state.map_idx = lastindex(chain_state.logprob_chain)
     end
 
-    function plot_clusters_2d(clusters::Vector{Cluster}; plot_kw...)
+    function plot(clusters::Vector{Cluster}; plot_kw...)
         p = plot(
             legend_position=:outertopright, grid=:no, 
             showaxis=:no, ticks=:true; 
@@ -1277,7 +1279,7 @@ module MultivariateNormalCRP
 
     end
 
-    function plot_clusters_covellipses!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; n_std=2, mode=false, lowest_weight=nothing, plot_kw...)
+    function covellipses!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; n_std=2, mode=false, lowest_weight=nothing, plot_kw...)
 
         mu0, lambda0, psi0, nu0 = hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu0, 1)
@@ -1302,8 +1304,8 @@ module MultivariateNormalCRP
     function plot(chain_state::MNCRPchain; burn=0)
 
         if size(chain_state.hyperparams.mu, 1) == 2
-            p_map = plot_clusters_2d(chain_state.map_clusters, title="MAP state ($(length(chain_state.map_clusters)) clusters)")
-            p_current = plot_clusters_2d(chain_state.clusters, title="Current state ($(length(chain_state.clusters)) clusters)", legend=false)
+            p_map = plot(chain_state.map_clusters, title="MAP state ($(length(chain_state.map_clusters)) clusters)")
+            p_current = plot(chain_state.clusters, title="Current state ($(length(chain_state.clusters)) clusters)", legend=false)
         end
         
         lpc = chain_state.logprob_chain
@@ -1316,20 +1318,20 @@ module MultivariateNormalCRP
         vline!(p_alpha, [chain_state.map_idx], label=nothing, color=:gray)
 
         muc = reduce(hcat, mu_chain(chain_state))'
-        p_mu = plot(burn+1:size(muc, 1), muc[burn+1:end, :], grid=:no, label=nothing, title="μ chain")
+        p_mu = plot(burn+1:size(muc, 1), muc[burn+1:end, :], grid=:no, label=nothing, title="μ₀ chain")
         vline!(p_mu, [chain_state.map_idx], label=nothing, color=:gray)
 
         lc = lambda_chain(chain_state)
-        p_lambda = plot(burn+1:length(lc), lc[burn+1:end], grid=:no, label=nothing, title="λ chain")
+        p_lambda = plot(burn+1:length(lc), lc[burn+1:end], grid=:no, label=nothing, title="λ₀ chain")
         vline!(p_lambda, [chain_state.map_idx], label=nothing, color=:gray)
         
         pc = flatten.(LowerTriangular.(psi_chain(chain_state)))
         pc = reduce(hcat, pc)'
-        p_psi = plot(burn+1:size(pc, 1), pc[burn+1:end, :], grid=:no, label=nothing, title="Ψ chain")
+        p_psi = plot(burn+1:size(pc, 1), pc[burn+1:end, :], grid=:no, label=nothing, title="Ψ₀ chain")
         vline!(p_psi, [chain_state.map_idx], label=nothing, color=:gray)
 
         nc = nu_chain(chain_state)
-        p_nu = plot(burn+1:length(nc), nc[burn+1:end], grid=:no, label=nothing, title="ν chain")
+        p_nu = plot(burn+1:length(nc), nc[burn+1:end], grid=:no, label=nothing, title="ν₀ chain")
         vline!(p_nu, [chain_state.map_idx], label=nothing, color=:gray)
 
         nbc = chain_state.nbclusters_chain
