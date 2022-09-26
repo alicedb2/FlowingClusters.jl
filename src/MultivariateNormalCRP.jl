@@ -2,13 +2,14 @@ module MultivariateNormalCRP
     using Distributions: logpdf, MvNormal, InverseWishart, Normal, Cauchy, Uniform, Binomial
     using Random: randperm, shuffle, seed!
     using StatsFuns: logsumexp, logmvgamma
-    using StatsBase: sample, mean, Weights, std, percentile
+    using StatsBase: sample, mean, Weights, std, percentile, quantile
     using LinearAlgebra: det, LowerTriangular, cholesky, diag, tr, diagm, inv, norm, eigen
     using SpecialFunctions: loggamma, polygamma
     using Base.Iterators: cycle
     using ColorSchemes: Paired_12
     using Plots: plot, vline!, hline!, scatter!, @layout, grid
     using StatsPlots: covellipse!
+    using LoopVectorization
     import RecipesBase: plot
 
     export initiate_chain, advance_chain!, reset_map!
@@ -64,6 +65,47 @@ module MultivariateNormalCRP
         0, 0,
         0, 0,
         0, 0)
+    end
+
+    function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64)
+        d = size(mu, 1)
+        flatL_d = Int64(d * (d + 1) / 2)
+        if size(flatL, 1) != flatL_d
+            error("Dimension mismatch, flatL should have length $flatL_d")
+        end
+
+        L = foldflat(flatL)
+        psi = L * L'
+    
+        return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+    end
+
+    function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64)
+        d = size(mu, 1)
+        if !(d == size(L, 1))
+            error("Dimension mismatch, L should have dimension $d x $d")
+        end
+    
+        psi = L * L'
+        flatL = flatten(L)
+    
+        return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+    end
+
+    function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
+        d = size(mu, 1)
+        if !(d == size(psi, 1) == size(psi, 2))
+            error("Dimension mismatch, L should have dimension $d x $d")
+        end
+    
+        L = cholesky(psi).L
+        flatL = flatten(L)
+    
+        return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+    end
+
+    function MNCRPhyperparams(d::Int64)
+        return MNCRPhyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(0.1, d))), 1.0 * d)
     end
 
     function clear_diagnostics!(hyperparams::MNCRPhyperparams)
@@ -174,46 +216,6 @@ module MultivariateNormalCRP
         return L
     end
 
-    function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64)
-        d = size(mu, 1)
-        flatL_d = Int64(d * (d + 1) / 2)
-        if size(flatL, 1) != flatL_d
-            error("Dimension mismatch, flatL should have length $flatL_d")
-        end
-
-        L = foldflat(flatL)
-        psi = L * L'
-    
-        return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
-    end
-
-    function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64)
-        d = size(mu, 1)
-        if !(d == size(L, 1))
-            error("Dimension mismatch, L should have dimension $d x $d")
-        end
-    
-        psi = L * L'
-        flatL = flatten(L)
-    
-        return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
-    end
-
-    function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
-        d = size(mu, 1)
-        if !(d == size(psi, 1) == size(psi, 2))
-            error("Dimension mismatch, L should have dimension $d x $d")
-        end
-    
-        L = cholesky(psi).L
-        flatL = flatten(L)
-    
-        return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
-    end
-
-    function MNCRPhyperparams(d::Int64)
-        return MNCRPhyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(1.0, d))), 1.0 * d)
-    end
 
     function dimension(hyperparams::MNCRPhyperparams)
         @assert size(hyperparams.mu, 1) == size(hyperparams.psi, 1) == size(hyperparams.psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
@@ -318,20 +320,17 @@ module MultivariateNormalCRP
                 mu_c = Array{Float64}(undef, d)
                 psi_c = Array{Float64}(undef, d, d)
                 X = Array{Float64}(undef, n, d)
-                psi_data_c = Array{Float64}(undef, n, d, d)
 
-                @inbounds for (k, x) in enumerate(cluster)
+                for (k, x) in enumerate(cluster)
                     for i in 1:d
                         X[k, i] = x[i]
                     end
                 end
 
                 # mean_x::Vector{Float64} = mean(X, dims=1)[1, :]
-                # or
                 mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
-                # or
                 # mean_x = Array{Float64}(undef, d)
-                # @inbounds for i in 1:d
+                # for i in 1:d
                 #     mean_x[i] = 0.0
                 #     for k in 1:n
                 #         mean_x[i] += X[k, i]
@@ -339,29 +338,13 @@ module MultivariateNormalCRP
                 #     mean_x[i] /= n
                 # end
 
-                @inbounds for i in 1:d
-                    for j in 1:i
-                        for k in 1:n
-                            psi_data_c[k, i, j] = (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
-                            psi_data_c[k, j, i] = psi_data_c[k, i, j]
-                        end
-                    end
-                end
-
                 # psi_c = psi + lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)'
-                # psi_c = Array{Float64}(undef, d, d)
-                @inbounds for i in 1:d
-                    for j in 1:i
-                        psi_c[i, j] = psi[i, j] + lambda * n / (lambda + n) * (mean_x[i] - mu[i]) * (mean_x[j] - mu[j])
-                        psi_c[j, i] = psi_c[i, j]
-                    end
-                end
-
                 # psi_c += sum(psi_data_c, dims=1)[1, :, :]
-                @inbounds for i in 1:d
-                    for j in 1:i
+                for j in 1:d
+                    for i in 1:j
+                        psi_c[i, j] = psi[i, j] + lambda * n / (lambda + n) * (mean_x[i] - mu[i]) * (mean_x[j] - mu[j])
                         for k in 1:n
-                            psi_c[i, j] += psi_data_c[k, i, j]
+                            psi_c[i, j] += (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
                         end
                         psi_c[j, i] = psi_c[i, j]
                     end
@@ -439,12 +422,11 @@ module MultivariateNormalCRP
     
     end
 
-    function add_to_state_gibbs!(element::Vector{Float64}, list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
+    function add_to_state_gibbs!(element::Vector{Float64}, list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy=false)
 
         # Clean up just in case to make sure
         # the only empty cluster will be the one from
         # the CRP with probability prop to alpha
-        # filter!(c -> length(c) > 0, list_of_clusters)
 
         @assert all(!isempty(c) for c in list_of_clusters)
 
@@ -462,35 +444,21 @@ module MultivariateNormalCRP
     
         crp_log_weights = [log(length(c)) - log(alpha + Nminus1) for c in list_of_clusters]    
             
-        niw_log_weights = [
-                (
-                 log_Zniw(union(element_set, c), mu, lambda, psi, nu) 
-                - log_Zniw(c, mu, lambda, psi, nu)
-                - d / 2 * log(2pi)
-                ) 
-            for c in list_of_clusters
-            ]
-        
-        # despair
-        # foo = []
-        # K = length(list_of_clusters)
-        # N = 1 + sum(Float64[length(c) for c in list_of_clusters])
-        # for c in list_of_clusters
-        #     push!(foo, K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + loggamma(length(c) + 1) + log_Zniw(union(element_set, c), mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - (length(c) + 1) * d/2 * log(2pi) + sum(Float64[loggamma(length(c2)) + log_Zniw(c2, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - length(c2) * d/2 * log(2pi) for c2 in list_of_clusters if !(c2 === c)]))
-        # end
-        # push!(foo, (K + 1) * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + log_Zniw(element_set, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - d/2 * log(2pi) + sum(Float64[loggamma(length(c)) + log_Zniw(c, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - length(c) * d/2 * log(2pi) for c in list_of_clusters]))
-        # println(logsumexp(foo))
-        # println(K * log(alpha) - loggamma(alpha + N - 1) + loggamma(alpha) + sum(Float64[loggamma(length(c)) + log_Zniw(c, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - length(c) * d/2 * log(2pi) for c in list_of_clusters]))
-        # println()
-        
-        # Actually slower than using unions
-        # niw_log_weights = Array{Float64}(undef, length(list_of_clusters))
-        # for (i, c) in enumerate(list_of_clusters)
-        #     push!(c, element)
-        #     niw_log_weights[i] = log_Zniw(c, mu, lambda, psi, nu)
-        #     pop!(c, element)
-        #     niw_log_weights[i] -= log_Zniw(c, mu, lambda, psi, nu) + d/2 * log(2pi)
-        # end
+        # niw_log_weights = [
+        #         (
+        #          log_Zniw(union(element_set, c), mu, lambda, psi, nu) 
+        #         - log_Zniw(c, mu, lambda, psi, nu)
+        #         - d / 2 * log(2pi)
+        #         ) 
+        #     for c in list_of_clusters
+        #     ]
+        niw_log_weights = Array{Float64}(undef, length(list_of_clusters))
+        for (i, c) in enumerate(list_of_clusters)
+            push!(c, element)
+            niw_log_weights[i] = log_Zniw(c, mu, lambda, psi, nu)
+            pop!(c, element)
+            niw_log_weights[i] -= log_Zniw(c, mu, lambda, psi, nu) + d/2 * log(2pi)
+        end
         
         # Add single empty cluster to potential choice with its associated weights
         empty_cluster = Cluster()
@@ -499,21 +467,19 @@ module MultivariateNormalCRP
         push!(niw_log_weights, log_Zniw(element_set, mu, lambda, psi, nu) 
                              - log_Zniw(nothing, mu, lambda, psi, nu) 
                              - d / 2 * log(2pi))
-    
 
-
-        # This should be naturally normalized but somehow no?!
         unnorm_logPgen = [crp + niw for (crp, niw) in zip(crp_log_weights, niw_log_weights)]
-        # println(logsumexp(unnorm_logPgen))
         norm_logPgen = unnorm_logPgen .- logsumexp(unnorm_logPgen)
     
-        # Gibbs
-        probs = Weights(exp.(norm_logPgen))
-        selected_cluster = sample(list_of_clusters, probs)
-        
+        if !greedy
+            # Gibbs
+            probs = Weights(exp.(norm_logPgen))
+            selected_cluster = sample(list_of_clusters, probs)
+        else
         # greedy Gibbs
-        # max_prob, max_idx = findmax(norm_logp)
-        # selected_cluster = list_of_clusters[max_idx]
+            _, max_idx = findmax(norm_logPgen)
+            selected_cluster = list_of_clusters[max_idx]
+        end
         
         # N1 = sum(length(c) for c in list_of_clusters)
         # @assert N1 == Nminus1
@@ -525,11 +491,16 @@ module MultivariateNormalCRP
         
     end
 
-    function advance_clusters_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
+    function advance_clusters_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy=false)
     
         elements = shuffle([e for c in list_of_clusters for e in c])
     
         for e in elements
+
+            # This is just some complicated code to go with
+            # that shuffle so that we can go over every
+            # element exactly once even though they are
+            # hidden in sets in a list
             N = sum(length(c) for c in list_of_clusters)
             for (ci, c) in enumerate(list_of_clusters)
                 if e in c
@@ -540,10 +511,9 @@ module MultivariateNormalCRP
                     break
                 end
             end
-            @assert sum(length(c) for c in list_of_clusters) == N - 1
+            # @assert sum(length(c) for c in list_of_clusters) == N - 1
 
-            add_to_state_gibbs!(e, list_of_clusters, hyperparams)   
-        
+            add_to_state_gibbs!(e, list_of_clusters, hyperparams; greedy=greedy)   
         end
     
     end
@@ -1110,7 +1080,7 @@ module MultivariateNormalCRP
     end
 
 
-    function advance_full_sequential_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
+    function advance_full_sequential_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy=false)
 
         # data = Vector{Float64}[datum for cluster in list_of_clusters for datum in cluster]
         # data = data[randperm(size(data, 1))]
@@ -1119,7 +1089,7 @@ module MultivariateNormalCRP
         empty!(list_of_clusters)
 
         for element in data
-            add_to_state_gibbs!(element, list_of_clusters, hyperparams)
+            add_to_state_gibbs!(element, list_of_clusters, hyperparams; greedy=greedy)
         end
 
     end
@@ -1136,14 +1106,8 @@ module MultivariateNormalCRP
         chain_state = MNCRPchain([], hyperparams, [], [], [], [], hyperparams, -Inf, 1)
 
         chain_state.hyperparams_chain = [hyperparams]
-
-        # if !isempty(psi_data_c)
-        #     pop!(psi_data_c)
-        # end
-        # push!(psi_data_c, Array{Float64}(undef, n, d, d))
-
-        # will be suffled and replaced rightaway full_sequential_gibbs move
         
+        # lazy, will be suffled and replaced rightaway full_sequential_gibbs move        
         chain_state.clusters = [Set{Vector{Float64}}(data)]
         advance_full_sequential_gibbs!(chain_state.clusters, chain_state.hyperparams)
         # chain_state.clusters = [Set{Vector{Float64}}([datum]) for datum in data]
@@ -1170,6 +1134,7 @@ module MultivariateNormalCRP
 
         split_total = 0
         merge_total = 0
+        map_attempt_total = 0
 
         for step in 1:nb_steps
             print("\r$(step) -> $(nb_steps)"); flush(stdout)
@@ -1199,8 +1164,8 @@ module MultivariateNormalCRP
             
             split_total += hp.accepted_split
             merge_total += hp.accepted_merge
-            print(" spc:$(round(split_total/step, digits=2))")
-            print(" mpc:$(round(merge_total/step, digits=2))")
+            print("  spc:$(round(split_total/step, digits=1))")
+            print("  mpc:$(round(merge_total/step, digits=1))")
             flush(stdout)
 
             hp.accepted_split = 0
@@ -1217,6 +1182,8 @@ module MultivariateNormalCRP
             end
 
             push!(chain_state.nbclusters_chain, length(chain_state.clusters))
+
+            print("  #cl:$(length(chain_state.clusters))"); flush(stdout)
 
 
             # Metropolis-Hastings moves over each parameter
@@ -1247,18 +1214,43 @@ module MultivariateNormalCRP
             # logprob and MAP
             logprob = log_Pgenerative(chain_state.clusters, chain_state.hyperparams)
             push!(chain_state.logprob_chain, logprob)
+
+            history_length = 1000
+            near_logprob_chain = chain_state.logprob_chain[max(1, end - history_length):end]
             
-            if logprob > chain_state.map_logprob
-                chain_state.map_logprob = logprob
-                chain_state.map_clusters = deepcopy(chain_state.clusters)
-                chain_state.map_hyperparams = deepcopy(chain_state.hyperparams)
-                chain_state.map_idx = lastindex(chain_state.logprob_chain)
-                println(" ^"); flush(stdout)
+            if (length(chain_state.logprob_chain) > 100 
+               && logprob > quantile(near_logprob_chain, 0.95))
+
+                map_attempt_total += 1
+                
+                attempt_success = attempt_map!(chain_state)
+                
+                if attempt_success
+                    println("  a:$(map_attempt_total)  ^  "); flush(stdout)
+                end
             end
+
+            print("  a:$(map_attempt_total)  ")
+
+        end
+    end
+
+    function attempt_map!(chain_state::MNCRPchain)
+            
+        map_clusters_attempt = deepcopy(chain_state.clusters)
+        advance_clusters_gibbs!(map_clusters_attempt, chain_state.hyperparams, greedy=true)
+        attempt_logprob = log_Pgenerative(map_clusters_attempt, chain_state.hyperparams)
+
+        if attempt_logprob > chain_state.map_logprob
+            chain_state.map_logprob = attempt_logprob
+            chain_state.map_clusters = deepcopy(map_clusters_attempt)
+            chain_state.map_hyperparams = deepcopy(chain_state.hyperparams)
+            chain_state.map_idx = lastindex(chain_state.logprob_chain)
+            return true
         end
 
-        println("..$(length(chain_state.clusters))"); flush(stdout)
-
+        return false
+    # println("..$(length(chain_state.clusters))"); flush(stdout)
     end
 
     function reset_map!(chain_state::MNCRPchain)
