@@ -46,7 +46,7 @@ function synthetic(;nb_pseudoabsences=0)
         samples = hcat(samples, pseudoabsences)
     end
 
-    display(plot_clusters_2d(synthetic_state, title="Fake data"))
+    # display(plot_clusters_2d(synthetic_state, title="Fake data"))
 
     # Seed the MCMC
     seed!(41)
@@ -56,10 +56,10 @@ function synthetic(;nb_pseudoabsences=0)
     synthetic_chain = initiate_chain(data)
 
     # Profile split-merge moves
-    @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_hyperparamsmh=0, fullseq_prob=0.0)
+    # @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_hyperparamsmh=0, fullseq_prob=0.0)
 
     # Profile Gibbs moves
-    # @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_hyperparamsmh=0, fullseq_prob=0.0)
+    @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_hyperparamsmh=0, fullseq_prob=0.0)
 
     # Profile Metropolis-Hastings moves for parameters
     # @time @profview advance_chain!(synthetic_chain, nb_steps=200, nb_gibbs=0, nb_splitmerge=0, nb_hyperparamsmh=10, fullseq_prob=0.0)
