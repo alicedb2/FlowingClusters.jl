@@ -10,9 +10,10 @@ using LinearAlgebra
 using ColorSchemes
 using Serialization
 using StatsPlots
+# using Plots
 using Random: seed!
-# using GeoMakie
-# using CairoMakie
+using GeoMakie
+using CairoMakie
 
 # temperature, precipitation = SimpleSDMPredictor(WorldClim, BioClim, [1, 12])
 
@@ -48,25 +49,26 @@ seed!(43)
 shuffled_dataset = dataset[randperm(length(dataset))]
 subdatasets = [Vector{Vector{Float64}}(x) for x in Iterators.partition(shuffled_dataset, 1032)]
 
-chain_states = []
-for (i, sds) in enumerate(subdatasets)
-    _chain_state = initiate_chain(sds)
-    push!(chain_states, _chain_state)
-    advance_chain!(_chain_state, nb_steps=20000, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1, fullseq_prob=0.005)
-    serialize("results/aedes_albopictus_tempprec_partition$(i)_$(length(sds))subsamples.chainstate", _chain_state)
-end
+# chain_states = []
+# for (i, sds) in enumerate(subdatasets)
+#     _chain_state = initiate_chain(sds)
+#     push!(chain_states, _chain_state)
+#     advance_chain!(_chain_state, nb_steps=20000, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1, fullseq_prob=0.005)
+#     serialize("results/aedes_albopictus_tempprec_partition$(i)_$(length(sds))subsamples.chainstate", _chain_state)
+# end
 
 #######################################
 
-chain_state = deserialize("../results/aedes_albopictus_tempprec_partition5_1032subsamples.chainstate")
+chain_state = deserialize("results/aedes_albopictus_tempprec_partition5_1032subsamples.chainstate")
 
-chain_state = initiate_chain(subdatasets[1])
+# chain_state = initiate_chain(subdatasets[1])
 # advance_chain!(chain_state, nb_steps=1000, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1)
 
 #######################################
 
 obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
 sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2], rev=true)
+
 
 
 fig = Figure(resolution=(2000, 1200));
@@ -79,35 +81,21 @@ ga = GeoAxis(
 for (ci, sizeci) in sorted_clusters
     _cluster = obs_clusters[ci]
     GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude, markersize=4, label="$sizeci")
-
 end
+
 display(fig)
-
-#######################################
-
-obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
-sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2], rev=true)
-
-cmap = ColorSchemes.Paired_12
-
-fig = Figure(resolution=(2000, 2000));
-ga = GeoAxis(
-    fig[1, 1]; # any cell of the figure's layout
-    dest = "+proj=wintri", # the CRS in which you want to plot
-    coastlines = true # plot coastlines from Natural Earth, as a reference.
-);
 
 #######################################
 
 
 p = histogram2d(unique_obs.temperature, unique_obs.precipitation, fmt=:png, bins=100, legend=:false, axis=:false);
 covellipses!(chain_state.map_clusters, chain_state.map_hyperparams, 
-       lowest_weight=10, n_std=2,
+       lowest_weight=0, n_std=2,
        scalematrix=scale_matrix, offset=offset,
        legend=:false, fillcolor=:false, fillalpha=0.0, 
        linewidth=2, linealpha=1.0, linecolor=:deeppink3)
-xlabel!("Temperature (ᵒC)")
-ylabel!("Precipitation (mm/year)")
+StatsPlots.xlabel!("Temperature (ᵒC)")
+StatsPlots.ylabel!("Precipitation (mm/year)")
 display(p)       
 #######################################
 

@@ -321,17 +321,17 @@ module MultivariateNormalCRP
             
             X = Array{Float64}(undef, n, d)
             for (k, x) in enumerate(cluster)
-                for i in 1:d
+                @inbounds for i in 1:d
                     X[k, i] = x[i]
                 end
             end
 
             mean_x::Vector{Float64} = sum(X, dims=1)[1, :] / n
             
-            for j in 1:d
-                for i in 1:j
+            @inbounds for j in 1:d
+                @inbounds for i in 1:j
                     psi_c[i, j] = psi[i, j] + lambda * n / (lambda + n) * (mean_x[i] - mu[i]) * (mean_x[j] - mu[j])
-                    for k in 1:n
+                    @inbounds @simd for k in 1:n
                         psi_c[i, j] += (X[k, i] - mean_x[i]) * (X[k, j] - mean_x[j])
                     end
                     psi_c[j, i] = psi_c[i, j]
