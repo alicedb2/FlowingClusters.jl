@@ -5,27 +5,34 @@ using CSV
 using DataFrames
 using Random
 using StatsBase
-using StatsPlots
 using Ripserer
 using LinearAlgebra
 using ColorSchemes
 using Serialization
+using StatsPlots
+using Random: seed!
+# using GeoMakie
+# using CairoMakie
 
-temperature, precipitation = SimpleSDMPredictor(WorldClim, BioClim, [1, 12])
+# temperature, precipitation = SimpleSDMPredictor(WorldClim, BioClim, [1, 12])
 
-obs = DataFrame(CSV.File("/Users/alice/Documents/Postdoc/MultivariateNormalCRP/test/aedes_albopictus.csv", delim="\t"))
+# obs = DataFrame(CSV.File("data/aedes_albopictus.csv", delim="\t"))
+obs = deserialize("data/aedes_albopictus_tempprec.dataframe")
 
 # Remove rows with missing latitude and/or longitude
 # and then with missing temperature and/or precipitation
-filter!(row -> !ismissing(row.decimalLatitude) && !ismissing(row.decimalLongitude), obs)
-obs.temperature = temperature[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
-obs.precipitation = precipitation[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
-filter!(row -> !isnothing(row.temperature) && !isnothing(row.precipitation), obs)
-obs.temperature = Vector{Float64}(obs.temperature)
-obs.precipitation = Vector{Float64}(obs.precipitation)
 
-obs.normalized_temperature = (obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature)
-obs.normalized_precipitation = (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation)
+# filter!(row -> !ismissing(row.decimalLatitude) && !ismissing(row.decimalLongitude), obs)
+# obs.temperature = temperature[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
+# obs.precipitation = precipitation[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
+# filter!(row -> !isnothing(row.temperature) && !isnothing(row.precipitation), obs)
+# obs.temperature = Vector{Float64}(obs.temperature)
+# obs.precipitation = Vector{Float64}(obs.precipitation)
+
+# obs.normalized_temperature = (obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature)
+# obs.normalized_precipitation = (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation)
+offset = [mean(obs.temperature), mean(obs.precipitation)]
+scale_matrix = [1/std(obs.temperature) 0.0; 0.0 1/std(obs.precipitation)]
 
 # Keep records with unique temps/precs
 # (although they'll naturally be dropped
@@ -37,40 +44,108 @@ unique2nonunique = Dict([Vector{Float64}(group[1, [:normalized_temperature, :nor
 
 # Prepare dataset for MultivariateNormalCRP
 dataset = 1.0 * collect(eachrow(hcat(unique_obs.normalized_temperature, unique_obs.normalized_precipitation)))
+seed!(43)
 shuffled_dataset = dataset[randperm(length(dataset))]
+subdatasets = [Vector{Vector{Float64}}(x) for x in Iterators.partition(shuffled_dataset, 1032)]
 
-# draw without replacement
-nb_subsamples = 1000
-subsampled_dataset = shuffled_dataset[1:nb_subsamples]
+chain_states = []
+for (i, sds) in enumerate(subdatasets)
+    _chain_state = initiate_chain(sds)
+    push!(chain_states, _chain_state)
+    advance_chain!(_chain_state, nb_steps=20000, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1, fullseq_prob=0.005)
+    serialize("results/aedes_albopictus_tempprec_partition$(i)_$(length(sds))subsamples.chainstate", _chain_state)
+end
 
 #######################################
 
-chain_state = initiate_chain(subsampled_dataset)
-advance_chain!(chain_state, nb_steps=100, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1)
+chain_state = deserialize("../results/aedes_albopictus_tempprec_partition5_1032subsamples.chainstate")
+
+chain_state = initiate_chain(subdatasets[1])
+# advance_chain!(chain_state, nb_steps=1000, nb_splitmerge=50, splitmerge_t=2, nb_gibbs=1)
 
 #######################################
 
 obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
-sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2])
+sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2], rev=true)
 
-fig = Figure(resolution=(2000, 1500));
+
+fig = Figure(resolution=(2000, 1200));
 ga = GeoAxis(
     fig[1, 1]; # any cell of the figure's layout
     dest = "+proj=wintri", # the CRS in which you want to plot
     coastlines = true # plot coastlines from Natural Earth, as a reference.
 );
 
-# _cluster = obs_clusters[sorted_clusters[end-4][1]]
-# GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude, markersize=4)
-
-for (ci, _) in sorted_clusters[end:-1:end-10]
+for (ci, sizeci) in sorted_clusters
     _cluster = obs_clusters[ci]
-    GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude, markersize=4)
+    GeoMakie.scatter!(ga, _cluster.decimalLongitude, _cluster.decimalLatitude, markersize=4, label="$sizeci")
+
 end
 display(fig)
+
+#######################################
+
+obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
+sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2], rev=true)
+
+cmap = ColorSchemes.Paired_12
+
+fig = Figure(resolution=(2000, 2000));
+ga = GeoAxis(
+    fig[1, 1]; # any cell of the figure's layout
+    dest = "+proj=wintri", # the CRS in which you want to plot
+    coastlines = true # plot coastlines from Natural Earth, as a reference.
+);
+
 #######################################
 
 
+p = histogram2d(unique_obs.temperature, unique_obs.precipitation, fmt=:png, bins=100, legend=:false, axis=:false);
+covellipses!(chain_state.map_clusters, chain_state.map_hyperparams, 
+       lowest_weight=10, n_std=2,
+       scalematrix=scale_matrix, offset=offset,
+       legend=:false, fillcolor=:false, fillalpha=0.0, 
+       linewidth=2, linealpha=1.0, linecolor=:deeppink3)
+xlabel!("Temperature (ᵒC)")
+ylabel!("Precipitation (mm/year)")
+display(p)       
+#######################################
+
+obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
+sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2])
+
+fig = plot(legend=:true)
+for (ci, sizeci) in sorted_clusters[end:end]
+    _cluster = obs_clusters[ci]
+    StatsPlots.scatter!(_cluster.temperature, _cluster.precipitation, 
+    markersize=4, markerstrokewidth=0, label="$sizeci")
+end
+xflip!(true)
+Plots.xlims!(-10, 35)
+display(fig)
+
+#######################################
+
+# p = histogram2d(unique_obs.normalized_temperature, unique_obs.normalized_precipitation, fmt=:png, bins=100, legend=:false, axis=:false);
+# covellipses!(chain_state.map_clusters, chain_state.map_hyperparams, 
+#        lowest_weight=10, n_std=2,
+#        legend=:false, fillcolor=:false, fillalpha=0.0, 
+#        linewidth=2, linealpha=1.0, linecolor=:deeppink3)
+# display(p)
+
+#######################################
+
+p = histogram2d(unique_obs.temperature, unique_obs.precipitation, fmt=:png, bins=100, legend=:false, axis=:false);
+covellipses!(chain_state.map_clusters, chain_state.map_hyperparams, 
+       lowest_weight=10, n_std=2, 
+       scalematrix=scale_matrix, offset=offset,
+       legend=:false, fillcolor=:false, fillalpha=0.0, 
+       linewidth=2, linealpha=1.0, linecolor=:deeppink3);
+xlabel!("Temperature (ᵒC)");
+ylabel!("Precipitation (mm/year)");
+display(p)
+
+#######################################
 
 _clusters = chain_state.map_clusters
 _hyperparams = chain_state.map_hyperparams

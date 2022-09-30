@@ -60,7 +60,6 @@ function synthetic(;nb_pseudoabsences=0)
 
     # Profile Gibbs moves
     @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=5, nb_splitmerge=0, nb_hyperparamsmh=0, fullseq_prob=0.0)
-
     # Profile Metropolis-Hastings moves for parameters
     # @time @profview advance_chain!(synthetic_chain, nb_steps=200, nb_gibbs=0, nb_splitmerge=0, nb_hyperparamsmh=10, fullseq_prob=0.0)
 
