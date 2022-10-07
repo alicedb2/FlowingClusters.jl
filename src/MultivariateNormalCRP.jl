@@ -103,7 +103,7 @@ module MultivariateNormalCRP
     end
 
     function MNCRPhyperparams(d::Int64)
-        return MNCRPhyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(0.1, d))), 1.0 * d)
+        return MNCRPhyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(1.0, d))), 1.0 * d)
     end
 
     function clear_diagnostics!(hyperparams::MNCRPhyperparams)
@@ -297,11 +297,11 @@ module MultivariateNormalCRP
             # We are unfortunately going to have
             # to optimize the following
             #
-            #     mean_x = mean(cluster)
-            #     psi_c = (psi 
-            #             + sum((x - mean_x) * (x - mean_x)' for x in cluster) 
-            #             + lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)')
-            #     mu_c = (lambda * mu + n * mean_x) / (lambda + n)
+            # mean_x = mean(cluster)
+            # psi_c = (psi 
+            #         + sum((x - mean_x) * (x - mean_x)' for x in cluster) 
+            #         + lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)')
+            # mu_c = (lambda * mu + n * mean_x) / (lambda + n)
 
             mu_c = Array{Float64}(undef, d)
             psi_c = Array{Float64}(undef, d, d)
@@ -364,11 +364,11 @@ module MultivariateNormalCRP
 
         mu, lambda, psi, nu = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
         
-        lognum = d/2 * log(2pi) + nu * d/2 * log(2) + logmvgamma(d, nu / 2)
+        log_numerator = d/2 * log(2pi) + nu * d/2 * log(2) + logmvgamma(d, nu / 2)
     
-        logdenum = d/2 * log(lambda) + nu / 2 * log(det(psi))
+        log_denominator = d/2 * log(lambda) + nu / 2 * log(det(psi))
 
-        return lognum - logdenum
+        return log_numerator - log_denominator
     
     end
 
@@ -410,19 +410,14 @@ module MultivariateNormalCRP
 
     function add_to_state_gibbs!(element::Vector{Float64}, list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy::Bool=false)
 
-        # Clean up just in case to make sure
-        # the only empty cluster will be the one from
-        # the CRP with probability prop to alpha
 
         @assert all(!isempty(c) for c in list_of_clusters)
 
         element_set = Cluster([element])
 
-        # for c in list_of_clusters
-        #     @assert !in(element, c)
-        # end
         # element is not in any cluster in list_of_clusters
-        # but N includes all elements including that one
+        # so the total number of elements in the clusters
+        # is now Nminus1
         Nminus1 = sum([length(c) for c in list_of_clusters])
         
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
@@ -469,17 +464,13 @@ module MultivariateNormalCRP
             selected_cluster = list_of_clusters[max_idx]
         end
         
-        # N1 = sum(length(c) for c in list_of_clusters)
-        # @assert N1 == Nminus1
         push!(selected_cluster, element)
-        # N2 = sum(length(c) for c in list_of_clusters)
-        # @assert N2 == N1 + 1 "$N1 $N2) "
 
         filter!(c -> length(c) > 0, list_of_clusters)
         
     end
 
-    function advance_clusters_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy::Bool=false)
+    function advance_clusters_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy=false)
     
         elements = shuffle([el for cluster in list_of_clusters for el in cluster])
     
@@ -853,6 +844,7 @@ module MultivariateNormalCRP
         end
 
         N = sum(length(c) for c in list_of_clusters)
+        K = length(list_of_clusters)
 
         alpha = hyperparams.alpha
     
@@ -864,11 +856,12 @@ module MultivariateNormalCRP
 
         # because we propose moves on the log scale
         # but need them uniform over alpha > 0
+        # before feeding them to the hyperprior
         log_hastings = proposed_logalpha - log(alpha)
         log_acc += log_hastings
 
-        log_acc += length(list_of_clusters) * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
-        log_acc -= length(list_of_clusters) * log(alpha) - loggamma(alpha + N) + loggamma(alpha)
+        log_acc += K * log(proposed_alpha) - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
+        log_acc -= K * log(alpha) - loggamma(alpha + N) + loggamma(alpha)
 
         log_acc += log(jeffreys_alpha(proposed_alpha, N)) - log(jeffreys_alpha(alpha, N))
 
@@ -943,9 +936,9 @@ module MultivariateNormalCRP
                     - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(nothing, mu, lambda, psi, nu) 
                      for c in list_of_clusters)
 
-        # We leave loghastings = 0.0 because apparently the
-        # Jeffreys prior over lambda is the logarithmic prior
-        # and moves are symmetric on the log scale.
+        # We leave loghastings = 0.0 because the
+        # Jeffreys prior over lambda is the logarithmic 
+        # prior and moves are symmetric on the log scale.
 
         log_acc = min(0.0, log_acc)
         
@@ -1015,45 +1008,6 @@ module MultivariateNormalCRP
     
     end
 
-    function _advance_psi!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
-                          random_order=true, step_scale=0.1)
-    
-        mu, lambda, nu = hyperparams.mu, hyperparams.lambda, hyperparams.nu
-        d = size(mu, 1)
-
-        size_flatL = Int64(d * (d + 1) / 2)
-
-        step_distrib = Normal(0.0, step_scale)    
-        
-        
-        proposed_flatL = copy(hyperparams.flatL) .+ rand(step_distrib, size_flatL)
-        proposed_L = foldflat(proposed_flatL)
-        proposed_psi = proposed_L * proposed_L'
-        
-        log_acc = sum(log_Zniw(cluster, mu, lambda, proposed_psi, nu) - log_Zniw(nothing, mu, lambda, proposed_psi, nu)
-                    - log_Zniw(cluster, mu, lambda, hyperparams.psi, nu) + log_Zniw(nothing, mu, lambda, hyperparams.psi, nu) 
-                    for cluster in list_of_clusters)
-                
-        log_hastings = sum((d:-1:1) .* (log.(abs.(diag(proposed_L))) - log.(abs.(diag(hyperparams.L)))))
-        log_acc += log_hastings
-
-        log_acc += d * (log(det(hyperparams.psi)) - log(det(proposed_psi)))
-            
-        log_acc = min(0.0, log_acc)
-        
-        if log(rand()) < log_acc
-            flatL!(hyperparams, proposed_flatL)
-            for i in 1:size_flatL
-                hyperparams.accepted_flatL[i] += 1
-            end
-        else
-            for i in 1:size_flatL
-                hyperparams.rejected_flatL[i] += 1
-            end
-        end
-                
-    end
-
     function advance_nu!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
                          step_type="gaussian", step_scale=0.2)
 
@@ -1068,6 +1022,8 @@ module MultivariateNormalCRP
         mu, lambda, psi, nu = hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
 
         # x = nu - (d - 1)
+        # we use moves on the log of x
+        # so as to always keep nu > d - 1 
         current_logx = log(nu - (d - 1))
         proposed_logx = current_logx + rand(step_distrib)
         proposed_nu = d - 1 + exp(proposed_logx)
@@ -1103,12 +1059,13 @@ module MultivariateNormalCRP
     # improper a-posteriori probability in nu and psi
     function jeffreys_nu(nu::Float64, d::Int64)
 
-        return sqrt(1/4 * sum(polygamma.(1, nu/2 .+ 1/2 .- 1/2 * (1:d))) - d/2/nu)
+        # return sqrt(1/4 * sum(polygamma.(1, nu/2 .+ 1/2 .- 1/2 * (1:d))))
+        return sqrt(1/4 * sum(polygamma(1, nu/2 + (1 - i)/2) for i in 1:d))
 
     end
 
 
-    function advance_full_sequential_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy::Bool=false)
+    function advance_full_sequential_gibbs!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy=false)
 
         # data = Vector{Float64}[datum for cluster in list_of_clusters for datum in cluster]
         # data = data[randperm(size(data, 1))]
@@ -1230,7 +1187,7 @@ module MultivariateNormalCRP
         
             # Gibbs sweep
             for i in 1:nb_gibbs
-                advance_clusters_gibbs!(chain_state.clusters, chain_state.hyperparams; greedy=false)
+                advance_clusters_gibbs!(chain_state.clusters, chain_state.hyperparams)
             end
 
             push!(chain_state.nbclusters_chain, length(chain_state.clusters))
@@ -1287,7 +1244,7 @@ module MultivariateNormalCRP
             push!(chain_state.logprob_chain, logprob)
 
             # MAP
-            history_length = 1000
+            history_length = 500
             short_logprob_chain = chain_state.logprob_chain[max(1, end - history_length):end]
             
             if logprob > quantile(short_logprob_chain, 0.95)
@@ -1331,7 +1288,7 @@ module MultivariateNormalCRP
 
         if attempt_logprob > chain_state.map_logprob
             chain_state.map_logprob = attempt_logprob
-            chain_state.map_clusters = deepcopy(map_clusters_attempt)
+            chain_state.map_clusters = map_clusters_attempt
             chain_state.map_hyperparams = deepcopy(chain_state.hyperparams)
             chain_state.map_idx = lastindex(chain_state.logprob_chain)
             return true
