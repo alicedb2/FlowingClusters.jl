@@ -23,15 +23,18 @@ obs = deserialize("data/aedes_albopictus_tempprec.dataframe")
 # Remove rows with missing latitude and/or longitude
 # and then with missing temperature and/or precipitation
 
-# filter!(row -> !ismissing(row.decimalLatitude) && !ismissing(row.decimalLongitude), obs)
+filter!(row -> !ismissing(row.decimalLatitude) && !ismissing(row.decimalLongitude), obs)
 # obs.temperature = temperature[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
 # obs.precipitation = precipitation[obs, latitude=:decimalLatitude, longitude=:decimalLongitude]
-# filter!(row -> !isnothing(row.temperature) && !isnothing(row.precipitation), obs)
-# obs.temperature = Vector{Float64}(obs.temperature)
-# obs.precipitation = Vector{Float64}(obs.precipitation)
+filter!(row -> !isnothing(row.temperature) && !isnothing(row.precipitation), obs)
 
-# obs.normalized_temperature = (obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature)
-# obs.normalized_precipitation = (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation)
+
+filter!(row -> row.basisOfRecord == "HUMAN_OBSERVATION" || row.basisOfRecord == "OCCURRENCE" || obs.basisOfRecord == "MATERIAL_SAMPLE", obs)
+obs.temperature = Vector{Float64}(obs.temperature)
+obs.precipitation = Vector{Float64}(obs.precipitation)
+obs.normalized_temperature = (obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature)
+obs.normalized_precipitation = (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation)
+
 offset = [mean(obs.temperature), mean(obs.precipitation)]
 scale_matrix = [1/std(obs.temperature) 0.0; 0.0 1/std(obs.precipitation)]
 
@@ -45,6 +48,7 @@ unique2nonunique = Dict([Vector{Float64}(group[1, [:normalized_temperature, :nor
 
 # Prepare dataset for MultivariateNormalCRP
 dataset = 1.0 * collect(eachrow(hcat(unique_obs.normalized_temperature, unique_obs.normalized_precipitation)))
+
 seed!(43)
 shuffled_dataset = dataset[randperm(length(dataset))]
 subdatasets = [Vector{Vector{Float64}}(x) for x in Iterators.partition(shuffled_dataset, 1032)]
@@ -69,8 +73,6 @@ chain_state = deserialize("results/aedes_albopictus_tempprec_partition5_1032subs
 obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
 sorted_clusters = sort([(i, length(c)) for (i, c) in enumerate(chain_state.map_clusters)], by=x -> x[2], rev=true)
 
-
-
 fig = Figure(resolution=(2000, 1200));
 ga = GeoAxis(
     fig[1, 1]; # any cell of the figure's layout
@@ -87,16 +89,16 @@ display(fig)
 
 #######################################
 
-
-p = histogram2d(unique_obs.temperature, unique_obs.precipitation, fmt=:png, bins=100, legend=:false, axis=:false);
+p = histogram2d(unique_obs.temperature, unique_obs.precipitation, fmt=:png, bins=60, legend=:false, axis=:false);
 covellipses!(chain_state.map_clusters, chain_state.map_hyperparams, 
        lowest_weight=0, n_std=2,
        scalematrix=scale_matrix, offset=offset,
        legend=:false, fillcolor=:false, fillalpha=0.0, 
-       linewidth=2, linealpha=1.0, linecolor=:deeppink3)
-StatsPlots.xlabel!("Temperature (ᵒC)")
-StatsPlots.ylabel!("Precipitation (mm/year)")
-display(p)       
+       linewidth=2, linealpha=1.0, linecolor=:chartreuse3);
+StatsPlots.xlabel!("Temperature (ᵒC)");
+StatsPlots.ylabel!("Precipitation (mm/year)");
+display(p)
+
 #######################################
 
 obs_clusters = [reduce(vcat, [unique2nonunique[point] for point in cluster]) for cluster in chain_state.map_clusters]
@@ -128,9 +130,9 @@ covellipses!(chain_state.map_clusters, chain_state.map_hyperparams,
        lowest_weight=10, n_std=2, 
        scalematrix=scale_matrix, offset=offset,
        legend=:false, fillcolor=:false, fillalpha=0.0, 
-       linewidth=2, linealpha=1.0, linecolor=:deeppink3);
-xlabel!("Temperature (ᵒC)");
-ylabel!("Precipitation (mm/year)");
+       linewidth=1.5, linealpha=1.0, linecolor=:darkturquoise);
+StatsPlots.xlabel!("Temperature (ᵒC)");
+StatsPlots.ylabel!("Precipitation (mm/year)");
 display(p)
 
 #######################################
@@ -211,26 +213,26 @@ distance_matrix
 
 pds = ripserer(distance_matrix, alg=:homology)
 plot(pds)
-p = histogram2d((obs.temperature .- mean(obs.temperature)) ./ std(obs.temperature), (obs.precipitation .- mean(obs.precipitation)) ./ std(obs.precipitation), fmt=:png, bins=100, legend=:false, axis=:false)
+p = histogram2d(unique_obs.normalized_temperature, unique_obs.normalized_precipitation, bins=60, legend=:false, axis=:false)
 # p = plot_clusters_2d(_clusters, legend=false)
 
 c = ColorSchemes.magma[200];
-birth_threshold = 2
-death_threshold = 0.0
+birth_threshold = 4.2
+death_threshold = 5
 # plot_cluster_covellipses!(_clusters, _hyperparams,
 # lowest_weight=10,
 # linewidth=2, linecolor=c, fillalpha=0.0, linealpha=1.0)
 persistence_intervals = pds[2]
 for h in persistence_intervals
     if death(h) <= death_threshold
-        plot!(death_simplex(h), 
+        StatsPlots.plot!(p, death_simplex(h), 
         [Tuple(v) for v in updated_cluster_mus], 
         linewidth=3, linealpha=1.0, linecolor=c)
     end
 end
 for h in persistence_intervals
     if birth(h) <= birth_threshold
-        plot!(birth_simplex(h), 
+        StatsPlots.plot!(birth_simplex(h), 
         [Tuple(v) for v in updated_cluster_mus], 
         linewidth=2, linealpha=1.0, 
         markercolor=:black, markersize=2,

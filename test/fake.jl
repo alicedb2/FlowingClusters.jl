@@ -6,10 +6,11 @@ using StatsBase: mean
 using MultivariateNormalCRP
 using Plots
 using StatsFuns
+using BenchmarkTools
 
 include("../src/PseudoAbsences.jl")
 
-function synthetic(;nb_pseudoabsences=0)
+function synthetic(; nb_pseudoabsences=0)
     
     # Seed the synthetic data
     seed!(5558)
@@ -59,7 +60,7 @@ function synthetic(;nb_pseudoabsences=0)
     # @time @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=0, nb_splitmerge=5, nb_hyperparamsmh=0, fullseq_prob=0.0)
 
     # Profile Gibbs moves
-    @profview advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=10, nb_splitmerge=0, nb_hyperparamsmh=0, fullseq_prob=0.0)
+    @time advance_chain!(synthetic_chain, nb_steps=20, nb_gibbs=10, nb_splitmerge=0, nb_hyperparamsmh=0, fullseq_prob=0.0)
     # Profile Metropolis-Hastings moves for parameters
     # @time @profview advance_chain!(synthetic_chain, nb_steps=200, nb_gibbs=0, nb_splitmerge=0, nb_hyperparamsmh=10, fullseq_prob=0.0)
 
@@ -71,23 +72,3 @@ end
 
 # synthetic_state, synthetic_chain = synthetic(nb_pseudoabsences=16 * 25); nothing;
 synthetic_state, synthetic_chain = synthetic(); nothing;
-
-
-# advance_chain!(synthetic_chain, nb_steps=300)
-# plot_chain(synthetic_chain, burn=100)
-
-
-# foo = [0.1, 0.2]
-# cs = synthetic_chain.clusters
-# params = synthetic_chain.hyperparams
-# lps1 = []
-# for c in cs
-#     push!(c, foo)
-#     push!(lps1, log_Pgenerative(cs, ps))
-#     pop!(c, foo)
-# end
-# push!(cs, Set{Vector{Float64}}([foo]))
-# push!(lps1, log_Pgenerative(cs, ps))
-# pop!(cs)
-
-# log_Pgenerative(cs, params), logsumexp(lps1)
