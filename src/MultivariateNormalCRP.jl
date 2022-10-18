@@ -1278,6 +1278,10 @@ module MultivariateNormalCRP
 
     end
 
+    function initiate_chain(filename::String)
+        return load(filename)["chain"]
+    end
+
     function initiate_chain(data::Vector{Vector{Float64}})
 
         @assert all(size(e, 1) == size(first(data), 1) for e in data)
@@ -1481,7 +1485,7 @@ module MultivariateNormalCRP
             
             if checkpoint_every > 0 && 
                 (mod(length(chain.logprob_chain), checkpoint_every) == 0
-                || length(chain.logprob_chain) == 1)
+                || last_checkpoint == -1)
 
                 last_checkpoint = length(chain.logprob_chain)
                 filename = "$(checkpoint_prefix)_pid$(getpid())_iter$(last_checkpoint).jld2"
@@ -1508,7 +1512,7 @@ module MultivariateNormalCRP
             print("    #cl:$(length(chain.clusters)), #cl>1:$(length(filter(x -> length(x) > 1, chain.clusters)))")
             print("    f:$(nb_fullseq_moves)")
             print("    mapattsuc:$(nb_map_attemps)/$(nb_map_successes)")
-            print("    lastmap:$(length(chain.logprob_chain) - last_map_idx)")
+            print("    lastmap@$(last_map_idx)")
             print("    lchpt@$(last_checkpoint)")
             print("       ")
             if map_success
