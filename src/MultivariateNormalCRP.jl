@@ -588,7 +588,7 @@ module MultivariateNormalCRP
     end
 
     # Return the log-likelihood of the model
-    function log_Pgenerative(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; hyperprior=true)
+    function log_Pgenerative(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; hyperpriors=true)
     
         @assert all(length(c) > 0 for c in list_of_clusters)
         
