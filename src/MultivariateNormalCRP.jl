@@ -1,5 +1,5 @@
 module MultivariateNormalCRP
-    using Distributions: MvNormal, InverseWishart, Normal, Cauchy, Uniform
+    using Distributions: MvNormal, InverseWishart, Normal, Cauchy, Uniform, Multinomial
     using Random: randperm, shuffle, seed!
     using StatsFuns: logsumexp, logmvgamma
     using StatsBase: sample, mean, Weights, std, percentile, quantile
@@ -20,7 +20,7 @@ module MultivariateNormalCRP
     export log_Pgenerative, drawNIW, stats
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain
     export plot, covellipses!
-    export local_average_covariance, wasserstein2_distance, wasserstein1_distance_bound
+    export local_average_covprec, wasserstein2_distance, wasserstein1_distance_bound
 
     mutable struct Cluster
         elements::Set{Vector{Float64}}
@@ -612,7 +612,6 @@ module MultivariateNormalCRP
 
         if hyperpriors
             # mu0 has a flat hyperpriors
-
             # alpha hyperprior
             log_hyperpriors += log(jeffreys_alpha(alpha, N))
             # lambda hyperprior
@@ -630,7 +629,8 @@ module MultivariateNormalCRP
     function add_to_state_gibbs!(element::Vector{Float64}, list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; greedy::Bool=false)
 
 
-        @assert all(!isempty(c) for c in list_of_clusters)
+        # @assert all(!isempty(c) for c in list_of_clusters)
+        filter!(c -> !isempty(c), list_of_clusters)
 
         # element is not in any cluster in list_of_clusters
         # so the total number of elements across clusters
@@ -640,16 +640,8 @@ module MultivariateNormalCRP
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu, 1)
     
-        crp_log_weights = [log(length(c)) - log(alpha + Nminus1) for c in list_of_clusters]    
-            
-        # niw_log_weights = [
-        #         (
-        #          log_Zniw(union(element_set, c), mu, lambda, psi, nu) 
-        #         - log_Zniw(c, mu, lambda, psi, nu)
-        #         - d/2 * log(2pi)
-        #         ) 
-        #     for c in list_of_clusters
-        #     ]
+        crp_log_weights = [log(length(c)) - log(alpha + Nminus1) for c in list_of_clusters]
+        
         niw_log_weights = Array{Float64}(undef, length(list_of_clusters))
         for (i, cluster) in enumerate(list_of_clusters)
             # cluster <- cluster U {element}
@@ -666,27 +658,28 @@ module MultivariateNormalCRP
 
         push!(list_of_clusters, empty_cluster)
         push!(crp_log_weights, log(alpha) - log(alpha + Nminus1))
-        push!(niw_log_weights, log_Zniw(element_set, mu, lambda, psi, nu) 
-                             - log_Zniw(nothing, mu, lambda, psi, nu) 
-                             - d/2 * log(2pi))
+        empty_cluster_niw_weight = (log_Zniw(element_set, mu, lambda, psi, nu) 
+                                    - log_Zniw(nothing, mu, lambda, psi, nu) 
+                                    - d/2 * log(2pi))
+        push!(niw_log_weights, empty_cluster_niw_weight)
 
-        unnorm_logPgen = [log_crp + log_niw for (log_crp, log_niw) in zip(crp_log_weights, niw_log_weights)]
-        norm_logPgen = unnorm_logPgen .- logsumexp(unnorm_logPgen)
-    
+        unnorm_logp = [log_crp + log_niw for (log_crp, log_niw) in zip(crp_log_weights, niw_log_weights)]
+        norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+
         if !greedy
             # Gibbs
-            probs = Weights(exp.(norm_logPgen))
+            probs = Weights(exp.(norm_logp))
             selected_cluster = sample(list_of_clusters, probs)
         else
-        # greedy Gibbs
-            _, max_idx = findmax(norm_logPgen)
+            # greedy Gibbs
+            _, max_idx = findmax(norm_logp)
             selected_cluster = list_of_clusters[max_idx]
         end
         
         push!(selected_cluster, element)
 
-        # Remove empty cluster if it was not selected
-        filter!(c -> length(c) > 0, list_of_clusters)
+        # Remove empty cluster(s) 
+        filter!(c -> !isempty(c), list_of_clusters)
         
     end
 
@@ -703,18 +696,7 @@ module MultivariateNormalCRP
             # N = sum(length(c) for c in list_of_clusters)
             @assert all(!isempty(c) for c in list_of_clusters)
             pop!(list_of_clusters, e)
-            # for (ci, cluster) in enumerate(list_of_clusters)
-            #     if el in cluster
-            #         pop!(cluster, el)
-            #         if isempty(cluster)
-            #             deleteat!(list_of_clusters, ci)
-            #         end
-            #         break
-            #     end
-            # end
             @assert all(!isempty(c) for c in list_of_clusters)
-            # @assert sum(length(c) for c in list_of_clusters) == N - 1
-
             add_to_state_gibbs!(e, list_of_clusters, hyperparams; greedy=greedy)   
         end
     
@@ -748,6 +730,8 @@ module MultivariateNormalCRP
         # Namely we need it to form q(initial | merge) = q(initial | launch)
         if ci == cj
         
+            # Keep initial state in case
+            # the proposal is rejected
             initial_S = deepcopy(list_of_clusters[cj])
         
             launch_Si = Cluster([ei])
@@ -757,10 +741,13 @@ module MultivariateNormalCRP
             pop!(launch_Sj, ei)
         
             # Remove cluster from the active state
-            filter!(x -> !(x === launch_Sj), list_of_clusters)
+            # filter!(x -> !(x === launch_Sj), list_of_clusters)
+            deleteat!(list_of_clusters, cj)
 
         elseif ci != cj
 
+            # These will serve to calculate The
+            # Hastings factor of the merge proposal
             initial_Si = deepcopy(list_of_clusters[ci])
             initial_Sj = deepcopy(list_of_clusters[cj])
 
@@ -849,7 +836,7 @@ module MultivariateNormalCRP
             # proposed split state and keep track of assignment
             # probabilities to form the Hastings ratio
         
-            log_q_proposed_from_launch = 0.0
+            log_q_proposed_given_launch = 0.0
 
             # We rename launch_Si and launch_Sj just
             # to make it explicit that the last t-1 restricted
@@ -902,9 +889,9 @@ module MultivariateNormalCRP
 
                 # Accumulate the log probability of the restricted assignment
                 if choice_of_propSi_or_propSj === proposed_Si
-                    log_q_proposed_from_launch += norm_logp[1]
+                    log_q_proposed_given_launch += norm_logp[1]
                 elseif choice_of_propSi_or_propSj === proposed_Sj
-                    log_q_proposed_from_launch += norm_logp[2]
+                    log_q_proposed_given_launch += norm_logp[2]
                 end
             end
         
@@ -940,12 +927,12 @@ module MultivariateNormalCRP
             # Note also that q(proposed | initial) = q(proposed | launch)
             # because every initial states gets shuffled and forgotten
             # when forming a random launch state by restricted Gibbs moves
-            log_hastings_ratio = -log_q_proposed_from_launch
+            log_hastings_ratio = -log_q_proposed_given_launch
         
             log_likelihood_ratio = log_Zniw(proposed_Si, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - n_proposed_Si * d/2 * log(2pi)        
             log_likelihood_ratio += log_Zniw(proposed_Sj, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - n_proposed_Sj * d/2 * log(2pi)        
         
-            # initial_S is the merge state. This is not the
+            # initial_S is the merge state. This is NOT the
             # Hastings ratio formed from transition probabilities
             # !of the proposal process!. This is the actual
             # likelihood of the initial merge state in the
@@ -953,7 +940,7 @@ module MultivariateNormalCRP
             log_likelihood_ratio -= log_Zniw(initial_S, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - n_initial_S * d/2 * log(2pi)
             
             log_acceptance = log_hastings_ratio + log_crp_ratio + log_likelihood_ratio
-            log_acceptance = min(0.0, log_acceptance) # Unnecessary but whatever, lets follow the convention
+            log_acceptance = min(0.0, log_acceptance)
         
             if log(rand()) < log_acceptance
                 push!(list_of_clusters, proposed_Si, proposed_Sj)
@@ -963,7 +950,7 @@ module MultivariateNormalCRP
                 hyperparams.rejected_split += 1
             end
         
-            filter!(c -> length(c) > 0, list_of_clusters)
+            filter!(c -> !isempty(c), list_of_clusters)
 
         ##############
         ### Merge! ###
@@ -974,7 +961,7 @@ module MultivariateNormalCRP
             # q(initial | merge) = q(initial | launch)
             # and we remember that 
             # q(merge | initial) = q(merge | launch) = 1
-            log_q_initial_from_launch = 0.0 
+            log_q_initial_given_launch = 0.0 
         
             proposed_S = union(launch_Si, launch_Sj)
         
@@ -1016,17 +1003,17 @@ module MultivariateNormalCRP
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
 
                 if in(e, initial_Si)
-                    log_q_initial_from_launch += norm_logp[1]
+                    log_q_initial_given_launch += norm_logp[1]
                     push!(launch_Si, e)
                 elseif in(e, initial_Sj)
-                    log_q_initial_from_launch += norm_logp[2]
+                    log_q_initial_given_launch += norm_logp[2]
                     push!(launch_Sj, e)
                 else
                     error("(merge) element in neither initial_Si or initial_Sj")
                 end
             end
         
-            log_hastings_ratio = log_q_initial_from_launch
+            log_hastings_ratio = log_q_initial_given_launch
         
             n_proposed_S = length(proposed_S)
             n_initial_Si = length(initial_Si)
@@ -1049,7 +1036,7 @@ module MultivariateNormalCRP
                 hyperparams.rejected_merge += 1
             end
 
-            filter!(c -> length(c) > 0, list_of_clusters)
+            filter!(c -> !isempty(c), list_of_clusters)
 
         end
     
@@ -1057,12 +1044,12 @@ module MultivariateNormalCRP
 
     function advance_alpha!(
         list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
-        step_type="gaussian", step_scale=0.4)
+        step_type=:gaussian, step_scale=0.4)
             
         # No Cauchy because it's a very bad idea on a log scale
-        if step_type == "gaussian"
+        if step_type == :gaussian
             step_distrib = Normal(0.0, step_scale)
-        elseif step_type == "uniform"
+        elseif step_type == :uniform
             step_distrib = Uniform(-step_scale/2, step_scale/2)
         end
 
@@ -1080,6 +1067,7 @@ module MultivariateNormalCRP
         # because we propose moves on the log scale
         # but need them uniform over alpha > 0
         # before feeding them to the hyperprior
+
         log_hastings = proposed_logalpha - log(alpha)
         log_acc += log_hastings
 
@@ -1100,13 +1088,13 @@ module MultivariateNormalCRP
     end
 
     function advance_mu!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
-                         random_order=true, step_scale=0.3, step_type="gaussian")
+                         random_order=true, step_scale=0.3, step_type=:gaussian)
     
-        if step_type == "cauchy"
+        if step_type == :cauchy
             step_distrib = Cauchy(0.0, step_scale)
-        elseif step_type == "gaussian"
+        elseif step_type == :gaussian
             step_distrib = Normal(0.0, step_scale)
-        elseif step_type == "uniform"
+        elseif step_type == :uniform
             step_distrib = Uniform(-step_scale/2, step_scale/2)
         end
 
@@ -1142,11 +1130,11 @@ module MultivariateNormalCRP
     end
 
     function advance_lambda!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
-                             step_type="gaussian", step_scale=0.4)
+                             step_type=:gaussian, step_scale=0.4)
 
-        if step_type == "gaussian"
+        if step_type == :gaussian
             step_distrib = Normal(0.0, step_scale)
-        elseif step_type == "uniform"
+        elseif step_type == :uniform
             step_distrib = Uniform(-step_scale/2, step_scale/2)
         end
         
@@ -1175,13 +1163,13 @@ module MultivariateNormalCRP
     end
 
     function advance_psi!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
-                          random_order=true, step_scale=0.1, step_type="gaussian")
+                          random_order=true, step_scale=0.1, step_type=:gaussian)
     
-        if step_type == "cauchy"
+        if step_type == :cauchy
             step_distrib = Cauchy(0.0, step_scale)
-        elseif step_type == "gaussian"
+        elseif step_type == :gaussian
             step_distrib = Normal(0.0, step_scale)
-        elseif step_type == "uniform"
+        elseif step_type == :uniform
             step_distrib = Uniform(-step_scale/2, step_scale/2)
         end
     
@@ -1232,11 +1220,11 @@ module MultivariateNormalCRP
     end
 
     function advance_nu!(list_of_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams;
-                         step_type="gaussian", step_scale=0.2)
+                         step_type=:gaussian, step_scale=0.2)
 
-        if step_type == "gaussian"
+        if step_type == :gaussian
             step_distrib = Normal(0.0, step_scale)
-        elseif step_type == "uniform"
+        elseif step_type == :uniform
             step_distrib = Uniform(-step_scale/2, step_scale/2)
         end
     
@@ -1274,7 +1262,7 @@ module MultivariateNormalCRP
 
     function jeffreys_alpha(alpha::Float64, n::Int64)
 
-        return sqrt((polygamma(0, alpha + n) - polygamma(0, alpha))/alpha - polygamma(1, alpha) + polygamma(1, alpha + n))
+        return sqrt((polygamma(0, alpha + n) - polygamma(0, alpha))/alpha + polygamma(1, alpha + n) - polygamma(1, alpha))
 
     end
 
@@ -1302,7 +1290,8 @@ module MultivariateNormalCRP
 
     end
 
-    function initiate_chain(filename::String)
+    function initiate_chain(filename::AbstractString)
+        # Expects a JLD2 file
         return load(filename)["chain"]
     end
 
@@ -1392,7 +1381,8 @@ module MultivariateNormalCRP
         nb_gibbs=1, 
         nb_hyperparamsmh=10, 
         fullseq_prob=0.0, 
-        checkpoint_every=-1, checkpoint_prefix="chain")
+        checkpoint_every=-1, checkpoint_prefix="chain",
+        progress_bar=true)
         
         _nb_splitmerge = div(nb_splitmerge, 2)
         # Used for printing stats #
@@ -1423,7 +1413,7 @@ module MultivariateNormalCRP
             # This one might be biasing away
             # from the stationary distribution
             if rand() < fullseq_prob
-                
+
                 advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams)
                 nb_fullseq_moves += 1
             end
@@ -1461,19 +1451,19 @@ module MultivariateNormalCRP
             # by the standard deviation along each dimension.
             for i in 1:nb_hyperparamsmh
                 advance_alpha!(chain.clusters, chain.hyperparams, 
-                                step_type="gaussian", step_scale=0.2)
+                                step_type=:gaussian, step_scale=0.2)
                 
                 advance_mu!(chain.clusters, chain.hyperparams, 
-                            step_type="gaussian", step_scale=0.1)
+                            step_type=:gaussian, step_scale=0.1)
                 
                 advance_lambda!(chain.clusters, chain.hyperparams, 
-                                step_type="gaussian", step_scale=0.15)
+                                step_type=:gaussian, step_scale=0.15)
 
                 advance_psi!(chain.clusters, chain.hyperparams,
-                             step_type="gaussian", step_scale=0.02)
+                             step_type=:gaussian, step_scale=0.02)
 
                 advance_nu!(chain.clusters, chain.hyperparams, 
-                            step_type="gaussian", step_scale=0.1)
+                            step_type=:gaussian, step_scale=0.1)
             end
 
             push!(chain.hyperparams_chain, deepcopy(chain.hyperparams))
@@ -1504,7 +1494,7 @@ module MultivariateNormalCRP
             if logprob > quantile(short_logprob_chain, 0.95)
                 # Summit attempt
                 nb_map_attemps += 1
-                map_success = attempt_map!(chain, nb_pushes=5)
+                map_success = attempt_map!(chain, max_nb_pushes=10)
                 nb_map_successes += map_success
                 last_map_idx = chain.map_idx
             end
@@ -1518,44 +1508,66 @@ module MultivariateNormalCRP
                 jldsave(filename, chain=chain)
             end
 
-            # ProgressMeter.next!(progbar;
-            # showvalues=[
-            # (:"step", "$(step)/$(nb_steps)"),
-            # (:"chain length", length(chain.logprob_chain)),
-            # (:"last checkpoint", last_checkpoint),
-            # (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio * " ($(_nb_splitmerge))"),
-            # (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
-            # (:"# clusters", length(chain.clusters)),
-            # (:"# clusters > 1", length(filter(x -> length(x) > 1, chain.clusters))),
-            # (:"# fullseq moves", nb_fullseq_moves),
-            # (:"# MAP attempts/successes", "$(nb_map_attemps)/$(nb_map_successes)"),
-            # (:"# clusters in last MAP", length(chain.map_clusters)),
-            # (:"# steps since last MAP", length(chain.logprob_chain) - last_map_idx)])
-
-            print("\r$(step)/$(nb_steps)")
-            print("    s:" * split_ratio * " m:" * merge_ratio * " ($(_nb_splitmerge))")
-            print("    sr:$(split_per_step), mr:$(merge_per_step)")
-            print("    #cl:$(length(chain.clusters)), #cl>1:$(length(filter(x -> length(x) > 1, chain.clusters)))")
-            print("    f:$(nb_fullseq_moves)")
-            print("    mapattsuc:$(nb_map_attemps)/$(nb_map_successes)")
-            print("    lastmap@$(last_map_idx)")
-            print("    lchpt@$(last_checkpoint)")
-            print("       ")
-            if map_success
-                println("!       #clmap:$(length(chain.map_clusters))")
+            if progress_bar
+                ProgressMeter.next!(progbar;
+                showvalues=[
+                (:"step", "$(step)/$(nb_steps)"),
+                (:"chain length", length(chain.logprob_chain)),
+                (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio * " ($(_nb_splitmerge))"),
+                (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
+                (:"# clusters", length(chain.clusters)),
+                (:"# clusters > 1", length(filter(x -> length(x) > 1, chain.clusters))),
+                (:"# fullseq moves", nb_fullseq_moves),
+                (:"# MAP attempts/successes", "$(nb_map_attemps)/$(nb_map_successes)"),
+                (:"# clusters in last MAP", length(chain.map_clusters)),
+                (:"Last MAP logprob", round(chain.map_logprob, digits=1)),
+                (:"Last MAP at", last_map_idx),
+                (:"Last checkpoint at", last_checkpoint)
+                ])
+            else
+                print("\r$(step)/$(nb_steps)")
+                print(" (t:$(length(chain.logprob_chain)))")
+                print("   s:" * split_ratio * " m:" * merge_ratio * " ($(_nb_splitmerge))")
+                print("   sr:$(split_per_step), mr:$(merge_per_step)")
+                print("   #cl:$(length(chain.clusters)), #cl>1:$(length(filter(x -> length(x) > 1, chain.clusters)))")
+                print("   f:$(nb_fullseq_moves)")
+                print("   mapattsuc:$(nb_map_attemps)/$(nb_map_successes)")
+                print("   lastmap@$(last_map_idx)")
+                print("   lchpt@$(last_checkpoint)")
+                print("      ")
+                if map_success
+                    print("!      #clmap:$(length(chain.map_clusters))")
+                    println("   $(round(chain.map_logprob, digits=1))")
+                end
+                flush(stdout)
             end
-            flush(stdout)
 
         end
     end
 
-    function attempt_map!(chain::MNCRPchain; nb_pushes=5)
+    function attempt_map!(chain::MNCRPchain; max_nb_pushes=15)
             
         map_clusters_attempt = deepcopy(chain.clusters)
+        map_mll = log_Pgenerative(map_clusters_attempt, chain.hyperparams)
+        
         # Greedy Gibbs!
-        for p in 1:nb_pushes
-            advance_clusters_gibbs!(map_clusters_attempt, chain.hyperparams; greedy=true)
+        for p in 1:max_nb_pushes
+            test_attempt = deepcopy(map_clusters_attempt)
+            advance_clusters_gibbs!(test_attempt, chain.hyperparams; greedy=true)
+            test_mll = log_Pgenerative(test_attempt, chain.hyperparams)
+            if test_mll <= map_mll
+                # We've regressed, so stop and leave
+                # the previous state before this test
+                # attempt as the approx. map state
+                break
+            else
+                # the test state led to a better state
+                # than the previous one, keep going
+                map_clusters_attempt = test_attempt
+                map_mll = test_mll
+            end
         end
+
         attempt_logprob = log_Pgenerative(map_clusters_attempt, chain.hyperparams)
         if attempt_logprob > chain.map_logprob
             chain.map_logprob = attempt_logprob
@@ -1627,33 +1639,33 @@ module MultivariateNormalCRP
 
         lpc = chain.logprob_chain
         p_logprob = plot(burn+1:length(lpc), lpc[burn+1:end], grid=:no, label=nothing, title="log probability chain")
-        # vline!(p_logprob, [chain.map_idx], label=nothing, color=:black)
-        # hline!(p_logprob, [chain.map_logprob], label=nothing, color=:black)
+        vline!(p_logprob, [chain.map_idx], label=nothing, color=:black)
+        hline!(p_logprob, [chain.map_logprob], label=nothing, color=:black)
 
         ac = alpha_chain(chain)
         p_alpha = plot(burn+1:length(ac), ac[burn+1:end], grid=:no, label=nothing, title="α chain")
-        # vline!(p_alpha, [chain.map_idx], label=nothing, color=:black)
+        vline!(p_alpha, [chain.map_idx], label=nothing, color=:black)
 
         muc = reduce(hcat, mu_chain(chain))'
         p_mu = plot(burn+1:size(muc, 1), muc[burn+1:end, :], grid=:no, label=nothing, title="μ₀ chain")
-        # vline!(p_mu, [chain.map_idx], label=nothing, color=:black)
+        vline!(p_mu, [chain.map_idx], label=nothing, color=:black)
 
         lc = lambda_chain(chain)
         p_lambda = plot(burn+1:length(lc), lc[burn+1:end], grid=:no, label=nothing, title="λ₀ chain")
-        # vline!(p_lambda, [chain.map_idx], label=nothing, color=:black)
+        vline!(p_lambda, [chain.map_idx], label=nothing, color=:black)
         
         pc = flatten.(LowerTriangular.(psi_chain(chain)))
         pc = reduce(hcat, pc)'
         p_psi = plot(burn+1:size(pc, 1), pc[burn+1:end, :], grid=:no, label=nothing, title="Ψ₀ chain")
-        # vline!(p_psi, [chain.map_idx], label=nothing, color=:black)
+        vline!(p_psi, [chain.map_idx], label=nothing, color=:black)
 
         nc = nu_chain(chain)
         p_nu = plot(burn+1:length(nc), nc[burn+1:end], grid=:no, label=nothing, title="ν₀ chain")
-        # vline!(p_nu, [chain.map_idx], label=nothing, color=:black)
+        vline!(p_nu, [chain.map_idx], label=nothing, color=:black)
 
         nbc = chain.nbclusters_chain
         p_nbc = plot(burn+1:length(nbc), nbc[burn+1:end], grid=:no, label=nothing, title="#cluster chain")
-        # vline!(p_nbc, [chain.map_idx], label=nothing, color=:black)
+        vline!(p_nbc, [chain.map_idx], label=nothing, color=:black)
 
         empty_plot = plot(legend=false, grid=false, foreground_color_subplot=:white)
 
@@ -1699,7 +1711,7 @@ module MultivariateNormalCRP
         println()
     end
 
-    function local_average_covariance(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
+    function local_average_covprec(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
         
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu, 1)
@@ -1709,7 +1721,9 @@ module MultivariateNormalCRP
         N = sum(length(c) for c in clusters)
 
         log_parts = []
-        psi_c_parts = []
+        cluster_covs = []
+        cluster_precs = []
+
 
         clusters = vcat(clusters, [Cluster(d)])
 
@@ -1727,15 +1741,17 @@ module MultivariateNormalCRP
             
             push!(log_parts, log_crp_weight + log_data_weight)
 
-            push!(psi_c_parts, psi_c / (nu_c - d - 1))
-
+            push!(cluster_covs, psi_c / (nu_c - d - 1))
+            push!(cluster_precs, nu_c * inv(psi_c))
         end
 
         log_parts = log_parts .- logsumexp(log_parts)
         
-        average_covariance = sum(psi_c_parts .* exp.(log_parts))
+        average_covariance = sum(cluster_covs .* exp.(log_parts))
+        average_precision = sum(cluster_precs .* exp.(log_parts))
 
-        return average_covariance
+        return (average_covariance=average_covariance, 
+                average_precision=average_precision)
     end
 
     function wasserstein2_distance(mu1, sigma1, mu2, sigma2)
