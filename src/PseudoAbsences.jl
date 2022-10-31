@@ -5,7 +5,13 @@ module PseudoAbsences
     using StatsBase: median
     using LinearAlgebra: norm, diagm
 
-    function env_pseudoabsences(samples, exclusion_radius, nb_pseudoabsences; region_factor=1.5, shape=:ball, verbose=false)
+    function env_pseudoabsences(samples::Vector{Vector{Float64}}, exclusion_radius, nb_pseudoabsences; region_factor=1.5, shape=:ball, verbose=false)
+
+        # Too lazy to rewrite, I don'T
+        # know why I chose to use a
+        # d x N matrix rather than a vector
+        # of vectors
+        samples = hcat(samples...)
 
         d = size(samples, 1)
 
@@ -95,7 +101,7 @@ module PseudoAbsences
             
         println()
         
-        return pseudoabsences
+        return [1.0 * col for col in eachcol(pseudoabsences)]
         
     end
 end
