@@ -1365,7 +1365,7 @@ module MultivariateNormalCRP
 
     function initiate_chain(filename::AbstractString)
         # Expects a JLD2 file
-        return load(filename)["chain"]
+        return load(filename)
     end
 
     function initiate_chain(data::Vector{Vector{Float64}}; strategy=:fullseq)
@@ -1580,12 +1580,12 @@ module MultivariateNormalCRP
             end
             
             if checkpoint_every > 0 && 
-                (mod(length(chain.logprob_chain), checkpoint_every) == 0
+                (mod(step, checkpoint_every) == 0
                 || last_checkpoint == -1)
 
                 last_checkpoint = length(chain.logprob_chain)
                 filename = "$(checkpoint_prefix)_pid$(getpid())_iter$(last_checkpoint).jld2"
-                jldsave(filename, chain=chain)
+                jldsave(filename, chain)
             end
 
             if pretty_progress
