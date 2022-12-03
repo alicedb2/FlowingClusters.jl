@@ -1337,26 +1337,26 @@ module MultivariateNormalCRP
         end
 
         log_acceptance = log_Pgenerative(proposed_state, hyperparams) - log_Pgenerative(current_clusters, hyperparams)
-        println("log_metropolis  $log_acceptance")
-        println("      log_gxxp  $log_gxxp")
-        println("      log_gxpx  $log_gxpx")
-        println("  log_hastings  $(log_gxxp - log_gxpx)")
+        # println("log_metropolis  $log_acceptance")
+        # println("      log_gxxp  $log_gxxp")
+        # println("      log_gxpx  $log_gxpx")
+        # println("  log_hastings  $(log_gxxp - log_gxpx)")
 
         # Hastings ratio
         log_acceptance += log_gxxp - log_gxpx
         log_acceptance = min(0.0, log_acceptance)
         
-        println("log_acceptance  $log_acceptance")
-        println()
+        # println("log_acceptance  $log_acceptance")
+        # println()
 
         if log(rand()) < log_acceptance
             empty!(current_clusters)
             append!(current_clusters, proposed_state)
             hyperparams.accepted_fullseq += 1
-            println("accepted")
+            # println("accepted")
         else
             hyperparams.rejected_fullseq += 1
-            println("rejected")
+            # println("rejected")
         end
 
         return current_clusters
