@@ -1463,6 +1463,8 @@ module MultivariateNormalCRP
         checkpoint_every=-1, checkpoint_prefix="chain",
         pretty_progress=true)
         
+        checkpoint_every == -1 || typeof(checkpoint_prefix) == String || throw("Must specify a checkpoint prefix string")
+
         # _nb_splitmerge = div(nb_splitmerge, 2)
         _nb_splitmerge = nb_splitmerge
         # Used for printing stats #
@@ -1584,8 +1586,9 @@ module MultivariateNormalCRP
                 || last_checkpoint == -1)
 
                 last_checkpoint = length(chain.logprob_chain)
+                mkpath(dirname("$(checkpoint_prefix)"))
                 filename = "$(checkpoint_prefix)_pid$(getpid())_iter$(last_checkpoint).jld2"
-                jldsave(filename, chain)
+                jldsave(filename; chain)
             end
 
             if pretty_progress
