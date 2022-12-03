@@ -2,7 +2,7 @@ using JLD2, InlineStrings, DataFrames, FileIO
 using MultivariateNormalCRP
 using Random
 
-dataset = load("../data/aedes_albopictus_dataset.jld2")
+dataset = load("data/aedes_albopictus_dataset.jld2")
 
 Random.seed!()
 
