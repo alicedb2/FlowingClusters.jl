@@ -9,5 +9,5 @@
 module load StdEnv/2020
 module load julia/1.8.1
 
-cd /home/alicedb/MultivariateNormalCRP/output
-julia --project=.. task.jl
+cd /home/alicedb/MultivariateNormalCRP
+julia --project=. task.jl
