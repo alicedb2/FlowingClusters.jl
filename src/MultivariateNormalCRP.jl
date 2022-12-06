@@ -16,6 +16,7 @@ module MultivariateNormalCRP
     import RecipesBase: plot
     import Base: pop!, push!, length, isempty, union, delete!, iterate, deepcopy, sort, in
 
+    export Cluster
     export initiate_chain, advance_chain!, attempt_map!, burn!
     export log_Pgenerative, drawNIW, stats
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain
@@ -1239,21 +1240,42 @@ module MultivariateNormalCRP
     end
 
 
-    function advance_full_sequential_gibbs!(current_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; nb_elements=:all, proposal_temperature=1.0)
+    function advance_full_sequential_gibbs!(current_clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; nb_elements=:all, proposal_temperature=1.0, force_acceptance=false)
 
         @assert proposal_temperature > 0.0 "Can't calculate Hastings ratio when temperature=0.0. Use very small number instead."
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu, 1)
 
-        if nb_elements == :all
-            nb_elements = sum([length(c) for c in current_clusters])
-        end
         
         proposed_state = deepcopy(current_clusters)
         
-        scheduled_elements = shuffle([el for cluster in proposed_state for el in cluster])
+        # if nb_elements == :all
+        #     nb_elements = sum([length(c) for c in current_clusters])
+        # end
+        if nb_elements == :cluster
 
-        for element in scheduled_elements[1:nb_elements]
+            all_elements = [el for cluster in proposed_state for el in cluster]
+            sampled_element = sample(all_elements)
+            cluster, clustere_idx = find(sampled_element, proposed_state)
+            scheduled_elements = collect(cluster)
+            nb_elements = length(scheduled_elements)
+
+        elseif nb_elements == :all
+
+            scheduled_elements = [el for cluster in proposed_state for el in cluster]
+            nb_elements = sum([length(c) for c in current_clusters])
+
+        else
+
+            @assert typeof(nb_elements) == Int64
+            scheduled_elements = [el for cluster in proposed_state for el in cluster]
+            
+        end
+
+        scheduled_elements = shuffle(scheduled_elements)
+        scheduled_elements = scheduled_elements[1:nb_elements]
+
+        for element in scheduled_elements
             pop!(proposed_state, element)
         end
 
@@ -1281,7 +1303,7 @@ module MultivariateNormalCRP
                 log_weights[i] += log_Zniw(cluster, mu, lambda, psi, nu)
                 pop!(cluster, element)
                 log_weights[i] -= log_Zniw(cluster, mu, lambda, psi, nu)
-                log_weights[i] -= d/2 * log(2pi)
+                log_weights[i] -= d/2 * log(2pi) # unnecessary
             end
 
 
@@ -1296,7 +1318,6 @@ module MultivariateNormalCRP
             
             filter!(c -> !isempty(c), proposed_state)
         end
-
         ##### Backward transition from proposed to initial #####
         initial_state = deepcopy(current_clusters)
 
@@ -1326,7 +1347,7 @@ module MultivariateNormalCRP
                 log_weights[i] += log_Zniw(cluster, mu, lambda, psi, nu)
                 pop!(cluster, element)
                 log_weights[i] -= log_Zniw(cluster, mu, lambda, psi, nu)
-                log_weights[i] -= d/2 * log(2pi)
+                log_weights[i] -= d/2 * log(2pi) # unnecessary
 
             end
 
@@ -1349,14 +1370,12 @@ module MultivariateNormalCRP
         # println("log_acceptance  $log_acceptance")
         # println()
 
-        if log(rand()) < log_acceptance
+        if log(rand()) < log_acceptance || force_acceptance
             empty!(current_clusters)
             append!(current_clusters, proposed_state)
             hyperparams.accepted_fullseq += 1
-            # println("accepted")
         else
             hyperparams.rejected_fullseq += 1
-            # println("rejected")
         end
 
         return current_clusters
@@ -1365,7 +1384,7 @@ module MultivariateNormalCRP
 
     function initiate_chain(filename::AbstractString)
         # Expects a JLD2 file
-        return load(filename)
+        return load(filename)["chain"]
     end
 
     function initiate_chain(data::Vector{Vector{Float64}}; strategy=:fullseq)
@@ -1384,57 +1403,18 @@ module MultivariateNormalCRP
             ##### 1st initialization method: fullseq
             chain.clusters = [Cluster(collect.(data))]
             for i in 1:10
-                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams)
+                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams; nb_elements=:all)
+            end
+            if chain.hyperparams.accepted_fullseq == 0
+                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams; nb_elements=:all, force_acceptance=true)
             end
 
-        ####### 2nd initialization method: marriage problem
-        # best_yet = -Inf
-        # nb_test_suitors = 10
-        # for i in Iterators.countfrom(1, 1)
-        #     print("\rSuitor $(i)")
-        #     advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams)
-        #     logprob = log_Pgenerative(chain.clusters, chain.hyperparams)
-        #     if logprob > best_yet
-        #         best_yet = logprob
-        #         if i > nb_test_suitors
-        #             println("!")
-        #             break
-        #         end
-        #     end
-        # end
-        
-        ####### 3rd initialization method: N clusters
         elseif strategy == :N
             chain.clusters = [Cluster([datum]) for datum in data]
-        # @assert all(!isempty(c) for c in chain.clusters)
 
         elseif strategy == :1
-        ####### 4rd initialization method: 1 cluster
             chain.clusters = [Cluster(data)]
-        
-        ####### 5th initialization method: K clusters
-        # K = 3
-        # chain.clusters = [Set{Vector{Float64}}(p)
-        #                         for p in Iterators.partition(data, ceil(length(data)/K))]
-        ##########################
-
-
-        ######## 6th initialization method: Random CRP partition
-        elseif strategy == :crp
-            alpha = chain.hyperparams.alpha
-            chain.clusters = Cluster[]
-            N = 0
-            for datum in data
-                push!(chain.clusters, Cluster(d))
-                log_crp = [isempty(cl) ? log(alpha) - log(N + alpha) : log(length(cl)) - log(N + alpha)
-                                    for cl in chain.clusters]
-                probs = Weights(exp.(log_crp))
-                selected_cluster = sample(chain.clusters, probs)
-                push!(selected_cluster, datum)
-                N += 1
-                filter!(x -> !isempty(x), chain.clusters)
-            end
-        ##########################
+    
         end
 
         chain.nbclusters_chain = [length(chain.clusters)]
@@ -1459,14 +1439,12 @@ module MultivariateNormalCRP
         nb_splitmerge=5, splitmerge_t=2, restricted_temperature=1.0,
         nb_gibbs=1, temperature=1.0,
         nb_hyperparamsmh=10, step_mult=1.0,
-        fullseq_prob=0.0, fullseq_prop_temp=0.01,
+        nb_fullseq=20, fullseq_prop_temp=1.0, fullseq_nb_elements=:all,
         checkpoint_every=-1, checkpoint_prefix="chain",
         pretty_progress=true)
         
         checkpoint_every == -1 || typeof(checkpoint_prefix) == String || throw("Must specify a checkpoint prefix string")
 
-        # _nb_splitmerge = div(nb_splitmerge, 2)
-        _nb_splitmerge = nb_splitmerge
         # Used for printing stats #
         hp = chain.hyperparams
 
@@ -1494,16 +1472,13 @@ module MultivariateNormalCRP
 
             # This one might be biasing away
             # from the stationary distribution
-            if rand() < fullseq_prob
-                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, proposal_temperature=fullseq_prop_temp)
+            for i in 1:nb_fullseq
+                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, nb_elements=fullseq_nb_elements, proposal_temperature=fullseq_prop_temp)
                 nb_fullseq_moves += 1
             end
 
             # Split-merge
-            # random walk between 0 and nb_splitmerge
-            # _nb_splitmerge += rand([-3, -1, 0, 1, 3])
-            _nb_splitmerge = max(0, min(nb_splitmerge, _nb_splitmerge))
-            for i in 1:_nb_splitmerge
+            for i in 1:nb_splitmerge
                 advance_clusters_JNrestrictedsplitmerge!(chain.clusters, chain.hyperparams, t=splitmerge_t, restricted_temperature=restricted_temperature)
             end            
             
@@ -1511,18 +1486,10 @@ module MultivariateNormalCRP
         
             # Gibbs sweep
             for i in 1:nb_gibbs
-                # print(step, " ", i)
-                # print(" ", length(chain.clusters))
-                # print([length(c) for c in chain.clusters])
                 advance_gibbs!(chain.clusters, chain.hyperparams, temperature=temperature)
-                # print([length(c) for c in chain.clusters])
-                # println(" ", length(chain.clusters))
             end
 
             push!(chain.nbclusters_chain, length(chain.clusters))
-
-            # print("  #cl:$(length(chain.clusters))"); flush(stdout)
-
 
             # Metropolis-Hastings moves over each parameter
             # step_scale is adjusted to roughly hit
@@ -1576,7 +1543,7 @@ module MultivariateNormalCRP
             if logprob > logp_quantile95
                 # Summit attempt
                 nb_map_attemps += 1
-                map_success = attempt_map!(chain, max_nb_pushes=10)
+                # map_success = attempt_map!(chain, max_nb_pushes=10)
                 nb_map_successes += map_success
                 last_map_idx = chain.map_idx
             end
@@ -1597,7 +1564,7 @@ module MultivariateNormalCRP
                 (:"step", "$(step)/$(nb_steps)"),
                 (:"logprob", "$(round(chain.logprob_chain[end], digits=1))"),
                 (:"chain length", length(chain.logprob_chain)),
-                (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio * " ($(_nb_splitmerge))"),
+                (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio),
                 (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
                 (:"clusters (>1)", "$(length(chain.clusters)) ($(length(filter(c -> length(c) > 1, chain.clusters))))"),
                 (:"fullseq moves acc/rej (%)", "$(hp.accepted_fullseq)/$(hp.rejected_fullseq) ($(round(hp.accepted_fullseq/(hp.accepted_fullseq + hp.rejected_fullseq), digits=2)))"),
