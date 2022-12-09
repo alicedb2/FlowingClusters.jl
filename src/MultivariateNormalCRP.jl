@@ -1080,7 +1080,11 @@ module MultivariateNormalCRP
     #  - gibbs + splitmerge 1000+
     #  - fullseq 300+
     #  - gibbs + splitmerge onward
-    function advance_full_sequential_gibbs!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; proposal_temperature=1.0, acceptance_temperature=1.0, force_acceptance=false)
+    function advance_full_sequential_gibbs!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; nb_samples=2, proposal_temperature=1.0, acceptance_temperature=1.0, force_acceptance=false)
+
+        @assert nb_samples >= 2
+        @assert proposal_temperature > 0.0
+        @assert acceptance_temperature > 0.0
 
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu, 1)
@@ -1089,19 +1093,24 @@ module MultivariateNormalCRP
 
         all_elements = [el for cluster in proposed_state for el in cluster]
 
-        sampled_element1, sampled_element2 = sample(all_elements, 2, replace=false)
-        
-        cluster1, cluster1_idx = find(sampled_element1, proposed_state)
-        cluster2, cluster2_idx = find(sampled_element2, proposed_state)
+        sampled_elements = sample(all_elements, nb_samples, replace=false)
 
-        if cluster1_idx == cluster2_idx
-            deleteat!(proposed_state, cluster1_idx)
-            restricted_initial_state = Cluster[copy(cluster1)]
-        else
-            deleteat!(proposed_state, sort([cluster1_idx, cluster2_idx]))
-            restricted_initial_state = Cluster[copy(cluster1), copy(cluster2)]
+        # We want to avoid making Set of Sets because hashing at set
+        # traverses it in full rather than using objectid() unless
+        # the latters are equal
+        cls_clsidx = [find(sample, proposed_state) for sample in sampled_elements]
+        unique_cls_clsidx = []
+        visited_idx = Set()
+        for (cls, idx) in cls_clsidx
+            if !(idx in visited_idx)
+                push!(unique_cls_clsidx, (cls, idx))
+                push!(visited_idx, idx)
+            end
         end
-
+        sort!(unique_cls_clsidx, by=ci -> ci[2])
+        deleteat!(proposed_state, [idx for (cls, idx) in unique_cls_clsidx])
+        restricted_initial_state = Cluster[copy(cluster) for (cluster, idx) in unique_cls_clsidx]
+        
         scheduled_elements = shuffle!(collect(flatten(restricted_initial_state)))
 
         log_gxxp, log_gxpx = 0.0, 0.0
@@ -1112,12 +1121,12 @@ module MultivariateNormalCRP
 
             Nminus1 = sum(length.(restricted_proposed_state))
 
-            if length(restricted_proposed_state) <= 1
+            if length(restricted_proposed_state) < nb_samples
                 empty_cluster = Cluster(d)
                 push!(restricted_proposed_state, empty_cluster)
             end
 
-            @assert length(restricted_proposed_state) <= 2
+            @assert length(restricted_proposed_state) <= nb_samples
             
             log_weights = zeros(length(restricted_proposed_state))
             for (i, cluster) in enumerate(restricted_proposed_state)
@@ -1504,7 +1513,7 @@ module MultivariateNormalCRP
         nb_splitmerge=0, splitmerge_t=2, sm_prop_temp=1.0, sm_acc_temp=1.0,
         nb_gibbs=1, gibbs_temp=1.0,
         nb_hyperparamsmh=10, step_mult=1.0,
-        nb_fullseq=0, fullseq_prop_temp=1.0, fullseq_acc_temp=1.0,
+        nb_fullseq=0, fullseq_nb_samples=2, fullseq_prop_temp=1.0, fullseq_acc_temp=1.0,
         checkpoint_every=-1, checkpoint_prefix="chain",
         attempt_map=true, pretty_progress=true)
         
@@ -1543,6 +1552,7 @@ module MultivariateNormalCRP
             # from the stationary distribution
             for i in 1:nb_fullseq
                 advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, 
+                nb_samples=fullseq_nb_samples,
                 proposal_temperature=fullseq_prop_temp, acceptance_temperature=fullseq_acc_temp)
                 # nb_fullseq_moves += 1
             end
