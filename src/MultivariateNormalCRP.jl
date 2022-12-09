@@ -5,7 +5,8 @@ module MultivariateNormalCRP
     using StatsBase: sample, mean, Weights, std, percentile, quantile
     using LinearAlgebra: det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd
     using SpecialFunctions: loggamma, polygamma
-    using Base.Iterators: cycle, flatten
+    using Base.Iterators: cycle
+    import Base.Iterators: flatten
     using ColorSchemes: Paired_12, tableau_20
     using Plots: plot, vline!, hline!, scatter!, @layout, grid, scalefontsizes, mm
     using StatsPlots: covellipse!
@@ -922,9 +923,9 @@ module MultivariateNormalCRP
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
                 probs = Weights(exp.(norm_logp))
 
-                assignment, log_p = sample([(proposed_Si, norm_logp[1]), (proposed_Sj, norm_logp[2])], probs)
+                new_assignment, log_p = sample([(proposed_Si, norm_logp[1]), (proposed_Sj, norm_logp[2])], probs)
                 
-                push!(assignment, e)
+                push!(new_assignment, e)
 
                 log_q_proposed_given_launch += log_p
 
@@ -1079,57 +1080,29 @@ module MultivariateNormalCRP
     #  - gibbs + splitmerge 1000+
     #  - fullseq 300+
     #  - gibbs + splitmerge onward
-    function advance_full_sequential_gibbs!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; method=:cluster, proposal_temperature=1.0, acceptance_temperature=1.0, force_acceptance=false)
+    function advance_full_sequential_gibbs!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; proposal_temperature=1.0, acceptance_temperature=1.0, force_acceptance=false)
 
-        @assert proposal_temperature > 0.0 "Can't calculate Hastings ratio when temperature=0.0. Use very small number instead."
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu, 1)
 
-        if method == :cluster
+        proposed_state = copy(clusters)
 
-            proposed_state = copy(clusters)
+        all_elements = [el for cluster in proposed_state for el in cluster]
 
-            all_elements = [el for cluster in proposed_state for el in cluster]
-            sampled_element1, sampled_element2 = sample(all_elements, 2, replace=false)
-            cluster1, cluster1_idx = find(sampled_element1, proposed_state)
-            cluster2, cluster2_idx = find(sampled_element2, proposed_state)
+        sampled_element1, sampled_element2 = sample(all_elements, 2, replace=false)
+        
+        cluster1, cluster1_idx = find(sampled_element1, proposed_state)
+        cluster2, cluster2_idx = find(sampled_element2, proposed_state)
 
-            if cluster1_idx == cluster2_idx
-                deleteat!(proposed_state, cluster1_idx)
-                restricted_initial_state = Cluster[copy(cluster1)]
-            else
-                deleteat!(proposed_state, sort([cluster1_idx, cluster2_idx]))
-                restricted_initial_state = Cluster[copy(cluster1), copy(cluster2)]
-            end
-
-            scheduled_elements = collect(Base.Iterators.flatten(restricted_initial_state))
-
-        elseif method == :all
-
-            proposed_state = Cluster[]
-
-            restricted_initial_state = copy(clusters)
-
-            scheduled_elements = [el for cluster in clusters for el in cluster]
-
-        # else
-
-        #     scheduled_elements = [el for cluster in proposed_state for el in cluster]            
-
+        if cluster1_idx == cluster2_idx
+            deleteat!(proposed_state, cluster1_idx)
+            restricted_initial_state = Cluster[copy(cluster1)]
+        else
+            deleteat!(proposed_state, sort([cluster1_idx, cluster2_idx]))
+            restricted_initial_state = Cluster[copy(cluster1), copy(cluster2)]
         end
 
-        scheduled_elements = shuffle!(scheduled_elements)
-
-        # for element in scheduled_elements
-        #     pop!(proposed_state, element)
-        # end
-
-
-        ##### Forward/proposed transition #####
-        #####  wish I could use add_to_state_gibbs
-        #####  but I need the cumulative lognorm_p
-        #####  to calculate the transition probability
-        #####  for the Hastings ratio.
+        scheduled_elements = shuffle!(collect(flatten(restricted_initial_state)))
 
         log_gxxp, log_gxpx = 0.0, 0.0
         
@@ -1139,19 +1112,25 @@ module MultivariateNormalCRP
 
             Nminus1 = sum(length.(restricted_proposed_state))
 
-            # if all(!isempty(c) for c in restricted_proposed_state)
-            empty_cluster = Cluster(d)
-            push!(restricted_proposed_state, empty_cluster)
-            # end
+            if length(restricted_proposed_state) <= 1
+                empty_cluster = Cluster(d)
+                push!(restricted_proposed_state, empty_cluster)
+            end
+
+            @assert length(restricted_proposed_state) <= 2
             
             log_weights = zeros(length(restricted_proposed_state))
             for (i, cluster) in enumerate(restricted_proposed_state)
+
                 log_weights[i] = (isempty(cluster) ? log(alpha) : log(length(cluster))) - log(alpha + Nminus1)
+                
                 push!(cluster, element)
                 log_weights[i] += log_Zniw(cluster, mu, lambda, psi, nu)
                 pop!(cluster, element)
+                
                 log_weights[i] -= log_Zniw(cluster, mu, lambda, psi, nu)
                 log_weights[i] -= d/2 * log(2pi) # unnecessary
+            
             end
 
 
@@ -1174,6 +1153,7 @@ module MultivariateNormalCRP
         for element in reverse(scheduled_elements)
 
             container, container_idx = find(element, restricted_initial_state)
+
             pop!(container, element)
 
             # Make sure there's at least one empty
@@ -1203,12 +1183,14 @@ module MultivariateNormalCRP
 
             unnorm_logp = log_weights / proposal_temperature
             norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+
             log_gxxp += norm_logp[container_idx]
-            filter!(c -> !isempty(c), restricted_initial_state)
+
+            filter!(!isempty, restricted_initial_state)
+
         end
 
-        log_acceptance = log_Pgenerative(proposed_state, hyperparams) - log_Pgenerative(clusters, hyperparams)
-        log_acceptance /= acceptance_temperature
+        log_acceptance = (log_Pgenerative(proposed_state, hyperparams) - log_Pgenerative(clusters, hyperparams)) / acceptance_temperature
         # println("log_metropolis  $log_acceptance")
         # println("      log_gxxp  $log_gxxp")
         # println("      log_gxpx  $log_gxpx")
@@ -1489,10 +1471,7 @@ module MultivariateNormalCRP
             ##### 1st initialization method: fullseq
             chain.clusters = [Cluster(collect.(data))]
             for i in 1:10
-                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams; method=:all)
-            end
-            if chain.hyperparams.accepted_fullseq == 0
-                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams; method=:all, force_acceptance=true)
+                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, proposal_temperature=2.0, force_acceptance=true)
             end
 
         elseif strategy == :N
@@ -1522,10 +1501,10 @@ module MultivariateNormalCRP
 
     
     function advance_chain!(chain::MNCRPchain; nb_steps=100,
-        nb_splitmerge=5, splitmerge_t=2, sm_prop_temp=1.0, sm_acc_temp=1.0,
+        nb_splitmerge=0, splitmerge_t=2, sm_prop_temp=1.0, sm_acc_temp=1.0,
         nb_gibbs=1, gibbs_temp=1.0,
         nb_hyperparamsmh=10, step_mult=1.0,
-        nb_fullseq=0, fullseq_method=:cluster, fullseq_prop_temp=1.0, fullseq_acc_temp=1.0,
+        nb_fullseq=0, fullseq_prop_temp=1.0, fullseq_acc_temp=1.0,
         checkpoint_every=-1, checkpoint_prefix="chain",
         attempt_map=true, pretty_progress=true)
         
@@ -1541,8 +1520,12 @@ module MultivariateNormalCRP
         last_accepted_merge = hp.accepted_merge
         last_rejected_merge = hp.rejected_merge
         merge_total = 0
+
+        last_accepted_fullseq = hp.accepted_fullseq
+        last_rejected_fullseq = hp.rejected_fullseq
+        fullseq_total = 0
         
-        nb_fullseq_moves = 0
+        # nb_fullseq_moves = 0
         
         nb_map_attemps = 0
         nb_map_successes = 0
@@ -1560,9 +1543,8 @@ module MultivariateNormalCRP
             # from the stationary distribution
             for i in 1:nb_fullseq
                 advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, 
-                method=fullseq_method, 
                 proposal_temperature=fullseq_prop_temp, acceptance_temperature=fullseq_acc_temp)
-                nb_fullseq_moves += 1
+                # nb_fullseq_moves += 1
             end
 
             # Split-merge
@@ -1618,6 +1600,13 @@ module MultivariateNormalCRP
             last_rejected_split = hp.rejected_split
             last_accepted_merge = hp.accepted_merge
             last_rejected_merge = hp.rejected_merge
+
+            fullseq_ratio = "$(hp.accepted_fullseq - last_accepted_fullseq)/$(hp.rejected_fullseq - last_rejected_fullseq)"
+            fullseq_total += hp.accepted_fullseq - last_accepted_fullseq
+            fullseq_per_step = round(fullseq_total/step, digits=2)
+            last_accepted_fullseq = hp.accepted_fullseq
+            last_rejected_fullseq = hp.rejected_fullseq
+
             ########################
     
             # logprob
@@ -1653,12 +1642,12 @@ module MultivariateNormalCRP
                 ProgressMeter.next!(progbar;
                 showvalues=[
                 (:"step", "$(step)/$(nb_steps)"),
-                (:"logprob", "$(round(chain.logprob_chain[end], digits=1))"),
                 (:"chain length", length(chain.logprob_chain)),
+                (:"logprob", "$(round(chain.logprob_chain[end], digits=1))"),
+                (:"clusters (>1)", "$(length(chain.clusters)) ($(length(filter(c -> length(c) > 1, chain.clusters))))"),
                 (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio),
                 (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
-                (:"clusters (>1)", "$(length(chain.clusters)) ($(length(filter(c -> length(c) > 1, chain.clusters))))"),
-                (:"fullseq moves acc/rej (%)", "$(hp.accepted_fullseq)/$(hp.rejected_fullseq) ($(round(hp.accepted_fullseq/(hp.accepted_fullseq + hp.rejected_fullseq), digits=2)))"),
+                (:"fullseq ratio, fullseq/step", fullseq_ratio * ", $(fullseq_per_step)"),
                 (:"MAP att/succ", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
                 (:"clusters in last MAP", length(chain.map_clusters)),
                 (:"last MAP logprob", round(chain.map_logprob, digits=1)),
