@@ -15,7 +15,7 @@ module MultivariateNormalCRP
     using ProgressMeter
 
     import RecipesBase: plot
-    import Base: pop!, push!, length, isempty, union, delete!, iterate, deepcopy, copy, sort, in
+    import Base: pop!, push!, length, isempty, union, delete!, empty!, iterate, deepcopy, copy, sort, in
 
     export findapprox
     export Cluster
@@ -151,6 +151,20 @@ module MultivariateNormalCRP
             pop!(cluster, x)
         end
         return cluster
+    end
+
+    function empty!(cluster::Cluster)
+        empty!(cluster.elements)
+        cluster.sum_x = zeros(size(cluster.sum_x))
+        cluster.sum_xx = zeros(size(cluster.sum_xx))
+        return cluster
+    end
+
+    function delete!(clusters::Vector{Cluster}, x::Vector{Float64})
+        for cluster in clusters
+            delete!(cluster, x)
+        end
+        return clusters
     end
 
     function union(cluster1::Cluster, cluster2::Cluster)
@@ -732,79 +746,61 @@ module MultivariateNormalCRP
     # Split-Merge Metropolis-Hastings with restricted Gibbs sampling from Jain & Neal 2004
     # (nothing wrong with a little ravioli code, 
     #  might refactor later, might not)
-    function advance_clusters_JNrestrictedsplitmerge!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; t=3, proposal_temperature=1.0, acceptance_temperature=1.0)
+    function advance_JNsplitmerge!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; t=3, proposal_temperature=1.0, acceptance_temperature=1.0)
             
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
 
         d = size(mu, 1)
     
         # just to make explicit what's going on
-        elements = [(ce, e) for (ce, c) in enumerate(clusters) for e in c]
+        elements = Tuple{Int64, Vector{Float64}}[(ce, e) for (ce, c) in enumerate(clusters) for e in c]
 
         (ci, ei), (cj, ej) = sample(elements, 2, replace=false)
     
-        # S(minus)ij will only be used for sampling without replacement
-        # and shouldn't change during execution
-        Sminusij = union(clusters[ci], clusters[cj])
-        pop!(Sminusij, ei)
-        pop!(Sminusij, ej)
-        Sminusij = collect(Sminusij)
-    
-        # For merge moves we need the initial state
-        # for the "hypothetical" restricted gibbs state
-        # that would bring the launch state into the initial state.
-        # Namely we need it to form q(initial | merge) = q(initial | launch)
+        # Sminusij = union(clusters[ci], clusters[cj])
+        # pop!(Sminusij, ei)
+        # pop!(Sminusij, ej)
+        # Sminusij = shuffle!(collect(Sminusij))
+
         if ci == cj
 
-            # Keep initial state in case
-            # the proposal is rejected
-            initial_S = copy(clusters[cj])
-        
-            launch_Si = Cluster([ei])
+            Sminusij = Vector{Float64}[e for e in clusters[ci] 
+                                         if !(e === ei) && !(e === ej)]
 
-            # Avoid one more copy
-            launch_Sj = clusters[cj]
-            pop!(launch_Sj, ei)
-        
-            # Remove cluster from the active state
-            # filter!(x -> !(x === launch_Sj), clusters)
-            deleteat!(clusters, cj)
+            initial_S = clusters[ci]
+            deleteat!(clusters, ci)
 
         elseif ci != cj
 
-            # These will serve to calculate The
-            # Hastings factor of the merge proposal
-            initial_Si = copy(clusters[ci])
-            initial_Sj = copy(clusters[cj])
+            Sminusij = collect(flatten((
+                Vector{Float64}[e for e in clusters[ci] if !(e == ei)], 
+                Vector{Float64}[e for e in clusters[cj] if !(e == ej)]
+                )))
 
-            # Avoid two more copies
-            launch_Si = clusters[ci]
-            launch_Sj = clusters[cj]
-        
-            filter!(x -> !(x === launch_Si || x === launch_Sj), clusters)
-        
+            initial_Si = clusters[ci]
+            initial_Sj = clusters[cj]
+            deleteat!(clusters, sort([ci, cj]))
+
         end
-    
 
-        # Shuffle elements (except ei and ej) with equal probability
-        # of being reassigned to either launch cluster
-        for e in Sminusij
-            
-            # Make sure it's in neither
-            delete!(launch_Si, e)
-            delete!(launch_Sj, e)
-
-            assignment = sample([launch_Si, launch_Sj])
-            push!(assignment, e)
-        end
-    
         shuffle!(Sminusij)
     
-        # if t >= 1 perform t restricted Gibbs scans
-        # where each element (except ei and ej) is reassigned
-        # to either the cluster with ei or the cluster with ej
-        for n in 1:t-1
+        launch_Si = Cluster([ei])
+        launch_Sj = Cluster([ej])
+        # launch_Si = Cluster([ei])
+        # launch_Si = Cluster(d)
+        # launch_Sj = Cluster(d)
         
+        # Perform t restricted Gibbs sweeps.
+        # The first sweep is sequential
+        # i.e. we grow launch_Si/launch_Sj
+        # until all elements in Sminusij
+        # are either in launch_Si or
+        # launch_Sj
+
+        for n in 1:t
+        
+            # for e in flatten((Sminusij, [ei, ej]))
             for e in Sminusij
                 
                 # It's in one of them.
@@ -812,55 +808,47 @@ module MultivariateNormalCRP
                 delete!(launch_Si, e)
                 delete!(launch_Sj, e)
                         
-                #############
+                #############        
 
-                # CRP contribution
-                log_weight_Si = log(length(launch_Si))
+                # Nminus1 = length(launch_Si) + length(launch_Sj)
+                # Nempty = isempty(launch_Si) + isempty(launch_Sj)
 
-                # push!(launch_Si, e)
-                # log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu)
-                # log_weight_Si -= log_Zniw(nothing, mu, lambda, psi, nu)
-                # log_weight_Si -= length(launch_Si) * d/2 * log(2pi)
-                # pop!(launch_Si, e)
-                push!(launch_Si, e)
-                log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu)
-                pop!(launch_Si, e)
-                log_weight_Si -= log_Zniw(launch_Si, mu, lambda, psi, nu)
-                log_weight_Si -= d/2 * log(2pi)
-                
-                #############
+                log_weights = zeros(2)
+                for (i, launch_cluster) in enumerate([launch_Si, launch_Sj])
 
-                # CRP contribution
-                log_weight_Sj = log(length(launch_Sj))
-
-                # push!(launch_Sj, e)
-                # log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                # log_weight_Sj -= log_Zniw(nothing, mu, lambda, psi, nu)
-                # log_weight_Sj -= length(launch_Sj) * d/2 * log(2pi)             
-                # pop!(launch_Sj, e)
-                push!(launch_Sj, e)
-                log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                pop!(launch_Sj, e)
-                log_weight_Sj -= log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                log_weight_Sj -= d/2 * log(2pi)             
-
-                #############
+                    # log_weights[i] = (isempty(launch_cluster) ? log(alpha) - log(Nempty) : log(length(launch_cluster))) - log(alpha + Nminus1)
+                    log_weights[i] = log(length(launch_cluster))
+                    
+                    push!(launch_cluster, e)
+                    log_weights[i] += log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    pop!(launch_cluster, e)
+                    log_weights[i] -= log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    log_weights[i] -= d/2 * log(2pi)                        
+                end
 
                 ######## Still in restricted gibbs ########
 
-                unnorm_logp = [log_weight_Si, log_weight_Sj]
+                unnorm_logp = log_weights #/ proposal_temperature
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
                 probs = Weights(exp.(norm_logp))
-
-                assignment = sample([launch_Si, launch_Sj], probs)
-            
-                push!(assignment, e)
-            
+                new_assignment = sample([launch_Si, launch_Sj], probs)
+                push!(new_assignment, e)
             end
-
         end
 
-        shuffle!(Sminusij)
+        # if ei in launch_Sj
+        #     launch_Si, launch_Sj = launch_Sj, launch_Si
+        # end
+        # delete!(launch_Si, ej)
+        # push!(launch_Sj, ej)
+
+        # delete!(launch_Si, ej)
+        # push!(launch_Sj, ej)
+
+        # delete!(launch_Sj, ei)
+        # push!(launch_Si, ei)
+
+        # shuffle!(Sminusij)
     
         ##############
         ### Split! ###
@@ -873,79 +861,67 @@ module MultivariateNormalCRP
             log_q_proposed_given_launch = 0.0
 
             # We rename launch_Si and launch_Sj just
-            # to make it explicit that the last t-1 restricted
+            # to make it explicit that the last t+1 restricted
             # Gibbs scan produces the proposed split state
             proposed_Si = launch_Si
             proposed_Sj = launch_Sj
         
             for e in Sminusij
+            # for e in flatten((Sminusij, [ei, ej]))
 
                 delete!(proposed_Si, e)
                 delete!(proposed_Sj, e)
 
                 #############
 
-                # restricted CRP contribution
-                log_weight_Si = log(length(proposed_Si))
+                log_weights = zeros(2)
+                for (i, proposed_cluster) in enumerate([proposed_Si, proposed_Sj])
+                    # log_weights[i] = isempty(proposed_cluster) ? log(alpha) : log(length(proposed_cluster))
+                    log_weights[i] = log(length(proposed_cluster))
 
-                # push!(proposed_Si, e)
-                # log_weight_Si += log_Zniw(proposed_Si, mu, lambda, psi, nu)
-                # log_weight_Si -= log_Zniw(nothing, mu, lambda, psi, nu)
-                # log_weight_Si -= length(proposed_Si) * d/2 * log(2pi)
-                # pop!(proposed_Si, e)
-                push!(proposed_Si, e)
-                log_weight_Si += log_Zniw(proposed_Si, mu, lambda, psi, nu)
-                pop!(proposed_Si, e)
-                log_weight_Si -= log_Zniw(proposed_Si, mu, lambda, psi, nu)
-                log_weight_Si -= d/2 * log(2pi)
-            
-                #############
-
-                # restricted CRP contribution
-                log_weight_Sj = log(length(proposed_Sj))
-
-                # push!(proposed_Sj, e)
-                # log_weight_Sj += log_Zniw(proposed_Sj, mu, lambda, psi, nu) 
-                # log_weight_Sj -= log_Zniw(nothing, mu, lambda, psi, nu)
-                # log_weight_Sj -= length(proposed_Sj) * d/2 * log(2pi)
-                # pop!(proposed_Sj, e)
-                push!(proposed_Sj, e)
-                log_weight_Sj += log_Zniw(proposed_Sj, mu, lambda, psi, nu) 
-                pop!(proposed_Sj, e)
-                log_weight_Sj -= log_Zniw(proposed_Sj, mu, lambda, psi, nu)
-                log_weight_Sj -= d/2 * log(2pi)
-
-                #############
+                    push!(proposed_cluster, e)
+                    log_weights[i] += log_Zniw(proposed_cluster, mu, lambda, psi, nu) 
+                    pop!(proposed_cluster, e)
+                    log_weights[i] -= log_Zniw(proposed_cluster, mu, lambda, psi, nu)
+                    log_weights[i] -= d/2 * log(2pi)     
+                end
 
                 ######## Still in split! ########
 
-                unnorm_logp = [log_weight_Si, log_weight_Sj] / proposal_temperature
-                norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+                unnorm_logp = log_weights / proposal_temperature
+                norm_logp = unnorm_logp .- logsumexp(unnorm_logp) 
                 probs = Weights(exp.(norm_logp))
 
-                new_assignment, log_p = sample([(proposed_Si, norm_logp[1]), (proposed_Sj, norm_logp[2])], probs)
+                new_assignment, log_qe = sample([(proposed_Si, norm_logp[1]), 
+                                                 (proposed_Sj, norm_logp[2])], 
+                                                probs)
                 
                 push!(new_assignment, e)
 
-                log_q_proposed_given_launch += log_p
+                log_q_proposed_given_launch += log_qe
 
             end
-        
 
-            n_proposed_Si = length(proposed_Si)
-            n_proposed_Sj = length(proposed_Sj)
-            n_initial_S = length(initial_S)        
-        
+            # if ei in proposed_Sj
+                # proposed_Si, proposed_Sj = proposed_Sj, proposed_Si
+            # end
+            # delete!(proposed_Si, ej)
+            # push!(proposed_Sj, ej)
+            
             # The Hastings ratio is 
             # q(initial | proposed) / q(proposed | initial)
             # Here q(initial | proposed) = 1 
             # because the initial state is a merge state with its ci = cj
             # and the proposed state is a split state, so the proposal process
             # would be a merge proposal and there is only one way to do so.
-        
+            
             # Note also that q(proposed | initial) = q(proposed | launch)
             # because every initial states gets shuffled and forgotten
             # when forming a random launch state by restricted Gibbs moves
+
+            n_proposed_Si = length(proposed_Si)
+            n_proposed_Sj = length(proposed_Sj)
+            n_initial_S = length(initial_S)        
         
             log_crp_ratio = log(alpha) + loggamma(n_proposed_Si) + loggamma(n_proposed_Sj) - loggamma(n_initial_S)
 
@@ -966,7 +942,9 @@ module MultivariateNormalCRP
                 hyperparams.rejected_split += 1
             end
         
-            filter!(c -> !isempty(c), clusters)
+            
+            @assert all([!isempty(c) for c in clusters])
+            # filter!(!isempty, clusters)
 
             return clusters
 
@@ -979,71 +957,67 @@ module MultivariateNormalCRP
             # q(initial | merge) = q(initial | launch)
             # and we remember that 
             # q(merge | initial) = q(merge | launch) = 1
+
+            # We do that by performing an hypothetical
+            # restricted gibbs sweep that transforms
+            # the current launch state into the
+            # initial state.
             
             log_q_initial_given_launch = 0.0
 
-
-            for e in reverse(Sminusij)
+            for e in Sminusij
+            # for e in flatten((Sminusij, [ei, ej]))
 
                 delete!(launch_Si, e)
                 delete!(launch_Sj, e)
 
                 #############
 
-                log_weight_Si = log(length(launch_Si))
+                log_weights = zeros(2)
+                for (i, launch_cluster) in enumerate(Cluster[launch_Si, launch_Sj])
+                    # log_weights[i] = isempty(launch_cluster) ? log(alpha) : log(length(launch_cluster))
+                    log_weights[i] = log(length(launch_cluster))
 
-                # push!(launch_Si, e)
-                # log_weight_Si += (log_Zniw(launch_Si, mu, lambda, psi, nu) 
-                #                 - log_Zniw(nothing, mu, lambda, psi, nu)
-                #                 - length(launch_Si) * d/2 * log(2pi))
-                # pop!(launch_Si, e)
-                push!(launch_Si, e)
-                log_weight_Si += log_Zniw(launch_Si, mu, lambda, psi, nu)
-                pop!(launch_Si, e)
-                log_weight_Si -= log_Zniw(launch_Si, mu, lambda, psi, nu)
-                log_weight_Si -= d/2 * log(2pi)
-
-                #############
-                
-                log_weight_Sj = log(length(launch_Sj))
-
-                # push!(launch_Sj, e)
-                # log_weight_Sj += (log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                #                 - log_Zniw(nothing, mu, lambda, psi, nu)
-                #                 - length(launch_Sj) * d/2 * log(2pi))
-                # pop!(launch_Sj, e)                
-                push!(launch_Sj, e)
-                log_weight_Sj += log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                pop!(launch_Sj, e)                
-                log_weight_Sj -= log_Zniw(launch_Sj, mu, lambda, psi, nu)
-                log_weight_Sj -= d/2 * log(2pi)
-
-                #############
+                    push!(launch_cluster, e)
+                    log_weights[i] += log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    pop!(launch_cluster, e)
+                    log_weights[i] -= log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    log_weights[i] -= d/2 * log(2pi)
+                end
 
                 ######## Still in merge! ########
 
-                unnorm_logp = [log_weight_Si, log_weight_Sj] / proposal_temperature
+                unnorm_logp = log_weights / proposal_temperature
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
 
+                ### We are progressively forcing the transformation
+                ### of the launch state into the initial state
+                ### and accumulating the transition probabilities
+
+                # if ei in launch_Sj
+                #     launch_Si, launch_Sj = launch_Sj, launch_Si
+                # end
+
                 if e in initial_Si
-                    log_q_initial_given_launch += norm_logp[1]
                     push!(launch_Si, e)
+                    log_q_initial_given_launch += norm_logp[1]
                 elseif e in initial_Sj
-                    log_q_initial_given_launch += norm_logp[2]
                     push!(launch_Sj, e)
-                else
-                    error("Something went wrong during merge")
+                    log_q_initial_given_launch += norm_logp[2]
                 end
             end
 
+            # delete!(launch_Si, ej)
+            # pop!(launch_Sj, ej)
+
+            ######## Still in merge! ########
+            
             proposed_S = union(launch_Si, launch_Sj)
 
             n_proposed_S = length(proposed_S)
             n_initial_Si = length(initial_Si)
             n_initial_Sj = length(initial_Sj)
         
-            ######## Still in merge! ########
-
             log_crp_ratio = -log(alpha) + loggamma(n_proposed_S) - loggamma(n_initial_Si) - loggamma(n_initial_Sj)
         
             log_likelihood_ratio = log_Zniw(proposed_S, mu, lambda, psi, nu) - log_Zniw(nothing, mu, lambda, psi, nu) - n_proposed_S * d/2 * log(2pi)
@@ -1061,7 +1035,9 @@ module MultivariateNormalCRP
                 hyperparams.rejected_merge += 1
             end
 
-            filter!(c -> !isempty(c), clusters)
+            @assert all([!isempty(c) for c in clusters])
+
+            # filter!(!isempty, clusters)
             
             return clusters
 
@@ -1069,161 +1045,159 @@ module MultivariateNormalCRP
     
     end
 
-
-    # This move is apparently invalid, but appears
-    # to be excellent at shaking the chain into
-    # the bassin of attraction of a good mode
-    # of the posterior.
-    # ...it should be valid though :(
-    # recipe:
-    #  - fullseq 300+
-    #  - gibbs + splitmerge 1000+
-    #  - fullseq 300+
-    #  - gibbs + splitmerge onward
-    function advance_full_sequential_gibbs!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; nb_samples=2, proposal_temperature=1.0, acceptance_temperature=1.0, force_acceptance=false)
-
-        @assert nb_samples >= 2
-        @assert proposal_temperature > 0.0
-        @assert acceptance_temperature > 0.0
-
+    function advance_splitmerge_seq!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; t=3, proposal_temperature=1.0, acceptance_temperature=1.0)
+            
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+
         d = size(mu, 1)
+    
+        elements = Tuple{Int64, Vector{Float64}}[(ce, e) for (ce, c) in enumerate(clusters) for e in c]
 
-        proposed_state = copy(clusters)
+        (ci, ei), (cj, ej) = sample(elements, 2, replace=false)
+    
+        if ci == cj
 
-        all_elements = [el for cluster in proposed_state for el in cluster]
+            scheduled_elements = collect(clusters[ci])
 
-        sampled_elements = sample(all_elements, nb_samples, replace=false)
+            initial_state = Cluster[clusters[ci]]
+            deleteat!(clusters, ci)
 
-        # We want to avoid making Set of Sets because hashing at set
-        # traverses it in full rather than using objectid() unless
-        # the latters are equal
-        cls_clsidx = [find(sample, proposed_state) for sample in sampled_elements]
-        unique_cls_clsidx = []
-        visited_idx = Set()
-        for (cls, idx) in cls_clsidx
-            if !(idx in visited_idx)
-                push!(unique_cls_clsidx, (cls, idx))
-                push!(visited_idx, idx)
-            end
+        elseif ci != cj
+
+            scheduled_elements = collect(flatten((clusters[ci], clusters[cj])))
+
+            initial_state = Cluster[clusters[ci], clusters[cj]]
+            deleteat!(clusters, sort([ci, cj]))
+
         end
-        sort!(unique_cls_clsidx, by=ci -> ci[2])
-        deleteat!(proposed_state, [idx for (cls, idx) in unique_cls_clsidx])
-        restricted_initial_state = Cluster[copy(cluster) for (cluster, idx) in unique_cls_clsidx]
+
+        shuffle!(scheduled_elements)
+    
+        launch_state = Cluster[]
+        proposed_state = Cluster[]
+        log_gxpx = 0.0
+
+        for step in flatten((1:t, [:create_proposed_state]))
         
-        scheduled_elements = shuffle!(collect(flatten(restricted_initial_state)))
-
-        log_gxxp, log_gxpx = 0.0, 0.0
-        
-        restricted_proposed_state = Cluster[]
-
-        for element in scheduled_elements
-
-            Nminus1 = sum(length.(restricted_proposed_state))
-
-            if length(restricted_proposed_state) < nb_samples
-                empty_cluster = Cluster(d)
-                push!(restricted_proposed_state, empty_cluster)
+            if step == :create_proposed_state
+                launch_state = copy(proposed_state)                
             end
 
-            @assert length(restricted_proposed_state) <= nb_samples
-            
-            log_weights = zeros(length(restricted_proposed_state))
-            for (i, cluster) in enumerate(restricted_proposed_state)
+            log_gxpx = 0.0
 
-                log_weights[i] = (isempty(cluster) ? log(alpha) : log(length(cluster))) - log(alpha + Nminus1)
-                
-                push!(cluster, element)
-                log_weights[i] += log_Zniw(cluster, mu, lambda, psi, nu)
-                pop!(cluster, element)
-                
-                log_weights[i] -= log_Zniw(cluster, mu, lambda, psi, nu)
-                log_weights[i] -= d/2 * log(2pi) # unnecessary
+            for e in scheduled_elements
+
+                delete!(proposed_state, e)
+
+                if length(proposed_state) < 2
+                    push!(proposed_state, Cluster(d))
+                end
+
+                @assert sum(isempty.(proposed_state)) <= 1
+
+                #############        
             
+                log_weights = zeros(length(proposed_state))
+                for (i, launch_cluster) in enumerate(proposed_state)
+                    
+                    log_weights[i] = (isempty(launch_cluster) ? log(alpha) : log(length(launch_cluster)))
+                    
+                    push!(launch_cluster, e)
+                    log_weights[i] += log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    pop!(launch_cluster, e)
+                    log_weights[i] -= log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    log_weights[i] -= d/2 * log(2pi)
+
+                end
+
+                unnorm_logp = log_weights / (step == :create_proposed_state ? proposal_temperature : 1.0)
+                norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+                probs = Weights(exp.(norm_logp))
+                new_assignment, log_p = sample(collect(zip(proposed_state, norm_logp)), probs)
+                
+                push!(new_assignment, e)
+                
+                log_gxpx += log_p
+                
             end
-
-
-            unnorm_logp = log_weights / proposal_temperature
-            norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
-            
-            selected_cluster_idx = sample(1:length(restricted_proposed_state), Weights(exp.(norm_logp)))
-
-            log_gxpx += norm_logp[selected_cluster_idx]
-            
-            push!(restricted_proposed_state[selected_cluster_idx], element)
-            
-            filter!(!isempty, restricted_proposed_state)
         end
 
-        append!(proposed_state, restricted_proposed_state)
+        filter!(!isempty, launch_state)
+        filter!(!isempty, proposed_state)
 
-        ##### Backward transition from proposed to initial #####
+        if length(initial_state) < 2
+            push!(initial_state, Cluster(d))
+        end    
 
-        for element in reverse(scheduled_elements)
+        log_gxxps = zeros(2)
 
-            container, container_idx = find(element, restricted_initial_state)
+        launch_state_copies = Vector{Cluster}[launch_state, copy(launch_state)]
 
-            pop!(container, element)
+        for (i, (left_initial_cluster, right_initial_cluster)) in enumerate([(initial_state[1], initial_state[2]),
+                                                                            (initial_state[2], initial_state[1])])
 
-            # Make sure there's at least one empty
-            # cluster so that we calculate the
-            # correct transition probabilities.
-            # Otherwise keep the empty cluster where it is
-            # so that container_idx remains valid.
-            if !isempty(container)
-                empty_cluster = Cluster(d)
-                push!(restricted_initial_state, empty_cluster)
+            for e in scheduled_elements
+
+                pop!(launch_state_copies[i], e)
+
+                if length(launch_state_copies[i]) < 2
+                    push!(launch_state_copies[i], Cluster(d))
+                end
+
+                log_weights = zeros(2)
+
+                for (i, launch_cluster) in enumerate(launch_state_copies[i])
+
+                    log_weights[i] = isempty(launch_cluster) ? log(alpha) : log(length(launch_cluster))
+                    
+                    push!(launch_cluster, e)
+                    log_weights[i] += log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    pop!(launch_cluster, e)
+                    log_weights[i] -= log_Zniw(launch_cluster, mu, lambda, psi, nu)
+                    log_weights[i] -= d/2 * log(2pi)
+
+                end
+
+                unnorm_logp = log_weights / proposal_temperature
+                norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+
+                if e in left_initial_cluster
+                    log_gxxps[i] += norm_logp[1]
+                    push!(launch_state_copies[i][1], e)
+                elseif e in right_initial_cluster
+                    log_gxxps[i] += norm_logp[2]
+                    push!(launch_state_copies[i][2], e)
+                else
+                    @error "Something went wrong"
+                end
+                
             end
             
-            Nminus1 = sum(length.(restricted_initial_state))
-
-            log_weights = zeros(length(restricted_initial_state))
-            for (i, cluster) in enumerate(restricted_initial_state)
-
-                log_weights[i] = (isempty(cluster) ? log(alpha) : log(length(cluster))) - log(alpha + Nminus1)
-                
-                push!(cluster, element)
-                log_weights[i] += log_Zniw(cluster, mu, lambda, psi, nu)
-                pop!(cluster, element)
-                log_weights[i] -= log_Zniw(cluster, mu, lambda, psi, nu)
-                log_weights[i] -= d/2 * log(2pi) # unnecessary
-
-            end
-
-            unnorm_logp = log_weights / proposal_temperature
-            norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
-
-            log_gxxp += norm_logp[container_idx]
-
-            filter!(!isempty, restricted_initial_state)
-
         end
 
-        log_acceptance = (log_Pgenerative(proposed_state, hyperparams) - log_Pgenerative(clusters, hyperparams)) / acceptance_temperature
-        # println("log_metropolis  $log_acceptance")
-        # println("      log_gxxp  $log_gxxp")
-        # println("      log_gxpx  $log_gxpx")
-        # println("  log_hastings  $(log_gxxp - log_gxpx)")
+        filter!(!isempty, initial_state)
 
-        # Hastings ratio
+        log_gxxp = logsumexp(log_gxxps)
+
+        log_acceptance = (log_Pgenerative(proposed_state, hyperparams, hyperpriors=false) 
+                        - log_Pgenerative(initial_state, hyperparams, hyperpriors=false)) 
+        log_acceptance /= acceptance_temperature
+
         log_acceptance += log_gxxp - log_gxpx
         log_acceptance = min(0.0, log_acceptance)
         
-        # println("log_acceptance  $log_acceptance")
-        # println()
-
-        if force_acceptance || log(rand()) < log_acceptance
-            empty!(clusters)
+        if log(rand()) < log_acceptance
             append!(clusters, proposed_state)
             hyperparams.accepted_fullseq += 1
-            # println("accepted")
         else
+            append!(clusters, initial_state)
             hyperparams.rejected_fullseq += 1
-            # println("rejected")
         end
 
-        return clusters
+        @assert all([!isempty(c) for c in clusters])
 
+        return clusters
+    
     end
 
 
@@ -1468,6 +1442,8 @@ module MultivariateNormalCRP
 
         @assert all(size(e, 1) == size(first(data), 1) for e in data)
 
+        N = length(data)
+
         d = size(first(data), 1)
 
         hyperparams = MNCRPhyperparams(d)
@@ -1478,9 +1454,10 @@ module MultivariateNormalCRP
         
         if strategy == :fullseq
             ##### 1st initialization method: fullseq
-            chain.clusters = [Cluster(collect.(data))]
+            chain.clusters = [Cluster(data)]
+            # advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, nb_samples=N, proposal_temperature=1.0, force_acceptance=true)
             for i in 1:10
-                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, proposal_temperature=2.0, force_acceptance=true)
+                advance_gibbs!(chain.clusters, chain.hyperparams, temperature=1.2)
             end
 
         elseif strategy == :N
@@ -1551,15 +1528,14 @@ module MultivariateNormalCRP
             # This one might be biasing away
             # from the stationary distribution
             for i in 1:nb_fullseq
-                advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, 
-                nb_samples=fullseq_nb_samples,
-                proposal_temperature=fullseq_prop_temp, acceptance_temperature=fullseq_acc_temp)
-                # nb_fullseq_moves += 1
+                advance_splitmerge_seq!(chain.clusters, chain.hyperparams, 
+                t=splitmerge_t,
+                proposal_temperature=fullseq_prop_temp, acceptance_temperature=fullseq_acc_temp)                # nb_fullseq_moves += 1
             end
 
             # Split-merge
             for i in 1:nb_splitmerge
-                advance_clusters_JNrestrictedsplitmerge!(chain.clusters, chain.hyperparams, 
+                advance_JNsplitmerge!(chain.clusters, chain.hyperparams, 
                 t=splitmerge_t, 
                 proposal_temperature=sm_prop_temp, acceptance_temperature=sm_acc_temp)
             end            
@@ -2003,15 +1979,27 @@ module MultivariateNormalCRP
         return dist
     end
 
-    function presence_probability(x, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; min=0)
+    function presence_probability(x, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; minsize=0)
         
+
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = size(mu, 1)
         N = sum([length(cl) for cl in clusters])
 
-        clusters = filter(x -> length(x) >= min, clusters)
+        @assert all(!isempty, clusters)
 
         push!(clusters, Cluster(d))
+
+        if typeof(minsize) == Float64
+            sorted_sizes = sort(length.(clusters))
+            minsize = sorted_sizes[findfirst(x -> x[2] >= minsize * N, 
+                                            collect(zip(sorted_sizes, cumsum(sorted_sizes))))
+                                        ]
+        end
+        
+        minsize = max(minsize, 1)
+
+        under_tresh_mask = [length(cl) < minsize for cl in clusters]
 
         log_assignments = zeros(length(clusters))
         for (i, cluster) in enumerate(clusters)
@@ -2031,7 +2019,7 @@ module MultivariateNormalCRP
 
         log_assignments .-= logsumexp(log_assignments)
         
-        return 1.0 - exp(log_assignments[end])
+        return 1.0 - exp(logsumexp(log_assignments[under_tresh_mask]))
 
     end
 
