@@ -20,8 +20,6 @@ mutable struct Diagnostics
     accepted_merge::Int64
     rejected_merge::Int64
 
-    accepted_fullseq::Int64
-    rejected_fullseq::Int64
 end
 
 function Diagnostics(d)
@@ -33,7 +31,6 @@ function Diagnostics(d)
         zeros(Int64, d), zeros(Int64, d), 
         0, 0, 
         zeros(Int64, sizeflatL), zeros(Int64, sizeflatL), 
-        0, 0, 
         0, 0, 
         0, 0, 
         0, 0)
@@ -61,6 +58,4 @@ function clear_diagnostics!(diagnostics::Diagnostics)
     diagnostics.accepted_merge = 0
     diagnostics.rejected_merge = 0
 
-    diagnostics.accepted_fullseq = 0
-    diagnostics.rejected_fullseq = 0    
 end

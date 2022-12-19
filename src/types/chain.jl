@@ -6,8 +6,12 @@ mutable struct MNCRPchain
     # Current value of hyperparameters
     hyperparams::MNCRPhyperparams
 
+    data_offset::Vector{Float64}
+    data_scale::Vector{Float64}
+
     # Some chains of interests
     nbclusters_chain::Vector{Int64}
+    largestcluster_chain::Vector{Int64}
     hyperparams_chain::Vector{MNCRPhyperparams}
     logprob_chain::Vector{Float64}
     observation_chain::Vector{Vector{Float64}}
@@ -29,5 +33,3 @@ psi_chain(chain::MNCRPchain, i, j) = [p.psi[i, j] for p in chain.hyperparams_cha
 flatL_chain(chain::MNCRPchain) = [p.flatL for p in chain.hyperparams_chain]
 flatL_chain(chain::MNCRPchain, i) = [p.flatL[i] for p in chain.hyperparams_chain]
 nu_chain(chain::MNCRPchain) = [p.nu for p in chain.hyperparams_chain]
-
-foo() = "bar"
