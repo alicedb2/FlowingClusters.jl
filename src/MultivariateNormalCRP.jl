@@ -12,6 +12,7 @@ module MultivariateNormalCRP
     using StatsPlots: covellipse!
     using JLD2
     using ProgressMeter
+    using Optim: optimize, minimizer, LBFGS
 
     import RecipesBase: plot
     import Base: pop!, push!, length, isempty, union, delete!, empty!, iterate, deepcopy, copy, sort, in
@@ -30,10 +31,6 @@ module MultivariateNormalCRP
     include("types/hyperparams.jl")
     include("types/cluster.jl")
     include("types/chain.jl")
-
-    function dims_to_proj(dims::Vector{Int64}, d::Int64)
-        return diagm(ones(d))[dims, :]
-    end
 
     function drawNIW(
         mu::Vector{Float64}, 
@@ -868,16 +865,22 @@ module MultivariateNormalCRP
 
     end
 
-    function attempt_map!(chain::MNCRPchain; max_nb_pushes=15)
+    function attempt_map!(chain::MNCRPchain; max_nb_pushes=15, optimize_hyperparams=true)
             
         map_clusters_attempt = copy(chain.clusters)
         map_mll = log_Pgenerative(map_clusters_attempt, chain.hyperparams)
         
+        hyperparams = deepcopy(chain.hyperparams)
+        
+        if optimize_hyperparams
+            optimize_hyperparams!(map_clusters_attempt, hyperparams)
+        end
+
         # Greedy Gibbs!
         for p in 1:max_nb_pushes
             test_attempt = copy(map_clusters_attempt)
-            advance_gibbs!(test_attempt, chain.hyperparams; temperature=0.0)
-            test_mll = log_Pgenerative(test_attempt, chain.hyperparams)
+            advance_gibbs!(test_attempt, hyperparams; temperature=0.0)
+            test_mll = log_Pgenerative(test_attempt, hyperparams)
             if test_mll <= map_mll
                 # We've regressed, so stop and leave
                 # the previous state before this test
@@ -891,11 +894,15 @@ module MultivariateNormalCRP
             end
         end
 
-        attempt_logprob = log_Pgenerative(map_clusters_attempt, chain.hyperparams)
+        if optimize_hyperparams
+            optimize_hyperparams!(map_clusters_attempt, hyperparams)
+        end
+
+        attempt_logprob = log_Pgenerative(map_clusters_attempt, hyperparams)
         if attempt_logprob > chain.map_logprob
             chain.map_logprob = attempt_logprob
             chain.map_clusters = map_clusters_attempt
-            chain.map_hyperparams = deepcopy(chain.hyperparams)
+            chain.map_hyperparams = hyperparams
             chain.map_idx = lastindex(chain.logprob_chain)
             return true
         else
@@ -903,14 +910,17 @@ module MultivariateNormalCRP
         end
     end
 
-    function plot(clusters::Vector{Cluster}; rev=false, plot_kw...)
+    function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, plot_kw...)
         
+        @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
+
         p = plot(
             legend_position=:topleft, grid=:no, 
             showaxis=:no, ticks=:true;
             plot_kw...)
 
-        clusters = sort(clusters, by=length, rev=rev)
+        clusters = project_clusters(sort(clusters, by=length, rev=rev), dims)
+
         for (cluster, color) in zip(clusters, cycle(tableau_20))
             scatter!(collect(Tuple.(cluster)), label="$(length(cluster))", 
             color=color, markerstrokewidth=0)
@@ -921,61 +931,26 @@ module MultivariateNormalCRP
 
     end
 
-    function covellipses!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; n_std=2, scalematrix=nothing, offset=nothing, mode=false, lowest_weight=nothing, plot_kw...)
+    # function plot(chain::MNCRPchain, cluster::Cluster, hyperparams::MNCRPhyperparams; eigdirs::Vector{Float64}=[1, 2], burn=0)
 
-        mu0, lambda0, psi0, nu0 = hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
-        d = size(mu0, 1)
+    #     _, evecs = eigen_mode(cluster, hyperparams)
 
-        for c in clusters
-            if lowest_weight === nothing || length(c) >= lowest_weight
-                mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(c, mu0, lambda0, psi0, nu0)
-                
-                if mode
-                    # Sigma mode of the posterior
-                    sigma_c = psi_c / (nu_c + d + 1)
-                else
-                    # Average sigma of the posterior
-                    sigma_c = psi_c / (nu_c - d - 1)
-                end
+    #     # proj = (evecs[:, end + 1 - eigdirs[1]], evecs[:, end + 1 - eigdirs[2]])
+    #     proj = Matrix{Float64}(evecs[:, [end + 1 - eigdirs[1], end + 1 - eigdirs[2]]]')
 
-                if !(scalematrix === nothing)
-                    mu_c = inv(scalematrix) * mu_c
-                    sigma_c = inv(scalematrix) * sigma_c * inv(scalematrix)'
-                end
+    #     return plot(chain, proj, burn=burn)
 
-                if !(offset === nothing)
-                    mu_c += offset
-                end
+    # end
+    
+    function plot(chain::MNCRPchain; dims::Vector{Int64}=[1, 2], burn=0)
+        
+        @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
-                covellipse!(mu_c, sigma_c; n_std=n_std, legend=nothing, plot_kw...)
-            end
-        end
-    end
-
-    function plot(chain::MNCRPchain; dims::Tuple{Int64, Int64}=(1, 2), burn=0)
         d = size(chain.hyperparams.mu, 1)
         
-        proj = dims_to_proj([dims[1], dims[2]], d)
+        proj = dims_to_proj(dims, d)
 
         return plot(chain, proj, burn=burn)
-    end
-
-    function eigen_mode(cluster::Cluster, hyperparams::MNCRPhyperparams)
-        _, _, psi_c, nu_c = updated_niw_hyperparams(cluster, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
-        d = size(hyperparams.mu, 1)
-        sigma_mode = Symmetric(psi_c / (nu_c + d + 1))
-        return eigen(sigma_mode)
-    end
-
-    function plot(chain::MNCRPchain, cluster::Cluster, hyperparams::MNCRPhyperparams; eigdirs::Tuple{Int64, Int64}=(1, 2), burn=0)
-
-        _, evecs = eigen_mode(cluster, hyperparams)
-
-        # proj = (evecs[:, end + 1 - eigdirs[1]], evecs[:, end + 1 - eigdirs[2]])
-        proj = Matrix{Float64}(evecs[:, [end + 1 - eigdirs[1], end + 1 - eigdirs[2]]]')
-
-        return plot(chain, proj, burn=burn)
-
     end
 
     function plot(chain::MNCRPchain, proj::Matrix{Float64}; burn=0)
@@ -1037,6 +1012,46 @@ module MultivariateNormalCRP
         size=(1500, 1500), layout=lo)
 
         return p
+    end
+
+    function eigen_mode(cluster::Cluster, hyperparams::MNCRPhyperparams)
+        _, _, psi_c, nu_c = updated_niw_hyperparams(cluster, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
+        d = size(hyperparams.mu, 1)
+        sigma_mode = Symmetric(psi_c / (nu_c + d + 1))
+        return eigen(sigma_mode)
+    end
+
+    function covellipses!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams; dims::Vector{Int64}=[1, 2], n_std=2, scalematrix=nothing, offset=nothing, mode=false, lowest_weight=nothing, plot_kw...)
+
+        mu0, lambda0, psi0, nu0 = hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+        d = size(mu0, 1)
+
+        clusters = proj_clusters(clusters, dims)
+
+        for c in clusters
+            if lowest_weight === nothing || length(c) >= lowest_weight
+                mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(c, mu0, lambda0, psi0, nu0)
+                
+                if mode
+                    # Sigma mode of the posterior
+                    sigma_c = psi_c / (nu_c + d + 1)
+                else
+                    # Average sigma of the posterior
+                    sigma_c = psi_c / (nu_c - d - 1)
+                end
+
+                if !(scalematrix === nothing)
+                    mu_c = inv(scalematrix) * mu_c
+                    sigma_c = inv(scalematrix) * sigma_c * inv(scalematrix)'
+                end
+
+                if !(offset === nothing)
+                    mu_c += offset
+                end
+
+                covellipse!(mu_c, sigma_c; n_std=n_std, legend=nothing, plot_kw...)
+            end
+        end
     end
 
     function stats(chain::MNCRPchain; burn=0)
@@ -1243,5 +1258,29 @@ module MultivariateNormalCRP
 
     # end
 
+    function optimize_hyperparams(clusters::Vector{Cluster}, hyperparams0::MNCRPhyperparams)
 
+        objfun(x) = -log_Pgenerative(clusters, opt_pack(x))
+
+        optres = optimize(objfun, opt_unpack(hyperparams0), LBFGS())
+
+        opt_hp = opt_pack(minimizer(optres))
+
+        return opt_hp
+
+    end
+
+    function optimize_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
+        
+        opt_res = optimize_hyperparams(clusters, hyperparams)
+
+        hyperparams.alpha = opt_res.alpha
+        hyperparams.mu = opt_res.mu
+        hyperparams.lambda = opt_res.lambda
+        hyperparams.psi = opt_res.psi
+        hyperparams.nu = opt_res.nu
+
+        return hyperparams
+    
+    end
 end
