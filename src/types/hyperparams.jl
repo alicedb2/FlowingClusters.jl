@@ -155,6 +155,17 @@ function psi!(hyperparams::MNCRPhyperparams, value::Matrix{Float64})
     hyperparams.psi = value
 end
 
+project_vec(vec::Vector{Float64}, proj::Matrix{Float64}) = proj * vec
+project_vec(vec::Vector{Float64}, dims::Vector{Int64}) = dims_to_proj(dims, size(vec, 1)) * vec
+
+project_mat(mat::Matrix{Float64}, proj::Matrix{Float64}) = proj * mat * proj'
+
+function project_mat(mat::Matrix{Float64}, dims::Vector{Int64})
+    d = size(mat, 1)
+    proj = dims_to_proj(dims, d)
+    return proj * mat * proj'
+end
+
 function project_hyperparams(hyperparams::MNCRPhyperparams, proj::Matrix{Float64})
     proj_hp = deepcopy(hyperparams)
     proj_hp.mu = proj * proj_hp.mu
@@ -162,7 +173,43 @@ function project_hyperparams(hyperparams::MNCRPhyperparams, proj::Matrix{Float64
     return proj_hp
 end
 
+
 function project_hyperparams(hyperparams::MNCRPhyperparams, dims::Vector{Int64})
     d = size(hyperparams.mu, 1)
     return project_hyperparams(hyperparams, dims_to_proj(dims, d))
+end
+
+function opt_pack(x::Vector{Float64}; transformed=true)
+
+    d = Int64((sqrt(8 * length(x) - 15) - 3)/2)
+
+    alpha = x[1]
+    mu = x[2:2 + d - 1]
+    lambda = x[2 + d]
+    flatL = x[2 + d + 1:2 + d + div(d * (d + 1), 2)]
+    nu = x[end]
+
+    if transformed
+        alpha = exp(alpha)
+        lambda = exp(lambda)
+        nu = d - 1 + exp(nu)
+    end
+
+    return MNCRPhyperparams(alpha, mu, lambda, flatL, nu)
+end
+
+function opt_unpack(hp::MNCRPhyperparams; transform=true)
+    
+    d = size(hp.mu, 1)
+    alpha = hp.alpha
+    lambda = hp.lambda
+    nu = hp.nu
+
+    if transform
+        alpha = log(alpha)
+        lambda = log(lambda)
+        nu = log(nu - (d - 1))
+    end
+
+    return vcat([alpha], hp.mu, [lambda], hp.flatL, [nu])
 end
