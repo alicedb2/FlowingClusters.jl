@@ -1,8 +1,8 @@
 module MultivariateNormalCRP
-    using Distributions: MvNormal, InverseWishart, Normal, Cauchy, Uniform, Multinomial
+    using Distributions: MvNormal, MvTDist, InverseWishart, Normal, Cauchy, Uniform
     using Random: randperm, shuffle, shuffle!, seed!
     using StatsFuns: logsumexp, logmvgamma
-    using StatsBase: sample, mean, Weights, std, percentile, quantile, median
+    using StatsBase: sample, mean, Weights, std, percentile, quantile, median, iqr
     using LinearAlgebra: logdet, det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd
     using SpecialFunctions: loggamma, polygamma
     using Base.Iterators: cycle
@@ -26,7 +26,7 @@ module MultivariateNormalCRP
     export plot, covellipses!
     export project_clusters, project_cluster, project_hyperparams, project_mu, project_psi
     export local_average_covprec, crp_distance, crp_distance_matrix
-    export presence_probability, tail_probability, absence_probability
+    export tail_probability, tail_probability_summary
     export wasserstein2_distance, wasserstein1_distance_bound
     export minimum_size
 
@@ -696,7 +696,7 @@ module MultivariateNormalCRP
     end
 
     
-    function advance_chain!(chain::MNCRPchain; nb_steps=100,
+    function advance_chain!(chain::MNCRPchain, nb_steps=100;
         nb_splitmerge=30, splitmerge_t=3,
         nb_gibbs=1, gibbs_temp=1.0,
         nb_mhhyperparams=10, mh_stepscale=1.0,
@@ -741,7 +741,7 @@ module MultivariateNormalCRP
             # by the standard deviation along each dimension.
             for i in 1:nb_mhhyperparams
                 advance_alpha!(chain.clusters, chain.hyperparams, 
-                                step_type=:gaussian, step_size=mh_stepscale * .5)
+                                step_type=:gaussian, step_size=mh_stepscale * 0.5)
                 
                 advance_mu!(chain.clusters, chain.hyperparams, 
                             step_type=:gaussian, step_size=mh_stepscale * 0.3)
@@ -970,7 +970,7 @@ module MultivariateNormalCRP
 
     # end
     
-    function plot(chain::MNCRPchain; dims::Vector{Int64}=[1, 2], burn=0)
+    function plot(chain::MNCRPchain; dims::Vector{Int64}=[1, 2], burn=0, rev=false)
         
         @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
@@ -978,18 +978,18 @@ module MultivariateNormalCRP
         
         proj = dims_to_proj(dims, d)
 
-        return plot(chain, proj, burn=burn)
+        return plot(chain, proj, burn=burn, rev=rev)
     end
 
-    function plot(chain::MNCRPchain, proj::Matrix{Float64}; burn=0)
+    function plot(chain::MNCRPchain, proj::Matrix{Float64}; burn=0, rev=false)
         
         @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
         
         map_marginals = project_clusters(chain.map_clusters, proj)
         current_marginals = project_clusters(chain.clusters, proj)
         
-        p_map = plot(map_marginals, title="MAP state ($(length(chain.map_clusters)) clusters)")
-        p_current = plot(current_marginals, title="Current state ($(length(chain.clusters)) clusters)", legend=false)
+        p_map = plot(map_marginals; rev=rev, title="MAP state ($(length(chain.map_clusters)) clusters)")
+        p_current = plot(current_marginals; rev=rev, title="Current state ($(length(chain.clusters)) clusters)", legend=false)
 
         lpc = chain.logprob_chain
         p_logprob = plot(burn+1:length(lpc), lpc[burn+1:end], grid=:no, label=nothing, title="log probability chain")
@@ -1218,113 +1218,6 @@ module MultivariateNormalCRP
         return dist
     end
 
-    function presence_probability(x::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams, threshold=0.05)
-        
-
-        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
-        
-        # alpha = 300.0
-
-        d = size(mu, 1)
-
-        @assert all(!isempty, clusters)
-
-        minsize = minimum_size(clusters, threshold)
-
-        push!(clusters, Cluster(d))
-
-        under_tresh_mask = [length(cl) < minsize for cl in clusters]
-
-        log_assignments = zeros(length(clusters))
-        for (i, cluster) in enumerate(clusters)
-            log_assignments[i] = log_cluster_weight(x, cluster, alpha, mu, lambda, psi, nu)
-        end
-
-        # remove empty cluster
-        pop!(clusters)
-
-        log_assignments .-= logsumexp(log_assignments)
-        
-        return 1.0 - exp(logsumexp(log_assignments[under_tresh_mask]))
-
-    end
-    
-    # Picky eater process with beta
-    # the probability of liking the menu
-    function absence_probability(x::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
-        
-
-        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
-        beta = 1/2
-
-        N = sum(length.(clusters))
-        d = size(mu, 1)
-
-        @assert all(!isempty, clusters)
-
-        push!(clusters, Cluster(d))
-
-        log_assignments = zeros(length(clusters))
-        for (i, cluster) in enumerate(clusters)
-            log_assignments[i] = log(beta) + log_cluster_weight(x, cluster, alpha, mu, lambda, psi, nu; N=N + beta)
-        end
-
-        pop!(clusters)
-
-        # Picky eater process wiht beta=1/2
-        push!(log_assignments, log(1.0 - beta) - log(alpha + N + beta))
-
-        log_assignments .-= logsumexp(log_assignments)
-        
-        return exp(logsumexp(log_assignments[end]))
-
-    end
-
-    function tail_probability(x::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
-        
-
-        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
-        
-        d = size(mu, 1)
-        N = sum([length(cl) for cl in clusters])
-
-        @assert all(!isempty, clusters)
-
-        # push!(clusters, Cluster(d))
-
-        log_weights = zeros(length(clusters))
-        tail_probabilities = zeros(length(clusters))
-
-        for (i, cluster) in enumerate(clusters)
-
-            log_weights[i] = log_cluster_weight(x, cluster, alpha, mu, lambda, psi, nu)
-
-            push!(cluster, x)
-            mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
-            pop!(cluster, x)
-            
-            Rsquare = (x - mu_c)' * inv(psi_c / (nu_c - d - 1)) * (x - mu_c)
-            # print(x - mu_c, "   ")
-            # print(psi_c / (nu_c + d + 1))
-            # println("  $(round(Rsquare, digits=2))")
-            # print("$(round(loggamma(d/2, Rsquare/2), digits=2)), ")
-            # println("$(round(loggamma(d/2, Rsquare/2) - loggamma(d/2), digits=2))")
-            # flush(stdout)
-            tail_probabilities[i] = exp(loggamma(d/2, Rsquare/2) - loggamma(d/2))
-
-        end
-
-        # pop!(clusters)
-
-        log_weights .-= logsumexp(log_weights)
-
-        component_probabilities = exp.(log_weights)
-
-        average_tail_probability = sum(tail_probabilities .* component_probabilities)
-
-        return average_tail_probability
-
-    end
 
     function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
 
@@ -1370,4 +1263,91 @@ module MultivariateNormalCRP
         return hyperparams
     
     end
+
+
+    function updated_mvstudent_params(cluster::Cluster, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
+
+        d = size(mu, 1)
+           
+        mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
+
+        return (nu_c - d + 1, mu_c, (lambda_c + 1)/lambda_c/(nu_c - d + 1) * psi_c)
+
+    end
+
+    function predictive_logpdf(clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams)
+
+    end
+
+    function tail_probability(x::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams, nb_samples=100)
+        return tail_probability(Vector{Float64}[x], clusters, hyperparams, nb_samples)
+    end
+
+    function tail_probability(Xs::Vector{Vector{Float64}}, clusters::Vector{Cluster}, hyperparams::MNCRPhyperparams, nb_samples=100)
+
+        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+        d = size(mu, 1)
+
+        weights = 1.0 .* length.(clusters)
+        # updated_hyperparams = [updated_niw_hyperparams(cluster, mu, lambda, psi, nu) for cluster in clusters]
+        # degs_mus_sigs = [(nu_c - d + 1, mu_c, (lambda_c + 1)/lambda_c/(nu_c - d + 1) * psi_c) for (mu_c, lambda_c, psi_c, nu_c) in updated_hyperparams]
+        degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
+
+        push!(weights, alpha)
+        # push!(degs_mus_sigs, (nu - d + 1, mu, (lambda + 1)/lambda/(nu - d + 1) * psi))
+        push!(degs_mus_sigs, updated_mvstudent_params(Cluster(d), mu, lambda, psi, nu))
+
+        weights ./= sum(weights)
+
+        logpdf(x) = logsumexp(log(w) + loggamma((deg + d)/2) - loggamma(deg/2)
+                    - d/2 * log(deg) - d/2 * log(pi) - 1/2 * log(det(sig))
+                    - (deg + d)/2 * log(1 + 1/deg * (x - mu)' * inv(sig) * (x - mu))
+                    for (w, (deg, mu, sig)) in zip(weights, degs_mus_sigs))
+
+        sample_logpdfs = zeros(nb_samples)
+        for i in 1:nb_samples
+            deg, mu, sig = sample(degs_mus_sigs, Weights(weights))
+            sample_draw = rand(MvTDist(deg, mu, sig))
+            sample_logpdfs[i] = logpdf(sample_draw)
+        end
+
+        tail_probabilities = zeros(size(Xs))
+
+        for i in 1:size(Xs, 1)
+            isocontour_val = logpdf(Xs[i])
+            tail_probabilities[i] = sum(sample_logpdfs .< isocontour_val)
+        end
+        
+        return tail_probabilities ./ nb_samples
+
+    end
+
+    function tail_probability(Xs::Vector{Vector{Float64}}, chain::MNCRPchain, nb_samples=1000)
+        return tail_probability(Xs, chain.clusters_samples, chain.hyperparams_samples, nb_samples)
+    end
+    
+    function tail_probability(Xs::Vector{Vector{Float64}}, clusters_samples::CircularBuffer{Vector{Cluster}}, hyperparams_samples::CircularBuffer{MultivariateNormalCRP.MNCRPhyperparams}, nb_samples=1000)
+        
+        @assert length(clusters_samples) == length(hyperparams_samples)
+        tail_probs_samples = Vector{Float64}[tail_probability(Xs, clusters, hyperparams, nb_samples) for (clusters, hyperparams) in zip(clusters_samples, hyperparams_samples)]
+    
+        return tail_probs_samples
+
+    end
+
+    function tail_probability_summary(Xs::Vector{Vector{Float64}}, chain::MNCRPchain, nb_samples=1000)
+        return tail_probability_summary(Xs::Vector{Vector{Float64}}, chain.clusters_samples, chain.hyperparams_samples, nb_samples)
+    end
+
+    function tail_probability_summary(Xs::Vector{Vector{Float64}}, clusters_samples::CircularBuffer{Vector{Cluster}},  hyperparams_samples::CircularBuffer{MultivariateNormalCRP.MNCRPhyperparams}, nb_samples=1000)
+        
+        tail_probs_samples = reduce(hcat, tail_probability(Xs, clusters_samples, hyperparams_samples, nb_samples))
+        
+        medians_probs = median.(collect(eachrow(tail_probs_samples)))
+        iqr_probs = iqr.(collect(eachrow(tail_probs_samples)))
+
+        return (median=medians_probs, iqr=iqr_probs)
+
+    end
+
 end
