@@ -2,10 +2,14 @@ mutable struct Cluster
     elements::Set{Vector{Float64}}
     sum_x::Vector{Float64}
     sum_xx::Matrix{Float64}
+
+    # This is not thread-safe
+    mu_c_volatile::Vector{Float64}
+    psi_c_volatile::Matrix{Float64}
 end
 
 function Cluster(d::Int64)
-    return Cluster(Set{Vector{Float64}}(), zeros(Float64, d), zeros(Float64, d, d))
+    return Cluster(Set{Vector{Float64}}(), zeros(Float64, d), zeros(Float64, d, d), Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 end
 
 function Cluster(elements::Vector{Vector{Float64}})
@@ -42,7 +46,7 @@ function Cluster(elements::Vector{Vector{Float64}})
 
     elements = Set{Vector{Float64}}(elements)
 
-    return Cluster(elements, sum_x, sum_xx)
+    return Cluster(elements, sum_x, sum_xx, Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 
 end
 
@@ -61,6 +65,7 @@ function pop!(cluster::Cluster, x::Vector{Float64})
             cluster.sum_xx[j, i] = cluster.sum_xx[i, j]
         end
     end
+
 
     return x
 end
@@ -81,6 +86,8 @@ function pop!(cluster::Cluster)
             cluster.sum_xx[j, i] = cluster.sum_xx[i, j]
         end
     end
+
+
     return x
 end
 
@@ -91,6 +98,7 @@ function pop!(clusters::Vector{Cluster}, x::Vector{Float64}; delete_empty::Bool=
             if delete_empty && isempty(cluster)
                 deleteat!(clusters, ci)
             end
+    
             return x
         end
     end
@@ -114,18 +122,21 @@ function push!(cluster::Cluster, x::Vector{Float64})
         end
         push!(cluster.elements, x)
     end
+
+
     return cluster
 end
 
 function delete!(cluster::Cluster, x::Vector{Float64})
     if x in cluster.elements
         pop!(cluster, x)
+
     end
     return cluster
 end
 
 function delete!(clusters::Vector{Cluster}, x::Vector{Float64}; delete_empty::Bool=true)
-    for (ci, cluster) in enumerate(clusters)
+    for (ci, cluster) in enumerate(clusters)        
         delete!(cluster, x)
         if delete_empty && isempty(cluster)
             deleteat!(clusters, ci)
@@ -174,7 +185,7 @@ function union(cluster1::Cluster, cluster2::Cluster)
         end
     end
     
-    return Cluster(elements, new_sum_x, new_sum_xx)
+    return Cluster(elements, new_sum_x, new_sum_xx, Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 end
 
 function isempty(cluster::Cluster)
@@ -187,6 +198,10 @@ end
 
 function in(element::Vector{Float64}, cluster::Cluster)
     return in(element, cluster.elements)
+end
+
+function in(element::Vector{Float64}, clusters::Vector{Cluster})
+    return any([element in cluster for cluster in clusters])
 end
 
 function find(element::Vector{Float64}, clusters::Vector{Cluster})
@@ -207,17 +222,20 @@ function iterate(cluster::Cluster, state)
 end
 
 function deepcopy(cluster::Cluster)
-    return Cluster(deepcopy(cluster.elements), deepcopy(cluster.sum_x), deepcopy(cluster.sum_xx))
+    return Cluster(deepcopy(cluster.elements), deepcopy(cluster.sum_x), deepcopy(cluster.sum_xx), deepcopy(cluster.mu_c_volatile), deepcopy(cluster.psi_c_volatile))
 end
 
 function copy(cluster::Cluster)
-    return Cluster(copy(cluster.elements), deepcopy(cluster.sum_x), deepcopy(cluster.sum_xx))
+    return Cluster(copy(cluster.elements), deepcopy(cluster.sum_x), deepcopy(cluster.sum_xx), deepcopy(cluster.mu_c_volatile), deepcopy(cluster.psi_c_volatile))
 end
 
 function copy(clusters::Vector{Cluster})
     return Cluster[copy(cl) for cl in clusters]
 end
 
+function dims_to_proj(dims::Vector{Int64}, d::Int64)
+    return diagm(ones(d))[dims, :]
+end
 
 function project_cluster(cluster::Cluster, proj::Matrix{Float64})
     return Cluster([proj * x for x in cluster])
@@ -228,8 +246,8 @@ function project_clusters(clusters::Vector{Cluster}, proj::Matrix{Float64})
 end
 
 function project_clusters(clusters::Vector{Cluster}, dims::Vector{Int64})
-    el = pop!(clusters[1])
+    el = pop!(first(clusters))
     d = size(el, 1)
-    push!(clusters[1], el)
+    push!(first(clusters), el)
     return project_clusters(clusters, dims_to_proj(dims, d))
 end
