@@ -14,7 +14,8 @@ mutable struct MNCRPchain
     largestcluster_chain::Vector{Int64}
     hyperparams_chain::Vector{MNCRPhyperparams}
     logprob_chain::Vector{Float64}
-    observation_chain::Vector{Vector{Float64}}
+    clusters_samples::CircularBuffer{Vector{Cluster}}
+    hyperparams_samples::CircularBuffer{MNCRPhyperparams}
 
     # Maximum a-posteriori state and location
     map_clusters::Vector{Cluster}
