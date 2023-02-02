@@ -261,3 +261,7 @@ end
 function elements(clusters::Vector{Cluster})
     return Vector{Float64}[x for cluster in clusters for x in cluster]
 end
+
+function first(cluster::Cluster)
+    return first(cluster.elements)
+end
