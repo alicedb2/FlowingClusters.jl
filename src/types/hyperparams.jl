@@ -11,13 +11,13 @@ mutable struct MNCRPhyperparams
 end
 
 function MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
-    d = size(mu, 1)
+    d = length(mu)
 
     return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d))
 end
 
 function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64)
-    d = size(mu, 1)
+    d = length(mu)
     flatL_d = Int64(d * (d + 1) / 2)
     if size(flatL, 1) != flatL_d
         error("Dimension mismatch, flatL should have length $flatL_d")
@@ -30,7 +30,7 @@ function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
 end
 
 function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64)
-    d = size(mu, 1)
+    d = length(mu)
     if !(d == size(L, 1))
         error("Dimension mismatch, L should have dimension $d x $d")
     end
@@ -42,7 +42,7 @@ function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
 end
 
 function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
-    d = size(mu, 1)
+    d = length(mu)
     if !(d == size(psi, 1) == size(psi, 2))
         error("Dimension mismatch, L should have dimension $d x $d")
     end
@@ -58,7 +58,7 @@ function MNCRPhyperparams(d::Int64)
 end
 
 function clear_diagnostics!(hyperparams::MNCRPhyperparams)
-    d = size(hyperparams.mu, 1)
+    d = length(hyperparams.mu)
 
     hyperparams.diagnostics = Diagnostics(d)
 
@@ -121,8 +121,8 @@ end
 
 
 function dimension(hyperparams::MNCRPhyperparams)
-    @assert size(hyperparams.mu, 1) == size(hyperparams.psi, 1) == size(hyperparams.psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
-    return size(hyperparams.mu, 1)
+    @assert length(hyperparams.mu) == size(hyperparams.psi, 1) == size(hyperparams.psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
+    return length(hyperparams.mu)
 end
 
 function flatL!(hyperparams::MNCRPhyperparams, value::Vector{Float64})
@@ -175,7 +175,7 @@ end
 
 
 function project_hyperparams(hyperparams::MNCRPhyperparams, dims::Vector{Int64})
-    d = size(hyperparams.mu, 1)
+    d = length(hyperparams.mu)
     return project_hyperparams(hyperparams, dims_to_proj(dims, d))
 end
 
@@ -200,7 +200,7 @@ end
 
 function opt_unpack(hp::MNCRPhyperparams; transform=true)
     
-    d = size(hp.mu, 1)
+    d = length(hp.mu)
     alpha = hp.alpha
     lambda = hp.lambda
     nu = hp.nu

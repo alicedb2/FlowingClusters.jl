@@ -12,6 +12,10 @@ function Cluster(d::Int64)
     return Cluster(Set{Vector{Float64}}(), zeros(Float64, d), zeros(Float64, d, d), Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 end
 
+function Cluster(elements::Set{Vector{Float64}})
+    return Cluster(collect(elements))
+end
+
 function Cluster(elements::Vector{Vector{Float64}})
     
     # We need at least one element
@@ -25,7 +29,8 @@ function Cluster(elements::Vector{Vector{Float64}})
     # sum_x = sum(elements)
     # sum_xx = sum([x * x' for x in elements])
 
-    d = size(first(elements), 1)
+    d = length(first(elements))
+    @assert all(length.(elements) .== d) "All elements must be of dimension $d"
 
     sum_x = zeros(Float64, d)
     @inbounds for i in 1:d
@@ -54,7 +59,7 @@ function pop!(cluster::Cluster, x::Vector{Float64})
     x = pop!(cluster.elements, x)
     # cluster.sum_xx -= x * x'
     # cluster.sum_x -= x
-    d = size(x, 1)
+    d = length(x)
     @inbounds for i in 1:d
         cluster.sum_x[i] -= x[i]
     end
@@ -74,7 +79,7 @@ function pop!(cluster::Cluster)
     x = pop!(cluster.elements)
     # cluster.sum_xx -= x * x'
     # cluster.sum_x -= x
-    d = size(x, 1)
+    d = length(x)
 
     @inbounds for i in 1:d
         cluster.sum_x[i] -= x[i]
@@ -109,7 +114,7 @@ function push!(cluster::Cluster, x::Vector{Float64})
     if !(x in cluster.elements)
         # cluster.sum_xx += x * x'
         # cluster.sum_x += x
-        d = size(x, 1)
+        d = length(x)
         @inbounds for i in 1:d
             cluster.sum_x[i] += x[i]
         end
@@ -154,9 +159,9 @@ end
 
 function union(cluster1::Cluster, cluster2::Cluster)
 
-    @assert size(cluster1.sum_x, 1) == size(cluster2.sum_x, 1)
+    @assert length(cluster1.sum_x) == length(cluster2.sum_x)
     
-    d = size(cluster1.sum_x, 1)
+    d = length(cluster1.sum_x)
 
     elements = union(cluster1.elements, cluster2.elements)
 
@@ -221,6 +226,7 @@ function iterate(cluster::Cluster, state)
     return iterate(cluster.elements, state)
 end
 
+
 function deepcopy(cluster::Cluster)
     return Cluster(deepcopy(cluster.elements), deepcopy(cluster.sum_x), deepcopy(cluster.sum_xx), deepcopy(cluster.mu_c_volatile), deepcopy(cluster.psi_c_volatile))
 end
@@ -247,7 +253,11 @@ end
 
 function project_clusters(clusters::Vector{Cluster}, dims::Vector{Int64})
     el = pop!(first(clusters))
-    d = size(el, 1)
+    d = length(el)
     push!(first(clusters), el)
     return project_clusters(clusters, dims_to_proj(dims, d))
+end
+
+function elements(clusters::Vector{Cluster})
+    return Vector{Float64}[x for cluster in clusters for x in cluster]
 end
