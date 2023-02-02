@@ -40,14 +40,14 @@ function clear_diagnostics!(diagnostics::Diagnostics)
     diagnostics.accepted_alpha = 0
     diagnostics.rejected_alpha = 0
 
-    diagnostics.accepted_mu = 0
-    diagnostics.rejected_mu = 0
+    diagnostics.accepted_mu = zeros(length(diagnostics.accepted_mu))
+    diagnostics.rejected_mu = zeros(length(diagnostics.rejected_mu))
 
     diagnostics.accepted_lambda = 0
     diagnostics.rejected_lambda = 0
 
-    diagnostics.accepted_flatL = 0
-    diagnostics.rejected_flatL = 0
+    diagnostics.accepted_flatL = zeros(length(diagnostics.accepted_flatL))
+    diagnostics.rejected_flatL = zeros(length(diagnostics.rejected_flatL))
 
     diagnostics.accepted_nu = 0
     diagnostics.rejected_nu = 0
@@ -58,4 +58,5 @@ function clear_diagnostics!(diagnostics::Diagnostics)
     diagnostics.accepted_merge = 0
     diagnostics.rejected_merge = 0
 
+    return diagnostics
 end
