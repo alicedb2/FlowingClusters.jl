@@ -6,19 +6,21 @@ module Dataset
     using MultivariateNormalCRP: Cluster
     import Base: show
 
-    export load_dataset, cluster_dataframe, original, longlats
+    export MNCRPDataset
+    export load_dataset, dataframe, original, longitudes, latitudes
 
     struct MNCRPDataset
         dataframe::DataFrame
         valid_mask::BitVector
         predictors::Vector{<:SimpleSDMLayer}
         predictornames::Vector{String}
+        longlatcols::Vector{Union{Symbol, String, Int}}
         data_mean::Vector{Float64}
         data_scale::Vector{Float64}
         unique_map::Dict
-        dataset::Vector{Vector{Float64}}
-        train_dataset::Union{Nothing, Vector{Vector{Float64}}}
-        test_dataset::Union{Nothing, Vector{Vector{Float64}}}
+        data::Vector{Vector{Float64}}
+        train_data::Union{Nothing, Vector{Vector{Float64}}}
+        test_data::Union{Nothing, Vector{Vector{Float64}}}
     end
 
     function show(io::IO, dataset::MNCRPDataset)
@@ -35,7 +37,7 @@ module Dataset
                           split=true
                           ) where {T <: SimpleSDMLayer}
     
-        @assert lenght(longlatcols) == 2
+        @assert length(longlatcols) == 2
         @assert isnothing(predictornames) || length(predictors) == length(predictornames)
         if isnothing(predictornames)
             predictornames = ["predictor$i" for i in 1:length(predictors)]
@@ -88,6 +90,7 @@ module Dataset
                             valid_mask, 
                             predictors, 
                             predictornames,
+                            longlatcols,
                             m[:, 1], s[:, 1],
                             unique_map,
                             unique_standardized_predvals,
@@ -96,26 +99,65 @@ module Dataset
 
     end
 
-    function cluster_dataframe(cluster::Cluster, dataset::MNCRPDataset)
-        return reduce(vcat, (dataset.unique_map[x] for x in cluster))
+
+    function dataframe(clusters::AbstractVector{Cluster}, dataset::MNCRPDataset; repeats=true)
+        return DataFrame[dataframe(cluster, dataset, repeats=repeats) for cluster in clusters]
+    end
+
+    function dataframe(element::Vector{Float64}, dataset::MNCRPDataset; repeats=true)
+        return first(dataframe(Vector{Float64}[element], dataset, repeats=repeats))
+    end
+
+    function dataframe(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; repeats=true)
+        if !repeats
+            return reduce(vcat, DataFrame.(first(dataset.unique_map[x]) for x in elements))
+        else
+            return reduce(vcat, (dataset.unique_map[x] for x in elements))
+        end
     end
 
     function original(element::Vector{Float64}, dataset::MNCRPDataset)
         return collect(first(dataset.unique_map[element])[dataset.predictornames])
     end
     
-    function original(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
-        return original.(elements, Ref(dataset))
+    function original(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset)
+        return Vector{Float64}[original(element, dataset) for element in elements]
     end
 
-    function longlats(element::Vector{Float64}, dataset::MNCRPDataset; longlatcols=[:decimalLongitude, :decimalLatitude])
-        @assert length(longlatcols) == 2
+    function original(clusters::AbstractVector{Cluster}, dataset::MNCRPDataset)
+        return [original(cluster, dataset) for cluster in clusters]
+    end
+
+    function longlats(element::Vector{Float64}, dataset::MNCRPDataset)
         group = dataset.unique_map[element]
-        return collect.(eachrow(group[:, longlatcols]))
+        return collect.(eachrow(group[:, dataset.longlatcols]))
     end
 
-    function longlats(cluster::Cluster, dataset::MNCRPDataset; longlatcols=[:decimalLongitude, :decimalLatitude])
-        return reduce(vcat, longlats.(cluster, Ref(dataset); longlatcols=longlatcols))
+    function longlats(cluster::Cluster, dataset::MNCRPDataset)
+        return reduce(vcat, longlats.(cluster, Ref(dataset)))
     end
 
+    function longitudes(element::Vector{Float64}, dataset::MNCRPDataset)
+        return dataset.unique_map[element][:, dataset.longlatcols[1]]
+    end
+
+    function longitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; flatten=false)
+        longs = [longitudes(element, dataset) for element in elements]
+        if flatten
+            longs = reduce(vcat, longs)
+        end
+    end
+
+    function latitudes(element::Vector{Float64}, dataset::MNCRPDataset)
+        return dataset.unique_map[element][:, dataset.longlatcols[2]]
+    end
+
+    function latitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; flatten=false)
+        lats = [latitudes(element, dataset) for element in elements]
+        if flatten
+            lats = reduce(vcat, lats)
+        end
+
+        return lats
+    end
 end
