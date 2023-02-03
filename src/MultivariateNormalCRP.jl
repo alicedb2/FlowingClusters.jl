@@ -39,7 +39,7 @@ module MultivariateNormalCRP
     include("types/chain.jl")
 
     include("types/dataset.jl")
-    import SimpleSDMLayers: longitudes, latitudes
+    import SimpleSDMLayers: longitudes, latitudes, rescale
     using .Dataset
     export MNCRPDataset
     export load_dataset, dataframe, original, longitudes, latitudes, rescale, split
@@ -851,7 +851,7 @@ module MultivariateNormalCRP
                 ProgressMeter.next!(progbar;
                 showvalues=[
                 (:"step", "$(step)/$(nb_steps)"),
-                (:"chain length", length(chain.logprob_chain)),
+                (:"chain length (#samples)", "$(length(chain.logprob_chain)) ($(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer)))"),
                 (:"logprob (max, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
                 (:"clusters (>1, median, mean, max)", "$(length(chain.clusters)) ($(length(filter(c -> length(c) > 1, chain.clusters))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters])))"),
                 (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio),
@@ -1344,15 +1344,15 @@ module MultivariateNormalCRP
         return logpdf
     end
 
-    function tail_probability(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=1000)
+    function tail_probability(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=10000)
         return tail_probability(clusters, hyperparams, nb_samples)(coordinate)
     end
 
-    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=1000)
+    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=10000)
         return tail_probability(clusters, hyperparams, nb_samples).(coordinates)
     end
 
-    function tail_probability(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=1000)
+    function tail_probability(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=10000)
 
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = length(mu)
@@ -1374,24 +1374,32 @@ module MultivariateNormalCRP
             sample_logpdfs[i] = logpdf(sample_draw)
         end
 
+        all_elements = elements(clusters)
+        emp_max_logpdf, idx = findmax(logpdf.(all_elements))
+        x0 = all_elements[idx]
+        optres = optimize(x -> -logpdf(x), x0, NelderMead())
+        max_logpdf = logpdf(optres.minimizer)
+
         function tailprob_func(coordinate::Vector{Float64})
             isocontour_val = logpdf(coordinate)
-            return sum(sample_logpdfs .<= isocontour_val) / nb_samples
+            tail = sum(sample_logpdfs .<= isocontour_val) / nb_samples
+            # density = exp(isocontour_val - max_logpdf)
+            return exp(-logsumexp([-log(tail) - (isocontour_val - max_logpdf)]))
         end
 
         return tailprob_func
 
     end
 
-    function tail_probability(coordinate::Vector{Float64}, chain::MNCRPChain, nb_samples=1000)
+    function tail_probability(coordinate::Vector{Float64}, chain::MNCRPChain, nb_samples=10000)
         return first(tail_probability(Vector{Float64}[coordinate], chain.clusters_samples, chain.hyperparams_samples, nb_samples))
     end
 
-    function tail_probability(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=1000)
+    function tail_probability(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=10000)
         return tail_probability(coordinates, chain.clusters_samples, chain.hyperparams_samples, nb_samples)
     end
     
-    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}}, hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=1000)
+    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}}, hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=10000)
         
         @assert length(clusters_samples) == length(hyperparams_samples)
 
@@ -1408,23 +1416,24 @@ module MultivariateNormalCRP
 
     end
 
-    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=1000)
+    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=10000)
         return tail_probability_summary(coordinates, chain.clusters_samples, chain.hyperparams_samples, nb_samples)
     end
 
 
-    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=1000)
+    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=10000)
         
         tail_probs_distributions = tail_probability(coordinates, clusters_samples, hyperparams_samples, nb_samples)
         
         # hists = [fit(Histogram, dist; nbins=ceil(log2(length(dist))) + 1) for dist in tail_probs_distributions]
-        # modes = zeros(length(tail_probs_distributions))
-        # for i in 1:length(modes)
-        #     hist = hists[i]
-        #     maxweight, idx = findmax(hist.weights)
-        #     midbin = (first(hist.edges)[idx] + first(hist.edges)[idx+1]) / 2
-        #     modes[i] = midbin
-        # end
+        hists = [fit(Histogram, dist) for dist in tail_probs_distributions]
+        modes = zeros(length(tail_probs_distributions))
+        for i in 1:length(modes)
+            hist = hists[i]
+            maxweight, idx = findmax(hist.weights)
+            midbin = (first(hist.edges)[idx] + first(hist.edges)[idx+1]) / 2
+            modes[i] = midbin
+        end
     
         means = mean.(tail_probs_distributions)
         stds = std.(tail_probs_distributions)
@@ -1434,12 +1443,13 @@ module MultivariateNormalCRP
         quantiles25 = quantile.(tail_probs_distributions, 0.25)
         quantiles75 = quantile.(tail_probs_distributions, 0.75)
         quantiles95 = quantile.(tail_probs_distributions, 0.95)
+        iqrs90 = quantiles95 .- quantiles5
         
-        return (mean=means, std=stds, median=medians, iqr=iqrs, q5=quantiles5, q25=quantiles25, q75=quantiles75, q95=quantiles95)
+        return (mean=means, std=stds, mode=modes, median=medians, iqr=iqrs, iqr90=iqrs90, q5=quantiles5, q25=quantiles25, q75=quantiles75, q95=quantiles95)
 
     end
 
-    function response_correlation(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=1000; kernel_covs=:auto)
+    function response_correlation(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=10000; kernel_covs=:auto)
 
         d = size(first(coordinates), 1)
 
@@ -1509,7 +1519,7 @@ module MultivariateNormalCRP
     end
 
 
-    function response_correlation(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=1000; kernel_covs=kernel_covs)
+    function response_correlation(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=10000; kernel_covs=kernel_covs)
         return response_correlation(coordinates, chain.clusters_samples, chain.hyperparams_samples, nb_samples; kernel_covs=kernel_covs)
     end
 end

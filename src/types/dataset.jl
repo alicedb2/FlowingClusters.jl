@@ -182,32 +182,36 @@ module Dataset
         return [original(cluster, dataset) for cluster in clusters]
     end
 
-    function longlats(element::Vector{Float64}, dataset::MNCRPDataset)
-        group = dataset.unique_map[element]
-        return collect.(eachrow(group[:, dataset.longlatcols]))
-    end
-
-    function longlats(cluster::Cluster, dataset::MNCRPDataset)
-        return reduce(vcat, longlats.(cluster, Ref(dataset)))
-    end
-
-    function longitudes(element::Vector{Float64}, dataset::MNCRPDataset)
-        return dataset.unique_map[element][:, dataset.longlatcols[1]]
-    end
-
-    function longitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; flatten=false)
-        longs = [longitudes(element, dataset) for element in elements]
-        if flatten
-            longs = reduce(vcat, longs)
+    function longitudes(element::Vector{Float64}, dataset::MNCRPDataset; unique=false)
+        if unique
+            return first(dataset.unique_map[element])[dataset.longlatcols[1]]
+        else
+            return dataset.unique_map[element][:, dataset.longlatcols[1]]
         end
     end
 
-    function latitudes(element::Vector{Float64}, dataset::MNCRPDataset)
-        return dataset.unique_map[element][:, dataset.longlatcols[2]]
+    function longitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; unique=false, flatten=false)
+        longs = [longitudes(element, dataset, unique=unique) for element in elements]
+        if flatten
+            longs = reduce(vcat, longs)
+        end
+        return longs
     end
 
-    function latitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; flatten=false)
-        lats = [latitudes(element, dataset) for element in elements]
+    function longitudes(dataset::MNCRPDataset; unique=false, flatten=false)
+        return longitudes(dataset.data, dataset, unique=unique, flatten=flatten)
+    end
+
+    function latitudes(element::Vector{Float64}, dataset::MNCRPDataset; unique=false)
+        if unique
+            return first(dataset.unique_map[element])[dataset.longlatcols[2]]
+        else
+            return dataset.unique_map[element][:, dataset.longlatcols[2]]
+        end
+    end
+
+    function latitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; unique=false, flatten=false)
+        lats = [latitudes(element, dataset, unique=unique) for element in elements]
         if flatten
             lats = reduce(vcat, lats)
         end
@@ -215,8 +219,16 @@ module Dataset
         return lats
     end
 
+    function latitudes(dataset::MNCRPDataset; unique=false, flatten=false)
+        return latitudes(dataset.data, dataset, unique=unique, flatten=flatten)
+    end
+
     function rescale(element::Vector{Float64}, dataset::MNCRPDataset)
         return (element .- dataset.data_mean) ./ dataset.data_scale
+    end
+
+    function rescale(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
+        return rescale.(elements, Ref(dataset))
     end
 
 end
