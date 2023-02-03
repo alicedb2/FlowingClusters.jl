@@ -8,6 +8,11 @@ mutable struct Cluster
     psi_c_volatile::Matrix{Float64}
 end
 
+function show(io::IO, ::MIME"text/plain", cluster::Cluster)
+   print("$(length(cluster)) elements")
+end
+
+
 function Cluster(d::Int64)
     return Cluster(Set{Vector{Float64}}(), zeros(Float64, d), zeros(Float64, d, d), Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 end
