@@ -1,4 +1,4 @@
-mutable struct MNCRPhyperparams
+mutable struct MNCRPHyperparams
     alpha::Float64
     mu::Vector{Float64}
     lambda::Float64
@@ -10,13 +10,13 @@ mutable struct MNCRPhyperparams
     diagnostics::Diagnostics
 end
 
-function MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu)
     d = length(mu)
 
-    return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d))
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d))
 end
 
-function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64)
     d = length(mu)
     flatL_d = Int64(d * (d + 1) / 2)
     if size(flatL, 1) != flatL_d
@@ -26,10 +26,10 @@ function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
     L = foldflat(flatL)
     psi = L * L'
 
-    return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu)
 end
 
-function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64)
     d = length(mu)
     if !(d == size(L, 1))
         error("Dimension mismatch, L should have dimension $d x $d")
@@ -38,10 +38,10 @@ function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
     psi = L * L'
     flatL = flatten(L)
 
-    return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu)
 end
 
-function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
     d = length(mu)
     if !(d == size(psi, 1) == size(psi, 2))
         error("Dimension mismatch, L should have dimension $d x $d")
@@ -50,14 +50,14 @@ function MNCRPhyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
     L = cholesky(psi).L
     flatL = flatten(L)
 
-    return MNCRPhyperparams(alpha, mu, lambda, flatL, L, psi, nu)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu)
 end
 
-function MNCRPhyperparams(d::Int64)
-    return MNCRPhyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(sqrt(0.1), d))), 1.0 * d)
+function MNCRPHyperparams(d::Int64)
+    return MNCRPHyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(sqrt(0.1), d))), 1.0 * d)
 end
 
-function clear_diagnostics!(hyperparams::MNCRPhyperparams)
+function clear_diagnostics!(hyperparams::MNCRPHyperparams)
     d = length(hyperparams.mu)
 
     hyperparams.diagnostics = Diagnostics(d)
@@ -120,12 +120,12 @@ function foldflat(flatL::Vector{Float64})
 end
 
 
-function dimension(hyperparams::MNCRPhyperparams)
+function dimension(hyperparams::MNCRPHyperparams)
     @assert length(hyperparams.mu) == size(hyperparams.psi, 1) == size(hyperparams.psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
     return length(hyperparams.mu)
 end
 
-function flatL!(hyperparams::MNCRPhyperparams, value::Vector{Float64})
+function flatL!(hyperparams::MNCRPHyperparams, value::Vector{Float64})
     d = dimension(hyperparams)
     if (2 * size(value, 1) != d * (d + 1))
         error("Dimension mismatch, value should have length $(Int64(d*(d+1)/2))")
@@ -135,7 +135,7 @@ function flatL!(hyperparams::MNCRPhyperparams, value::Vector{Float64})
     hyperparams.psi = hyperparams.L * hyperparams.L'
 end
 
-function L!(hyperparams::MNCRPhyperparams, value::T) where {T <: AbstractMatrix{Float64}}
+function L!(hyperparams::MNCRPHyperparams, value::T) where {T <: AbstractMatrix{Float64}}
     d = dimension(hyperparams)
     if !(d == size(value, 1) == size(value, 2))
         error("Dimension mismatch, value shoud have size $d x $d")
@@ -145,7 +145,7 @@ function L!(hyperparams::MNCRPhyperparams, value::T) where {T <: AbstractMatrix{
     hyperparams.psi = hyperparams.L * hyperparams.L'
 end
 
-function psi!(hyperparams::MNCRPhyperparams, value::Matrix{Float64})
+function psi!(hyperparams::MNCRPHyperparams, value::Matrix{Float64})
     d = dimension(hyperparams)
     if !(d == size(value, 1) == size(value, 2))
         error("Dimension mismatch, value should have size $d x $d")
@@ -166,7 +166,7 @@ function project_mat(mat::Matrix{Float64}, dims::Vector{Int64})
     return proj * mat * proj'
 end
 
-function project_hyperparams(hyperparams::MNCRPhyperparams, proj::Matrix{Float64})
+function project_hyperparams(hyperparams::MNCRPHyperparams, proj::Matrix{Float64})
     proj_hp = deepcopy(hyperparams)
     proj_hp.mu = proj * proj_hp.mu
     proj_hp.psi = proj * proj_hp.psi * proj'
@@ -174,7 +174,7 @@ function project_hyperparams(hyperparams::MNCRPhyperparams, proj::Matrix{Float64
 end
 
 
-function project_hyperparams(hyperparams::MNCRPhyperparams, dims::Vector{Int64})
+function project_hyperparams(hyperparams::MNCRPHyperparams, dims::Vector{Int64})
     d = length(hyperparams.mu)
     return project_hyperparams(hyperparams, dims_to_proj(dims, d))
 end
@@ -195,10 +195,10 @@ function opt_pack(x::Vector{Float64}; transformed=true)
         nu = d - 1 + exp(nu)
     end
 
-    return MNCRPhyperparams(alpha, mu, lambda, flatL, nu)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, nu)
 end
 
-function opt_unpack(hp::MNCRPhyperparams; transform=true)
+function opt_unpack(hp::MNCRPHyperparams; transform=true)
     
     d = length(hp.mu)
     alpha = hp.alpha

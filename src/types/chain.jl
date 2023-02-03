@@ -1,49 +1,62 @@
-mutable struct MNCRPchain
+mutable struct MNCRPChain
 
     # Current state of the partition over samples
     # from the Chinese Restaurant Process
     clusters::Vector{Cluster}
     # Current value of hyperparameters
-    hyperparams::MNCRPhyperparams
+    hyperparams::MNCRPHyperparams
 
     # original_data::Dict{Vector{Float64}, Vector{<:Real}}
     data_mean::Vector{Float64}
-    data_scalematrix::Matrix{Float64}
+    data_scale::Vector{Float64}
 
     # Some chains of interests
     nbclusters_chain::Vector{Int64}
     largestcluster_chain::Vector{Int64}
-    hyperparams_chain::Vector{MNCRPhyperparams}
+    hyperparams_chain::Vector{MNCRPHyperparams}
     logprob_chain::Vector{Float64}
     clusters_samples::CircularBuffer{Vector{Cluster}}
-    hyperparams_samples::CircularBuffer{MNCRPhyperparams}
+    hyperparams_samples::CircularBuffer{MNCRPHyperparams}
 
     # Maximum a-posteriori state and location
     map_clusters::Vector{Cluster}
-    map_hyperparams::MNCRPhyperparams
+    map_hyperparams::MNCRPHyperparams
     map_logprob::Float64
     map_idx::Int64
 
 end
 
-alpha_chain(chain::MNCRPchain) = [p.alpha for p in chain.hyperparams_chain]
-mu_chain(chain::MNCRPchain) = [p.mu for p in chain.hyperparams_chain]
-mu_chain(chain::MNCRPchain, i) = [p.mu[i] for p in chain.hyperparams_chain]
-lambda_chain(chain::MNCRPchain) = [p.lambda for p in chain.hyperparams_chain]
-psi_chain(chain::MNCRPchain) = [p.psi for p in chain.hyperparams_chain]
-psi_chain(chain::MNCRPchain, i, j) = [p.psi[i, j] for p in chain.hyperparams_chain]
-flatL_chain(chain::MNCRPchain) = [p.flatL for p in chain.hyperparams_chain]
-flatL_chain(chain::MNCRPchain, i) = [p.flatL[i] for p in chain.hyperparams_chain]
-nu_chain(chain::MNCRPchain) = [p.nu for p in chain.hyperparams_chain]
-logprob_chain(chain::MNCRPchain) = chain.logprob_chain
-nbclusters_chain(chain::MNCRPchain) = chain.nbclusters_chain
-largestcluster_chain(chain::MNCRPchain) = chain.largestcluster_chain
+function show(io::IO, chain::MNCRPChain)
+    println(io, "MNCRP chain")
+    println(io, "          #elements: $(sum(length.(chain.clusters)))")
+    println(io, "       chain length: $(length(chain))")
+    println(io, "  current #clusters: $(length(chain.clusters))")
+    println(io, "    current logprob: $(round(last(chain.logprob_chain), digits=2))")
+    println(io, "   nb chain samples: $(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer))")
+    println()
+    println(io, "       last MAP at: $(chain.map_idx)")
+    println(io, "  #clusters in MAP: $(length(chain.map_clusters))")
+    println(io, "       MAP logprob: $(round(chain.map_logprob, digits=2))")
+end
 
-function elements(chain::MNCRPchain; destandardize=false)
+alpha_chain(chain::MNCRPChain) = [p.alpha for p in chain.hyperparams_chain]
+mu_chain(chain::MNCRPChain) = [p.mu for p in chain.hyperparams_chain]
+mu_chain(chain::MNCRPChain, i) = [p.mu[i] for p in chain.hyperparams_chain]
+lambda_chain(chain::MNCRPChain) = [p.lambda for p in chain.hyperparams_chain]
+psi_chain(chain::MNCRPChain) = [p.psi for p in chain.hyperparams_chain]
+psi_chain(chain::MNCRPChain, i, j) = [p.psi[i, j] for p in chain.hyperparams_chain]
+flatL_chain(chain::MNCRPChain) = [p.flatL for p in chain.hyperparams_chain]
+flatL_chain(chain::MNCRPChain, i) = [p.flatL[i] for p in chain.hyperparams_chain]
+nu_chain(chain::MNCRPChain) = [p.nu for p in chain.hyperparams_chain]
+logprob_chain(chain::MNCRPChain) = chain.logprob_chain
+nbclusters_chain(chain::MNCRPChain) = chain.nbclusters_chain
+largestcluster_chain(chain::MNCRPChain) = chain.largestcluster_chain
+
+function elements(chain::MNCRPChain; destandardize=false)
     if !destandardize
         return Vector{Float64}[x for cluster in chain.clusters for x in cluster]
     else
-        return Vector{Float64}[chain.data_scalematrix * x .+ chain.data_mean for cluster in chain.clusters for x in cluster]
+        return Vector{Float64}[chain.data_scale .* x .+ chain.data_mean for cluster in chain.clusters for x in cluster]
     end
 end
 
@@ -53,7 +66,7 @@ function ess(param_chain::Vector{<:Number})
     return length(param_chain) / (1 + 2 * sum(ac))
 end
 
-function ess(chain::MNCRPchain)
+function ess(chain::MNCRPChain)
     d = length(chain.hyperparams.mu)
 
     alpha_ess = ess(alpha_chain(chain))
@@ -91,7 +104,7 @@ function ess(chain::MNCRPchain)
 end
 
 
-function burn!(chain::MNCRPchain, nb_samples::Int64)
+function burn!(chain::MNCRPChain, nb_samples::Int64)
 
     if nb_samples >= length(chain.logprob_chain)
         @error("Can't burn the whole chain, nb_samples must be smaller than $(length(chain.logprob_chain))")
@@ -119,6 +132,6 @@ function burn!(chain::MNCRPchain, nb_samples::Int64)
 
 end
 
-function length(chain::MNCRPchain)
+function length(chain::MNCRPChain)
     return length(chain.logprob_chain)
 end
