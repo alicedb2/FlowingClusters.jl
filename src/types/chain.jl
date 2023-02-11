@@ -28,15 +28,17 @@ end
 
 function show(io::IO, chain::MNCRPChain)
     println(io, "MNCRP chain")
+    println(io, "         dimensions: $(length(chain.hyperparams.mu))")
     println(io, "          #elements: $(sum(length.(chain.clusters)))")
     println(io, "       chain length: $(length(chain))")
     println(io, "  current #clusters: $(length(chain.clusters))")
     println(io, "    current logprob: $(round(last(chain.logprob_chain), digits=2))")
     println(io, "   nb chain samples: $(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer))")
-    println()
+    println(io)
     println(io, "       last MAP at: $(chain.map_idx)")
     println(io, "  #clusters in MAP: $(length(chain.map_clusters))")
     println(io, "       MAP logprob: $(round(chain.map_logprob, digits=2))")
+    println(io)
 end
 
 alpha_chain(chain::MNCRPChain) = [p.alpha for p in chain.hyperparams_chain]
@@ -104,28 +106,28 @@ function ess(chain::MNCRPChain)
 end
 
 
-function burn!(chain::MNCRPChain, nb_samples::Int64)
+function burn!(chain::MNCRPChain, n::Int64)
 
-    if nb_samples >= length(chain.logprob_chain)
-        @error("Can't burn the whole chain, nb_samples must be smaller than $(length(chain.logprob_chain))")
+    if n >= length(chain.logprob_chain)
+        @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
     end
 
-    if nb_samples <= 0
-        @error("nb_samples must be at least 1")
+    if n <= 0
+        @error("n must be at least 1")
     end
 
-    chain.logprob_chain = chain.logprob_chain[nb_samples+1:end]
-    chain.hyperparams_chain = chain.hyperparams_chain[nb_samples+1:end]
-    chain.nbclusters_chain = chain.nbclusters_chain[nb_samples+1:end]
-    chain.largestcluster_chain = chain.largestcluster_chain[nb_samples+1:end]
+    chain.logprob_chain = chain.logprob_chain[n+1:end]
+    chain.hyperparams_chain = chain.hyperparams_chain[n+1:end]
+    chain.nbclusters_chain = chain.nbclusters_chain[n+1:end]
+    chain.largestcluster_chain = chain.largestcluster_chain[n+1:end]
 
-    if chain.map_idx <= nb_samples        
+    if chain.map_idx <= n        
         chain.map_clusters = deepcopy(chain.clusters)
         chain.map_hyperparams = deepcopy(chain.hyperparams)
         chain.map_logprob = log_Pgenerative(chain.clusters, chain.hyperparams)
         chain.map_idx = length(chain.logprob_chain)
     else
-        chain.map_idx -= nb_samples
+        chain.map_idx -= n
     end
     
     return chain
