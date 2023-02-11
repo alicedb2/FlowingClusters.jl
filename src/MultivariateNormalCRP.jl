@@ -3,7 +3,7 @@ module MultivariateNormalCRP
     using Random: randperm, shuffle, shuffle!, seed!
     using StatsFuns: logsumexp, logmvgamma
     using StatsBase: sample, mean, var, Weights, std, cov, percentile, quantile, median, iqr, scattermat, fit, Histogram, autocor, autocov
-    using LinearAlgebra: logdet, det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd, pinv
+    using LinearAlgebra: logdet, det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd
     using SpecialFunctions: loggamma, polygamma
     using Base.Iterators: cycle
     import Base.Iterators: flatten
@@ -23,13 +23,15 @@ module MultivariateNormalCRP
     export Cluster, elements
     export initiate_chain, advance_chain!, attempt_map!, burn!
     export clear_diagnostics!
-    export log_Pgenerative, drawNIW, stats, ess
+    export log_Pgenerative, stats, ess
+    # export drawNIW
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain, logprob_chain, nbclusters_chain, largestcluster_chain
     export plot, covellipses!
     export project_clusters, project_cluster, project_hyperparams, project_mu, project_psi
     export local_covprec, local_covariance, local_precision, local_covariance_summary
     export response_correlation
     export tail_probability, tail_probability_summary, predictive_logpdf
+    export presence_probability, presence_probability_summary
     # export wasserstein2_distance, wasserstein1_distance_bound
     export minimum_size
 
@@ -39,34 +41,44 @@ module MultivariateNormalCRP
     include("types/chain.jl")
 
     include("types/dataset.jl")
-    import SimpleSDMLayers: longitudes, latitudes, rescale
+    # import SimpleSDMLayers: longitudes, latitudes, rescale
     using .Dataset
     export MNCRPDataset
-    export load_dataset, dataframe, original, longitudes, latitudes, rescale, split
+    export load_dataset, dataframe, original, longitudes, latitudes, standardize, split
 
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
     export bioclim_predictor
 
-    function drawNIW(
-        mu::Vector{Float64}, 
-        lambda::Float64, 
-        psi::Matrix{Float64}, 
-        nu::Float64)
-    
-        invWish = InverseWishart(nu, psi)
-        sigma = rand(invWish)
-    
-        multNorm = MvNormal(mu, sigma/lambda)
-        mu = rand(multNorm)
-    
-        return mu, sigma
+    # Quick and dirty logdet of positive-definite matrix
+    # 2x faster than logdet()
+    function logdetpsd(A::Matrix{Float64})
+        chol = cholesky(Symmetric(A))
+        acc = 0.0
+        for i in 1:size(A, 1)
+            acc += log(chol.U[i, i])
+        end
+        return 2 * acc
     end
 
-    function drawNIW(hyperparams::MNCRPHyperparams)
-        return drawNIW(hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
-    end
+    # function drawNIW(
+    #     mu::Vector{Float64}, 
+    #     lambda::Float64, 
+    #     psi::Matrix{Float64}, 
+    #     nu::Float64)
+    
+    #     invWish = InverseWishart(nu, psi)
+    #     sigma = rand(invWish)
+    
+    #     multNorm = MvNormal(mu, sigma/lambda)
+    #     mu = rand(multNorm)
+    
+    #     return mu, sigma
+    # end
 
+    # function drawNIW(hyperparams::MNCRPHyperparams)
+    #     return drawNIW(hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
+    # end
 
     function updated_niw_hyperparams(cluster::Cluster, 
         mu::Vector{Float64}, 
@@ -132,10 +144,15 @@ module MultivariateNormalCRP
         psi::Matrix{Float64},
         nu::Float64)::Float64
 
-        empty_cluster = Cluster(length(mu))
+        # empty_cluster = Cluster(length(mu))
+        # return log_Zniw(empty_cluster, mu, lambda, psi, nu)
+        
+        d = length(mu)
+        log_numerator = d/2 * log(2pi) + nu * d/2 * log(2) + logmvgamma(d, nu/2)
+        log_denominator = d/2 * log(lambda) + nu/2 * logdetpsd(psi)
+        
+        return log_numerator - log_denominator
 
-        return log_Zniw(empty_cluster, mu, lambda, psi, nu)
-    
     end
 
     # Return the normalization constant 
@@ -154,9 +171,9 @@ module MultivariateNormalCRP
         
         log_numerator = d/2 * log(2pi) + nu * d/2 * log(2) + logmvgamma(d, nu/2)
     
-        # logdet is almost twice as slow as log(det).
-        # It's probably useful in higher dimensions only.
-        log_denominator = d/2 * log(lambda) + nu/2 * log(det(psi))
+        log_denominator = d/2 * log(lambda) + nu/2 * logdetpsd(psi)
+        # log_denominator = d/2 * log(lambda) + nu/2 * logdetpsd(psi)
+        # log_denominator = d/2 * log(lambda) + nu/2 * log(det(psi))
 
         return log_numerator - log_denominator
     
@@ -192,7 +209,9 @@ module MultivariateNormalCRP
             # lambda hyperprior
             log_hyperpriors += -log(lambda)
             # psi hyperprior
-            log_hyperpriors += -d * log(det(psi))
+            log_hyperpriors += -d * logdetpsd(psi)
+            # log_hyperpriors += -d * logdet(psi)
+            # log_hyperpriors += -d * log(det(psi))
             # nu hyperprior
             log_hyperpriors += log(jeffreys_nu(nu, d))
         end
@@ -567,7 +586,9 @@ module MultivariateNormalCRP
             log_hastings = sum((d:-1:1) .* (log.(abs.(diag(proposed_L))) - log.(abs.(diag(hyperparams.L)))))
             log_acc += log_hastings
 
-            log_acc += d * (log(det(hyperparams.psi)) - log(det(proposed_psi)))
+            log_acc += d * (logdetpsd(hyperparams.psi) - logdetpsd(proposed_psi))
+            # log_acc += d * (logdetpsd(hyperparams.psi) - logdetpsd(proposed_psi))
+            # log_acc += d * (log(det(hyperparams.psi)) - log(det(proposed_psi)))
             
             log_acc = min(0.0, log_acc)
         
@@ -642,14 +663,14 @@ module MultivariateNormalCRP
         return load(filename)["chain"]
     end
 
-    function initiate_chain(dataset::MNCRPDataset; nb_samples=200, strategy=:hot)
-        chain = initiate_chain(dataset.data, nb_samples=nb_samples, standardize=false, strategy=strategy)
+    function initiate_chain(dataset::MNCRPDataset; chain_samples=200, strategy=:hot)
+        chain = initiate_chain(dataset.data, chain_samples=chain_samples, standardize=false, strategy=strategy)
         chain.data_mean = dataset.data_mean[:]
         chain.data_scale = dataset.data_scale[:]
         return chain
     end
 
-    function initiate_chain(data::Vector{Vector{Float64}}; standardize=true, nb_samples=200, strategy=:hot)
+    function initiate_chain(data::Vector{Vector{Float64}}; standardize=true, chain_samples=100, strategy=:hot)
 
         @assert all(size(e, 1) == size(first(data), 1) for e in data)
 
@@ -659,12 +680,12 @@ module MultivariateNormalCRP
 
         hyperparams = MNCRPHyperparams(d)
 
-        clusters_samples = CircularBuffer{Vector{Cluster}}(nb_samples)
-        hyperparams_samples = CircularBuffer{MNCRPHyperparams}(nb_samples)
+        clusters_samples = CircularBuffer{Vector{Cluster}}(chain_samples)
+        hyperparams_samples = CircularBuffer{MNCRPHyperparams}(chain_samples)
 
         chain = MNCRPChain([], hyperparams, 
         # Dict{Vector{Float64}, Vector{<:Real}}(), # data point => original datapoint
-        zeros(d), zeros(d), [], [], [], [],
+        zeros(d), ones(d), [], [], [], [],
         clusters_samples, hyperparams_samples,
         [], deepcopy(hyperparams), -Inf, 1)
         
@@ -683,7 +704,6 @@ module MultivariateNormalCRP
         if strategy == :hot
             ##### 1st initialization method: fullseq
             chain.clusters = [Cluster(data)]
-            # advance_full_sequential_gibbs!(chain.clusters, chain.hyperparams, nb_samples=N, proposal_temperature=1.0, force_acceptance=true)
             for i in 1:10
                 advance_gibbs!(chain.clusters, chain.hyperparams, temperature=1.2)
             end
@@ -851,13 +871,13 @@ module MultivariateNormalCRP
                 ProgressMeter.next!(progbar;
                 showvalues=[
                 (:"step", "$(step)/$(nb_steps)"),
-                (:"chain length (#samples)", "$(length(chain.logprob_chain)) ($(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer)))"),
+                (:"chain length (#chain samples)", "$(length(chain.logprob_chain)) ($(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer)))"),
                 (:"logprob (max, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
                 (:"clusters (>1, median, mean, max)", "$(length(chain.clusters)) ($(length(filter(c -> length(c) > 1, chain.clusters))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters])))"),
                 (:"split ratio, merge ratio", split_ratio * ", " * merge_ratio),
                 (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
                 (:"MAP att/succ", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
-                (:"clusters in last MAP", length(chain.map_clusters)),
+                (:"MAP clusters (>1, median, mean, max)", "$(length(chain.map_clusters)) ($(length(filter(c -> length(c) > 1, chain.map_clusters))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters])))"),
                 (:"last MAP logprob", round(chain.map_logprob, digits=1)),
                 (:"last MAP at", last_map_idx),
                 (:"last checkpoint at", last_checkpoint)
@@ -934,7 +954,7 @@ module MultivariateNormalCRP
 
         p = plot(
             legend_position=:topleft, grid=:no, 
-            showaxis=:no, ticks=:true;
+            showaxis=:yes, ticks=:true;
             plot_kw...)
 
         clusters = project_clusters(sort(clusters, by=length, rev=rev), dims)
@@ -1013,7 +1033,7 @@ module MultivariateNormalCRP
 
         nbc = chain.nbclusters_chain
         # p_nbc = plot(burn+1:length(nbc), log(N) * ac[burn+1:end], grid=:no, label="Asymptotic mean", title="#cluster chain", legend=true)
-        p_nbc = plot(burn+1:length(nbc), nbc[burn+1:end], grid=:no,label=nothing, title="#cluster chain")
+        p_nbc = plot(burn+1:length(nbc), nbc[burn+1:end], grid=:no,label=nothing, title="Number of clusters chain")
         vline!(p_nbc, [chain.map_idx], label=nothing, color=:black)
 
         lcc = chain.largestcluster_chain
@@ -1318,11 +1338,20 @@ module MultivariateNormalCRP
     function updated_mvstudent_params(cluster::Cluster, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64)
 
         d = length(mu)
-           
         mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
 
         return (nu_c - d + 1, mu_c, (lambda_c + 1)/lambda_c/(nu_c - d + 1) * psi_c)
 
+    end
+
+    function updated_mvstudent_params(clusters::Vector{Cluster}, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; add_empty=true)
+        d = length(mu)
+        updated_mvstudent_degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
+        if add_empty
+            push!(updated_mvstudent_degs_mus_sigs, updated_mvstudent_params(Cluster(d), mu, lambda, psi, nu))
+        end
+
+        return updated_mvstudent_degs_mus_sigs
     end
 
     function predictive_logpdf(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams)
@@ -1330,196 +1359,319 @@ module MultivariateNormalCRP
         d = length(mu)
 
         weights = 1.0 .* length.(clusters)
-        degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
-
         push!(weights, alpha)
-        push!(degs_mus_sigs, updated_mvstudent_params(Cluster(d), mu, lambda, psi, nu))
-
         weights ./= sum(weights)
+        
+        updated_mvstudent_degs_mus_sigs = updated_mvstudent_params(clusters, mu, lambda, psi, nu, add_empty=true)
 
-        logpdf(x) = logsumexp(log(w) + loggamma((deg + d)/2) - loggamma(deg/2)
-                    - d/2 * log(deg) - d/2 * log(pi) - 1/2 * log(det(sig))
-                    - (deg + d)/2 * log(1 + 1/deg * (x - mu)' * inv(sig) * (x - mu))
-                    for (w, (deg, mu, sig)) in zip(weights, degs_mus_sigs))
+        logpdf(x) = logsumexp(log(weight) + loggamma((deg + d)/2) - loggamma(deg/2)
+                    - d/2 * log(deg) - d/2 * log(pi) - 1/2 * logdetpsd(sig)
+                    # - d/2 * log(deg) - d/2 * log(pi) - 1/2 * logdet(sig)
+                    - (deg + d)/2 * log(1 + 1/deg * (x - mu)' * (sig \ (x - mu)))
+                    # - (deg + d)/2 * log(1 + 1/deg * (x - mu)' * inv(sig) * (x - mu))
+                    for (weight, (deg, mu, sig)) in zip(weights, updated_mvstudent_degs_mus_sigs))
         return logpdf
     end
 
-    function tail_probability(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=10000)
-        return tail_probability(clusters, hyperparams, nb_samples)(coordinate)
-    end
-
-    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=10000)
-        return tail_probability(clusters, hyperparams, nb_samples).(coordinates)
-    end
-
-    function tail_probability(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, nb_samples=10000)
-
+    
+    function tail_probability(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, rejection_samples=10000)
+        
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = length(mu)
-
-        weights = 1.0 .* length.(clusters)
-        degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
-
+        
+        weights = 1.0 * length.(clusters)
         push!(weights, alpha)
-        push!(degs_mus_sigs, updated_mvstudent_params(Cluster(d), mu, lambda, psi, nu))
-
         weights ./= sum(weights)
 
+        updated_mvstudent_degs_mus_sigs = updated_mvstudent_params(clusters, mu, lambda, psi, nu, add_empty=true)
+        
         logpdf = predictive_logpdf(clusters, hyperparams)
-
-        sample_logpdfs = zeros(nb_samples)
-        for i in 1:nb_samples
-            deg, mu, sig = sample(degs_mus_sigs, Weights(weights))
-            sample_draw = rand(MvTDist(deg, mu, sig))
+        
+        sample_logpdfs = zeros(rejection_samples)
+        for i in 1:rejection_samples
+            sample_deg, sample_mu, sample_sig = sample(updated_mvstudent_degs_mus_sigs, Weights(weights))
+            sample_draw = rand(MvTDist(sample_deg, sample_mu, sample_sig))
             sample_logpdfs[i] = logpdf(sample_draw)
         end
 
-        all_elements = elements(clusters)
-        emp_max_logpdf, idx = findmax(logpdf.(all_elements))
-        x0 = all_elements[idx]
-        optres = optimize(x -> -logpdf(x), x0, NelderMead())
-        max_logpdf = logpdf(optres.minimizer)
-
         function tailprob_func(coordinate::Vector{Float64})
-            isocontour_val = logpdf(coordinate)
-            tail = sum(sample_logpdfs .<= isocontour_val) / nb_samples
-            # density = exp(isocontour_val - max_logpdf)
-            return exp(-logsumexp([-log(tail) - (isocontour_val - max_logpdf)]))
+            log_isocontour_val = logpdf(coordinate)
+            tail = sum(sample_logpdfs .<= log_isocontour_val) / rejection_samples
+            return tail
         end
-
+        
         return tailprob_func
-
-    end
-
-    function tail_probability(coordinate::Vector{Float64}, chain::MNCRPChain, nb_samples=10000)
-        return first(tail_probability(Vector{Float64}[coordinate], chain.clusters_samples, chain.hyperparams_samples, nb_samples))
-    end
-
-    function tail_probability(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=10000)
-        return tail_probability(coordinates, chain.clusters_samples, chain.hyperparams_samples, nb_samples)
+        
     end
     
-    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}}, hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=10000)
+    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, rejection_samples=10000)
+        tprob = tail_probability(clusters, hyperparams, rejection_samples) 
+        return tprob.(coordinates)
+    end
+
+    
+    function tail_probability(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}}, hyperparams_samples::AbstractVector{MNCRPHyperparams}, rejection_samples=10000; nb_samples=nothing)
         
         @assert length(clusters_samples) == length(hyperparams_samples)
 
+        if nb_samples === nothing
+            first_idx = 1
+            nb_samples = length(clusters_samples)
+        else
+            first_idx = max(1, length(clusters_samples) - nb_samples + 1)
+        end
+
         tail_probs_samples = Vector{Float64}[]
-        for (i, (clusters, hyperparams)) in enumerate(zip(clusters_samples, hyperparams_samples))
-            print("\rProcessing sample $(i)/$(length(clusters_samples))")
-            push!(tail_probs_samples, tail_probability(coordinates, clusters, hyperparams, nb_samples))
+        for (i, (clusters, hyperparams)) in enumerate(zip(clusters_samples[first_idx:end], hyperparams_samples[first_idx:end]))
+            print("\rProcessing sample $(i)/$(nb_samples)")
+            push!(tail_probs_samples, tail_probability(coordinates, clusters, hyperparams, rejection_samples))
+        end
+        println()
+        
+        # transpose
+        tail_probs_distributions = collect.(eachrow(reduce(hcat, tail_probs_samples)))
+        
+        return tail_probs_distributions
+        
+    end
+    
+    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, rejection_samples=10000; nb_samples=nothing)
+        
+        tail_probs_distributions = tail_probability(coordinates, 
+                                                    clusters_samples, hyperparams_samples, 
+                                                    rejection_samples, nb_samples=nb_samples)
+        
+        emp_summaries = empirical_distribution_summary.(tail_probs_distributions)
+        
+        emp_summaries_t = (mean=[], std=[], mode=[], median=[], iqr=[], iqr90=[], q5=[], q25=[], q75=[], q95=[])
+        for summ in emp_summaries
+            push!(emp_summaries_t.mean, summ.mean)
+            push!(emp_summaries_t.std, summ.std)
+            push!(emp_summaries_t.mode, summ.mode)
+            push!(emp_summaries_t.median, summ.median)
+            push!(emp_summaries_t.iqr, summ.iqr)
+            push!(emp_summaries_t.iqr90, summ.iqr90)
+            push!(emp_summaries_t.q5, summ.q5)
+            push!(emp_summaries_t.q25, summ.q25)
+            push!(emp_summaries_t.q75, summ.q75)
+            push!(emp_summaries_t.q95, summ.q95)
+        end
+
+        return emp_summaries_t
+        
+    end
+    
+    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, rejection_samples=10000; nb_samples=nothing)
+        return tail_probability_summary(coordinates, chain.clusters_samples, chain.hyperparams_samples, rejection_samples, nb_samples=nb_samples)
+    end
+
+    # function response_correlation(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, rejection_samples=10000; kernel_covs=:auto)
+
+    #     d = size(first(coordinates), 1)
+
+    #     if kernel_covs == :auto
+    #         println("Calculating local covariances at coordinates");flush(stdout)
+    #         kernel_covs = local_covariance_summary(coordinates, clusters_samples, hyperparams_samples).median
+    #     elseif typeof(kernel_covs) == Float64
+    #         kernel_covs = Matrix{Float64}[diagm(kernel_covs^2 * ones(d)) for _ in coordinates]
+    #     elseif typeof(kernel_covs) == Vector{Float64}
+    #         @assert length(kernel_covs) == d
+    #         kernel_covs = Matrix{Float64}[diagm(kernel_covs.^2) for _ in coordinates]
+    #     elseif typeof(kernel_covs) == Matrix{Float64}
+    #         @assert size(kernel_covs) == (d, d)
+    #         kernel_covs = Matrix{Float64}[kernel_covs for _ in coordinates]
+    #     end
+
+    #     elements = Vector{Float64}[x for cluster in first(clusters_samples) for x in cluster]
+        
+    #     logodd(p) = log(p) - log(1 - p)
+    #     println("Calculating tail probabilitiessc"); flush(stdout)
+    #     elements_tail_probs = tail_probability_summary(elements, clusters_samples, hyperparams_samples, rejection_samples).median
+    #     elements_tail_logodds = logodd.(elements_tail_probs)
+    #     elements = Vector{Float64}[element for (element, lo) in zip(elements, elements_tail_logodds) if isfinite(lo)]
+    #     augmented_elements = Vector{Float64}[vcat(element, lo) for (element, lo) in zip(elements, elements_tail_logodds) if isfinite(lo)]
+    #     augmented_elements_matrix = reduce(hcat, augmented_elements)    
+    #     # coordinates = coordinates .* (1.0 .+ 1e-7 * rand(length(coordinates)))
+    #     # coordinates_tail_probs = tail_probability_summary(coordinates, clusters_samples, hyperparams_samples, rejection_samples).median
+    #     # coordinates_tail_logodds = logodd.(coordinates_tail_probs)
+    #     # augmented_coordinates = Vector{Float64}[vcat(coordinate, lo) for (coordinate, lo) in zip(coordinates, coordinates_tail_logodds)]
+    #     # mask = isfinite.(coordinates_tail_logodds)
+
+    #     correlations = Matrix{Float64}[]
+    #     partial_correlations = Matrix{Float64}[]
+
+    #     for (i, (coordinate, kernel_cov)) in enumerate(zip(coordinates, kernel_covs))
+    #         if mod(i, 100) == 0
+    #             print("\rCalculating correlations...$(i)"); flush(stdout);
+    #         end
+    #         weights = zeros(size(augmented_elements))
+    #         for k in 1:length(weights)
+    #             weights[k] = exp(-1/2 * (elements[k] .- coordinate)' * inv(kernel_cov) * (elements[k] - coordinate))
+    #         end
+    #         weights ./= sqrt(det(2 * pi * kernel_cov))
+            
+    #         m = mean(augmented_elements_matrix, Weights(weights), 2)
+    #         sm = scattermat(augmented_elements_matrix .- hcat(m), Weights(weights), mean=0, dims=2)
+    #         covariance = sm ./ sum(weights)
+    #         # covariance = cov(augmented_elements_matrix, Weights(weights), 2)
+    #         precision = inv(covariance)
+            
+    #         correlation = zeros(d + 1, d + 1)
+    #         partial_correlation = zeros(d+1, d+1)
+    #         for m in 1:d+1
+    #             for n in 1:m
+    #                 correlation[m, n] = covariance[m, n] / sqrt(covariance[m, m] * covariance[n, n])
+    #                 correlation[n, m] = correlation[m, n]
+
+    #                 partial_correlation[m, n] = -precision[m, n] / sqrt(precision[m, m] * precision[n, n])
+    #                 partial_correlation[n, m] = partial_correlation[m, n]
+    #             end
+    #         end
+    #         push!(correlations, correlation)
+    #         push!(partial_correlations, partial_correlation)
+    #     end
+
+    #     return (correlation=correlations, partial_correlation=partial_correlations)
+    # end
+
+
+    # function response_correlation(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, rejection_samples=10000; kernel_covs=kernel_covs)
+    #     return response_correlation(coordinates, chain.clusters_samples, chain.hyperparams_samples, rejection_samples; kernel_covs=kernel_covs)
+    # end
+
+    function presence_probability(presence_clusters::AbstractVector{Cluster}, presence_hyperparams::MNCRPHyperparams, absence_clusters::AbstractVector{Cluster}, absence_hyperparams::MNCRPHyperparams; logprob=false)
+        
+        log_presence_predictive = predictive_logpdf(presence_clusters, presence_hyperparams)
+        log_absence_predictive = predictive_logpdf(absence_clusters, absence_hyperparams)
+        
+        function func(coordinate::Vector{Float64})
+            lpp = log_presence_predictive(coordinate)
+            lap = log_absence_predictive(coordinate)
+            lp = lpp - logsumexp([lpp, lap])
+            if logprob
+                return lp
+            else
+                return exp(lp)
+            end
+        end
+        
+        return func
+        
+    end
+
+    
+    function presence_probability(
+        coordinates::AbstractVector{Vector{Float64}}, 
+        presence_clusters::Vector{Cluster}, presence_hyperparams::MNCRPHyperparams, 
+        absence_clusters::Vector{Cluster}, absence_hyperparams::MNCRPHyperparams;
+        logprob=false
+        )
+
+        pres_pred = presence_probability(presence_clusters, presence_hyperparams, 
+                                        absence_clusters, absence_hyperparams, 
+                                        logprob=logprob)
+        
+        return pres_pred.(coordinates)
+    end
+
+
+    function presence_probability(
+        coordinates::AbstractVector{Vector{Float64}}, 
+        presence_clusters_samples::AbstractVector{Vector{Cluster}}, presence_hyperparams_samples::AbstractVector{MNCRPHyperparams}, 
+        absence_clusters_samples::AbstractVector{Vector{Cluster}}, absence_hyperparams_samples::AbstractVector{MNCRPHyperparams};
+        nb_samples=nothing, logprob=false
+        )
+
+        @assert length(presence_clusters_samples) == length(presence_hyperparams_samples) == length(absence_clusters_samples) == length(absence_hyperparams_samples)
+
+        if nb_samples === nothing
+            first_idx = 1
+            nb_samples = length(presence_clusters_samples)
+        else
+            first_idx = max(1, length(presence_clusters_samples) - nb_samples + 1)
+        end
+        
+        
+
+        presence_probs_samples = Vector{Float64}[]
+        for (i, (presence_clusters, presence_hyperparams, absence_clusters, absence_hyperparams)) in enumerate(zip(presence_clusters_samples[first_idx:end], presence_hyperparams_samples[first_idx:end], absence_clusters_samples[first_idx:end], absence_hyperparams_samples[first_idx:end]))
+            print("\rProcessing sample $(i)/$(nb_samples)")
+            push!(presence_probs_samples, presence_probability(coordinates, presence_clusters, presence_hyperparams, absence_clusters, absence_hyperparams, logprob=logprob))
         end
         println()
 
-        tail_probs_distributions = collect.(eachrow(reduce(hcat, tail_probs_samples)))
+        presence_probabilities_distributions = collect.(eachrow(reduce(hcat, presence_probs_samples)))
 
-        return tail_probs_distributions
-
-    end
-
-    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=10000)
-        return tail_probability_summary(coordinates, chain.clusters_samples, chain.hyperparams_samples, nb_samples)
+        return presence_probabilities_distributions
     end
 
 
-    function tail_probability_summary(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=10000)
+    function presence_probability_summary(
+        coordinates::AbstractVector{Vector{Float64}}, 
+        presence_clusters_samples::AbstractVector{Vector{Cluster}}, presence_hyperparams_samples::AbstractVector{MNCRPHyperparams},
+        absence_clusters_samples::AbstractVector{Vector{Cluster}}, absence_hyperparams_samples::AbstractVector{MNCRPHyperparams};
+        nb_samples=nothing, logprob=false
+        )
+
+        presence_probability_distributions = presence_probability(coordinates,
+                                            presence_clusters_samples, presence_hyperparams_samples, 
+                                            absence_clusters_samples, absence_hyperparams_samples,
+                                            nb_samples=nb_samples, logprob=logprob
+                                            )
+
+        emp_summaries = empirical_distribution_summary.(presence_probability_distributions)
         
-        tail_probs_distributions = tail_probability(coordinates, clusters_samples, hyperparams_samples, nb_samples)
-        
-        # hists = [fit(Histogram, dist; nbins=ceil(log2(length(dist))) + 1) for dist in tail_probs_distributions]
-        hists = [fit(Histogram, dist) for dist in tail_probs_distributions]
-        modes = zeros(length(tail_probs_distributions))
-        for i in 1:length(modes)
-            hist = hists[i]
-            maxweight, idx = findmax(hist.weights)
-            midbin = (first(hist.edges)[idx] + first(hist.edges)[idx+1]) / 2
-            modes[i] = midbin
-        end
-    
-        means = mean.(tail_probs_distributions)
-        stds = std.(tail_probs_distributions)
-        medians = median.(tail_probs_distributions)
-        iqrs = iqr.(tail_probs_distributions)
-        quantiles5 = quantile.(tail_probs_distributions, 0.05)
-        quantiles25 = quantile.(tail_probs_distributions, 0.25)
-        quantiles75 = quantile.(tail_probs_distributions, 0.75)
-        quantiles95 = quantile.(tail_probs_distributions, 0.95)
-        iqrs90 = quantiles95 .- quantiles5
-        
-        return (mean=means, std=stds, mode=modes, median=medians, iqr=iqrs, iqr90=iqrs90, q5=quantiles5, q25=quantiles25, q75=quantiles75, q95=quantiles95)
-
-    end
-
-    function response_correlation(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, nb_samples=10000; kernel_covs=:auto)
-
-        d = size(first(coordinates), 1)
-
-        if kernel_covs == :auto
-            println("Calculating local covariances at coordinates");flush(stdout)
-            kernel_covs = local_covariance_summary(coordinates, clusters_samples, hyperparams_samples).median
-        elseif typeof(kernel_covs) == Float64
-            kernel_covs = Matrix{Float64}[diagm(kernel_covs^2 * ones(d)) for _ in coordinates]
-        elseif typeof(kernel_covs) == Vector{Float64}
-            @assert length(kernel_covs) == d
-            kernel_covs = Matrix{Float64}[diagm(kernel_covs.^2) for _ in coordinates]
-        elseif typeof(kernel_covs) == Matrix{Float64}
-            @assert size(kernel_covs) == (d, d)
-            kernel_covs = Matrix{Float64}[kernel_covs for _ in coordinates]
+        emp_summaries_t = (mean=[], std=[], mode=[], median=[], iqr=[], iqr90=[], q5=[], q25=[], q75=[], q95=[])
+        for summ in emp_summaries
+            push!(emp_summaries_t.mean, summ.mean)
+            push!(emp_summaries_t.std, summ.std)
+            push!(emp_summaries_t.mode, summ.mode)
+            push!(emp_summaries_t.median, summ.median)
+            push!(emp_summaries_t.iqr, summ.iqr)
+            push!(emp_summaries_t.iqr90, summ.iqr90)
+            push!(emp_summaries_t.q5, summ.q5)
+            push!(emp_summaries_t.q25, summ.q25)
+            push!(emp_summaries_t.q75, summ.q75)
+            push!(emp_summaries_t.q95, summ.q95)
         end
 
-        elements = Vector{Float64}[x for cluster in first(clusters_samples) for x in cluster]
+        return emp_summaries_t
+
+    end
+
+
+    function presence_probability_summary(
+        coordinates::AbstractVector{Vector{Float64}}, 
+        presence_chain::MNCRPChain, absence_chain::MNCRPChain;
+        nb_samples=nothing, logprob=false
+        )
+
+        return presence_probability_summary(coordinates,
+                    presence_chain.clusters_samples, presence_chain.hyperparams_samples,
+                    absence_chain.clusters_samples, absence_chain.hyperparams_samples,
+                    nb_samples=nb_samples, logprob=logprob)
         
-        logodd(p) = log(p) - log(1 - p)
-        println("Calculating tail probabilitiessc"); flush(stdout)
-        elements_tail_probs = tail_probability_summary(elements, clusters_samples, hyperparams_samples, nb_samples).median
-        elements_tail_logodds = logodd.(elements_tail_probs)
-        elements = Vector{Float64}[element for (element, lo) in zip(elements, elements_tail_logodds) if isfinite(lo)]
-        augmented_elements = Vector{Float64}[vcat(element, lo) for (element, lo) in zip(elements, elements_tail_logodds) if isfinite(lo)]
-        augmented_elements_matrix = reduce(hcat, augmented_elements)    
-        # coordinates = coordinates .* (1.0 .+ 1e-7 * rand(length(coordinates)))
-        # coordinates_tail_probs = tail_probability_summary(coordinates, clusters_samples, hyperparams_samples, nb_samples).median
-        # coordinates_tail_logodds = logodd.(coordinates_tail_probs)
-        # augmented_coordinates = Vector{Float64}[vcat(coordinate, lo) for (coordinate, lo) in zip(coordinates, coordinates_tail_logodds)]
-        # mask = isfinite.(coordinates_tail_logodds)
-
-        correlations = Matrix{Float64}[]
-        partial_correlations = Matrix{Float64}[]
-
-        for (i, (coordinate, kernel_cov)) in enumerate(zip(coordinates, kernel_covs))
-            if mod(i, 100) == 0
-                print("\rCalculating correlations...$(i)"); flush(stdout);
-            end
-            weights = zeros(size(augmented_elements))
-            for k in 1:length(weights)
-                weights[k] = exp(-1/2 * (elements[k] .- coordinate)' * inv(kernel_cov) * (elements[k] - coordinate))
-            end
-            weights ./= sqrt(det(2 * pi * kernel_cov))
-            
-            m = mean(augmented_elements_matrix, Weights(weights), 2)
-            sm = scattermat(augmented_elements_matrix .- hcat(m), Weights(weights), mean=0, dims=2)
-            covariance = sm ./ sum(weights)
-            # covariance = cov(augmented_elements_matrix, Weights(weights), 2)
-            precision = inv(covariance)
-            
-            correlation = zeros(d + 1, d + 1)
-            partial_correlation = zeros(d+1, d+1)
-            for m in 1:d+1
-                for n in 1:m
-                    correlation[m, n] = covariance[m, n] / sqrt(covariance[m, m] * covariance[n, n])
-                    correlation[n, m] = correlation[m, n]
-
-                    partial_correlation[m, n] = -precision[m, n] / sqrt(precision[m, m] * precision[n, n])
-                    partial_correlation[n, m] = partial_correlation[m, n]
-                end
-            end
-            push!(correlations, correlation)
-            push!(partial_correlations, partial_correlation)
-        end
-
-        return (correlation=correlations, partial_correlation=partial_correlations)
     end
 
 
-    function response_correlation(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, nb_samples=10000; kernel_covs=kernel_covs)
-        return response_correlation(coordinates, chain.clusters_samples, chain.hyperparams_samples, nb_samples; kernel_covs=kernel_covs)
+    function empirical_distribution_summary(empirical_distribution::Vector{Float64})
+
+        hist = fit(Histogram, empirical_distribution)
+        _, max_idx = findmax(hist.weights)
+        emp_mode = (first(hist.edges)[max_idx] + first(hist.edges)[max_idx+1]) / 2
+
+        emp_mean = mean(empirical_distribution)
+        emp_std = std(empirical_distribution)
+        emp_median = median(empirical_distribution)
+        emp_iqr = iqr(empirical_distribution)
+        emp_quantile5 = quantile(empirical_distribution, 0.05)
+        emp_quantile25 = quantile(empirical_distribution, 0.25)
+        emp_quantile75 = quantile(empirical_distribution, 0.75)
+        emp_quantile95 = quantile(empirical_distribution, 0.95)
+        emp_iqr90 = emp_quantile95 - emp_quantile5
+        
+        return (mean=emp_mean, std=emp_std, mode=emp_mode, median=emp_median, iqr=emp_iqr, iqr90=emp_iqr90, q5=emp_quantile5, q25=emp_quantile25, q75=emp_quantile75, q95=emp_quantile95)
+
     end
+
 end
