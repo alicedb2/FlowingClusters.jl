@@ -4,13 +4,14 @@ module Dataset
     using SimpleSDMLayers: SimpleSDMLayer
     import SimpleSDMLayers: longitudes, latitudes
     using StatsBase: std, mean
+    import StatsBase: standardize
     using Random: shuffle!, shuffle
     using MultivariateNormalCRP: Cluster
 
     import Base: show, split
 
     export MNCRPDataset
-    export load_dataset, dataframe, original, longitudes, latitudes, rescale, split
+    export load_dataset, dataframe, original, longitudes, latitudes, standardize, split
 
     struct MNCRPDataset
         dataframe::DataFrame
@@ -32,26 +33,33 @@ module Dataset
 
 
     """
-        load_dataset(dataframe::Union{DataFrame, AbstractString}, predictors::Vector{<:SimpleSDMLayer}; predictornames=nothing, longlatcols=[:decimalLongitude, :decimalLatitude], perturb=false, delim="\\t" )
+        load_dataset(dataframe::Union{DataFrame, AbstractString}, predictors::Vector{<:SimpleSDMLayer}; predictornames=nothing, longlatcols=[:decimalLongitude, :decimalLatitude], perturb=false, delim="\\t", eps=1e-5)
 
-    Load a dataset from a DataFrame `dataframe` (optionally a CSV filename) containing longitude and latitude columns. Datapoints are generated from SimpleSDMLayer layers `predictors`. Only points with unique values are kept in the final data.
+    Load a dataset from a DataFrame `dataframe` (optionally a CSV filename) 
+    
+    The dataframe only needs a longitude and a latitude column.
+    Datapoints are generated from values returned by `SimpleSDMLayer` layers contained in `predictors`.
+    Only points with unique predictor values are kept in the final `data` field. Use `pertub=true` to keep repeated/non-unique values.
+    Data points with missing longitude and/or latitude or with predictor values containing one or more `nothing` are dropped.
 
     The optional keywords are:
 
-      •  `predictornames`: list the predictor names that will be added as new column to the dataframe. Defaults to ["predictor1", "predictor2", ...].
+    * `predictornames`: list the predictor names that will be added as new columns to the dataframe saved into the dataset. Defaults to ["predictor1", "predictor2", ...].
 
-      •  `longlatcols`: specify alternative longitude/latitude columns names.
+    * `longlatcols`: specify longitude/latitude columns names. Can be a mix of symbols, strings, and indices. Defaults to [:decimalLongitude, :decimalLatitude].
 
-      •  `perturb`: perturb each predictor point by a small value < 10⁻⁵
+    * `delim`: specify alternative column delimiter if loading from a CSV file. Defaults to "`\\t`".
 
-      •  `delim`: specify alternative column delimiter if loading from a CSV file
+    * `perturb`: perturb each predictor value by a small value < `eps`. This is an approximate way to allow repeats (e.g. when loading in MNCRP chain).
+
     """
     function load_dataset(dataframe::Union{DataFrame, AbstractString}, 
                           predictors::Vector{<:SimpleSDMLayer};
                           predictornames=nothing,
                           longlatcols=[:decimalLongitude, :decimalLatitude],
+                          delim="\t",
                           perturb=false,
-                          delim="\t"
+                          eps=1e-5
                           )
     
         @assert length(longlatcols) == 2
@@ -90,7 +98,7 @@ module Dataset
         for (predname, vals) in zip(predictornames, eachrow(predobsvals))
             vals = collect(vals)
             if perturb
-                vals .+= 1e-5 * (rand(length(vals)) .- 0.5)
+                vals .+= epsilon * (rand(length(vals)) .- 0.5)
             end
             dataframe[!, predname] = vals
         end
@@ -124,30 +132,59 @@ module Dataset
 
 
     """
-    `split(dataset::MNCRPDataset, n::Int=2)`
+    `split(dataset::MNCRPDataset, n::Int=2; rescaletofirst=true)`
 
-    Randomly split a dataset n-ways over its unique predictor values.
+    Randomly split a dataset `n`-ways.
+
+    Note: It splits the unique values of the predictors and not those (potentially non-unique) of the full dataframe.
+    
+    * `rescaletofirst=true (default)` insures that the rescaling is redone according to the first split and not simply a copy of the original. This should be `true` when splitting into training/validation/test datasets.
 
     """
-    function split(dataset::MNCRPDataset, n::Int=2)
-        n == 1 && return dataset
+    function split(dataset::MNCRPDataset, n::Int=3; rescaletofirst=true)
+        n <= 1 && return dataset
 
         datasets = MNCRPDataset[]
         data = shuffle(dataset.data)
         uv_splits = [data[i:n:end] for i in 1:n]
 
+        if rescaletofirst
+            first_dataframe = reduce(vcat, (dataset.unique_map[x] for x in uv_splits[1]))
+            first_dataset = load_dataset(first_dataframe, 
+                                        dataset.predictors, 
+                                        predictornames=dataset.predictornames,
+                                        longlatcols=dataset.longlatcols,
+                                        )
+        end
+
         for i in 1:n
+
             reduced_dataframe = reduce(vcat, (dataset.unique_map[x] for x in uv_splits[i]))
-            reduced_unique_map = Dict(x => dataset.unique_map[x] for x in uv_splits[i])
+
+            if rescaletofirst                
+                reduced_unique_map = Dict(((dataset.data_scale .* x + dataset.data_mean) .- first_dataset.data_mean) ./ first_dataset.data_scale
+                                          => dataset.unique_map[x] 
+                                          for x in uv_splits[i])
+                split_m = first_dataset.data_mean[:]
+                split_s = first_dataset.data_scale[:]
+                split_uv = collect(keys(reduced_unique_map))
+            else
+                reduced_unique_map = Dict(x => dataset.unique_map[x] for x in uv_splits[i])
+                split_m = dataset.data_mean[:]
+                split_s = dataset.data_scale[:]
+                split_uv = uv_splits[i]
+            end
+
             reduced_dataset = MNCRPDataset(reduced_dataframe, 
                                            dataset.predictors[:], 
                                            dataset.predictornames[:], 
                                            dataset.longlatcols[:],
-                                           dataset.data_mean[:],
-                                           dataset.data_scale[:],
+                                           split_m, split_s,
                                            reduced_unique_map,
-                                           uv_splits[i])
+                                           split_uv)
+
             push!(datasets, reduced_dataset)
+
         end
 
         return datasets
@@ -210,7 +247,7 @@ module Dataset
         end
     end
 
-    function latitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; unique=false, flatten=false)
+    function latitudes(elements::Union{AbstractVector{Vector{Float64}}, Cluster}, dataset::MNCRPDataset; unique=false, flatten=false)
         lats = [latitudes(element, dataset, unique=unique) for element in elements]
         if flatten
             lats = reduce(vcat, lats)
@@ -223,12 +260,25 @@ module Dataset
         return latitudes(dataset.data, dataset, unique=unique, flatten=flatten)
     end
 
-    function rescale(element::Vector{Float64}, dataset::MNCRPDataset)
+    
+    """
+    `function standardize(element::Vector{Float64}, dataset::MNCRPDataset)`
+
+    Return standard score of `element` against mean and standard deviation already determined for `dataset`.
+    """
+    function standardize(element::Vector{Float64}, dataset::MNCRPDataset)
         return (element .- dataset.data_mean) ./ dataset.data_scale
     end
+    
+    
+    """
+    `    function standardize(elements::AbstractVector{Vector{Float64}}, dataset::MNCRPDataset)`
 
-    function rescale(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
-        return rescale.(elements, Ref(dataset))
+    Return standard score of `elements` against mean and standard deviation already determined for `dataset`.
+    """
+    function standardize(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
+        return standardize.(elements, Ref(dataset))
     end
+
 
 end
