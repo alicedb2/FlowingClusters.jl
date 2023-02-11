@@ -16,6 +16,7 @@
 \usepackage{amsfonts}
 \usepackage{amssymb}
 \usepackage{mathabx}
+\usepackage{dsfont}
 \usepackage{bbold}
 
 %SetFonts
@@ -25,7 +26,7 @@
 \DeclareMathOperator{\niW}{niW}
 \DeclareMathOperator{\mvn}{mvn}
 
-\title{Density estimation in arbitrary dimension using a Dirichlet process mixture of multivariate normal with normal-inverse-Wishart base distribution}
+\title{Presence-only species distribution model based on a Dirichlet process mixture of multivariate normal distributions}
 \author{Alice Doucet Beaupr\'e}
 %\date{}							% Activate to display a given date or no date
 
@@ -42,19 +43,41 @@ The model uses a non-parametric Chinese Restaurant Process (CRP) prior (Aldous 1
 
 Diving straight into it, the generative model is given by
 \begin{equation}\begin{aligned}
-\pi~\vert~\alpha & \sim \operatorname{CRP}(\alpha), \\
-\mu_\omega, \Sigma_\omega ~\vert~\pi,\mu_0, \lambda_0, \Psi_0, \nu_0 & \sim \operatorname{normal-inverse-Wishart}(\mu_0, \lambda_0, \Psi_0, \nu_0), &\omega\in\pi,\\
-x_j~\vert~\omega, \mu_\omega, \Sigma_\omega & \sim \operatorname{multivariate-normal}(\mu_\omega, \Sigma_\omega),& j\in\omega.
+\pi~\vert~\alpha & \quad\sim\quad \operatorname{CRP}(\alpha), \\
+\mu_\omega, \Sigma_\omega ~\vert~\pi,\mu_0, \lambda_0, \Psi_0, \nu_0 &\quad\sim\quad \niW(\mu_0, \lambda_0, \Psi_0, \nu_0), &\omega\in\pi,\\
+x_j~\vert~\omega, \mu_\omega, \Sigma_\omega & \quad\sim\quad \mvn(\mu_\omega, \Sigma_\omega),& j\in\omega.
 \label{eq:model}\end{aligned}\end{equation}
-Here $\pi$ is a partition over the set of sample points $\lbrace x_j\rbrace_{j=1}^N$. $\omega$ are parts, or clusters, of the partition $\pi$ such that $\bigcup_{\omega\in\pi}\omega = \lbrace x_j\rbrace_{j=1}^N$ and $\omega \cap\omega' = \emptyset$ for $\omega$ and $\omega'$ distincts. Means $\mu_0^\omega$ and sample points $x_j$ are vectors in $d$-dimensions. The precision matrix $\Psi_0$ and covariances $\Sigma_\omega$ are $d$-dimensional positive-definite matrices.
+Here $\pi$ is a partition over the set of sample points $\lbrace x_j\rbrace_{j=1}^N$. The $\omega$'s are parts, or clusters, of the partition $\pi$ such that $\bigcup_{\omega\in\pi}\omega = \lbrace x_j\rbrace_{j=1}^N$ and $\omega \cap\omega' = \emptyset$ for $\omega$ and $\omega'$ distincts. Means $\mu_0^\omega$ and sample points $x_j$ are vectors in $d$-dimensions. The precision matrix $\Psi_0$ and covariances $\Sigma_\omega$ are $d$-dimensional positive-definite matrices.
+
+The expression for the CRP prior of a partition $\pi$ is given by
+$$P(\pi) = \frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi} \Gamma(\vert\omega\vert),$$
+where $\alpha^{(N)}= \Gamma(\alpha + N)/\Gamma(\alpha)$ is the Pochhammer symbol, $K=\vert\pi\vert$ is the number of parts, or clusters, in $\pi$, and $\omega$ run over the parts of $\pi$, and $N = \vert\left\lbrace x_i\right\rbrace = \sum_{\omega\in\pi}\vert\omega\vert$ is the total number of elements contained in the partition $\pi$ and given by the sum over the size of the parts.
+
+Let now $\pi_D$ be a partition over the data where the data points are implicit, or contained in $\pi_D$ so to speak. The equation for the generative model is therefore (leaving the hyperparameter $\mu_0, \lambda_0, \Psi_0, \nu_0$ of the niW implicit)
+
+\begin{equation}
+P_{gen}(\pi_D, \lbrace\mu_\omega\rbrace, \lbrace\Sigma_\omega\rbrace)
+= \frac{\alpha^K}{\alpha^{(N)}}\left[\prod_{\omega\in\pi}\Gamma(\vert\omega\vert)\niW(\mu_\omega,\Sigma_\omega)\prod_{x_j\in\omega} \mvn(x_j~\vert~\mu_\omega,\Sigma_\omega)\right],
+\end{equation}
+As show in the following sections, the conjugacy between the niW prior and the mvn distribution allows us to rewrite (restituting the hyperparameters)
+\begin{equation}\begin{split}
+&\niW(\mu_\omega,\Sigma_\omega\vert\mu_0,\lambda_0, \Psi_0, \nu_0)\prod_{x_j\in\omega} \mvn(x_j~\vert~\mu_\omega,\Sigma_\omega)\\
+&= \frac{Z_\omega}{z^{\vert\omega\vert} Z_0} \niW(\mu_\omega, \Sigma_\omega\vert \mu_0^\omega, \lambda_0^\omega, \Psi_0^\omega, \nu_0^\omega)
+\end{split}\end{equation}
+where $z = (2\pi)^{d/2}$, $Z_0$ is the bare normalization constant of the niW, and $Z^\omega$ is the same normalization constant but augmented by the data in $\omega$. By augmented we mean that it is now a function of the updated hyperparameters $\mu_0^\omega$, $\lambda_0^\omega$, $\Psi_0^\omega$, and $\nu_0^\omega$. The expression for the normalization constant and the updated parameters are given in the next section. The conjugacy therefore allow us to easily integrate over each mean $\mu_\omega$ and covariance $\Sigma_\omega$ and we obtain
+\begin{equation}\begin{split}
+P_{gen}(\pi_D) =& \frac{\alpha^K}{\alpha^{(N)}}\left[\prod_{\omega\in\pi}\Gamma(\vert\omega\vert)\int\int d\mu_\omega d\Sigma_\omega \niW(\mu_\omega,\Sigma_\omega)\prod_{x_j\in\omega} \mvn(x_j~\vert~\mu_\omega,\Sigma_\omega)\right],\\
+&= \frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}\Gamma(\vert\omega\vert) \frac{Z^\omega}{z^{\vert\omega\vert} Z_0}
+\end{split}\end{equation}
+
 
 \subsection{The normal-inverse-Wishart distribution}
 The probability distribution function of the niW is given by
 \begin{equation}
-\niW(\mu, \Sigma~\vert~\mu_0, \lambda_0,\Psi_0,\nu_0) = \frac{1}{Z_{\niW}^0} \vert\Sigma\vert^{-\frac{\nu_0 + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0\Sigma^{-1} - \frac{\lambda_0}{2}(\mu - \mu_0)^T\Sigma^{-1}(\mu - \mu_0)},
+\niW(\mu, \Sigma~\vert~\mu_0, \lambda_0,\Psi_0,\nu_0) = \frac{1}{Z_0} \vert\Sigma\vert^{-\frac{\nu_0 + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0\Sigma^{-1} - \frac{\lambda_0}{2}(\mu - \mu_0)^T\Sigma^{-1}(\mu - \mu_0)},
 \label{eq:niW}\end{equation}
 where 
-$$Z_{\niW}^0 = \frac{(2\pi)^{d/2} 2^{\nu_0 d/2} \Gamma_d(\frac{\nu_0}{2})}{\lambda_0^{d/2}\vert\Psi_0\vert^{\nu_0/2}},$$
+$$Z_0 = \frac{(2\pi)^{d/2} 2^{\nu_0 d/2} \Gamma_d(\frac{\nu_0}{2})}{\lambda_0^{d/2}\vert\Psi_0\vert^{\nu_0/2}},$$
 and $\Gamma_d(x)$ is the multivariate gamma function
 $$\Gamma_d(x) = \pi^{d(d-1)/4}\prod_{i=1}^d\Gamma(a + (1 - i)/2).$$
 
@@ -75,8 +98,8 @@ From the definitions of the niW Eq.~\ref{eq:niW} and the mvn, lets assume that E
 \begin{equation}\begin{split}
 &\niW(\mu, \Sigma~\vert~ \mu_0, \lambda_0,\Psi_0,\nu_0)\prod_{j\in\omega}\operatorname{mvn}(x_j~\vert~\mu,\Sigma)\\
 & = \frac{1}{Z^0_{\niW}}\vert\Sigma\vert^{-\frac{\nu_0 + d + 2}{2}} e^{-\frac{1}{2}\Tr\Psi_0\Sigma^{-1}-\frac{\lambda_0}{2}(\mu - \mu_0)^T \Sigma^{-1}(\mu - \mu_0)}\frac{1}{z^{\vert\omega\vert}}\vert\Sigma\vert^{-\frac{\vert\omega\vert}{2}} e^{-\frac{1}{2}\sum_{j\in\omega}(x_j - \mu)^T\Sigma^{-1}(x_j - \mu)},\\
-&=  \frac{1}{Z^0_{\niW}}\frac{1}{z^{\vert\omega\vert}} \frac{Z^\omega_{\niW}}{Z^\omega_{\niW}}\vert\Sigma\vert^{-\frac{\nu_0^\omega + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0^\omega\Sigma^{-1} - \frac{\lambda_0^\omega}{2}(\mu - \mu_0^\omega)^T\Sigma^{-1}(\mu - \mu_0^\omega)},\\
-&= \frac{Z^\omega_{\niW}}{Z^0_{\niW} z^{\vert\omega\vert}} \niW(\mu,\Sigma~\vert~\mu_0^\omega,\lambda_0^\omega,\Psi_0^\omega,\nu_0^\omega).
+&=  \frac{1}{Z_0}\frac{1}{z^{\vert\omega\vert}} \frac{Z^\omega}{Z^\omega}\vert\Sigma\vert^{-\frac{\nu_0^\omega + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0^\omega\Sigma^{-1} - \frac{\lambda_0^\omega}{2}(\mu - \mu_0^\omega)^T\Sigma^{-1}(\mu - \mu_0^\omega)},\\
+&= \frac{Z^\omega}{z^{\vert\omega\vert} Z_0} \niW(\mu,\Sigma~\vert~\mu_0^\omega,\lambda_0^\omega,\Psi_0^\omega,\nu_0^\omega).
 \label{eq:niW}\end{split}\end{equation}
 Combining powers of the determinant $\vert\Sigma\vert$ we find the updated
 $$\nu_0^\omega = \nu_0 + \vert\omega\vert.$$
@@ -91,7 +114,7 @@ From the first equality we can read off
 $$\lambda_0^\omega = \lambda_0 + \vert\omega\vert.$$
 Letting the sample mean $\bar x = \frac{1}{\vert\omega\vert}\sum_{j\in\omega}x_j$, the second and third equalities equivalently imply that
 $$\mu_0^\omega = \frac{\lambda_0\mu_0 + \vert\omega\vert\bar x}{\lambda_0 + \vert\omega\vert}.$$
-Finally the third equality for $\Psi_0^\omega$ requires a bit more algebra. First, using the cyclicity of the trace and the trace identity $\Tr(b a^T) = a^T b$ for $a$ and $b$ two column vectors we can write, after dropping the trace operator, that
+Finally the third equality for $\Psi_0^\omega$ requires a bit more algebra. First, using the cyclicity of the trace and the trace identity $a^T b = \Tr(b a^T)$ for $a$ and $b$ two column vectors we can write, after dropping the trace operator, that
 \begin{equation}
 \Psi_0^\omega = \Psi_0 + \lambda_0\mu_0\mu_0^T + \sum_{j\in\omega} x_j x_j^T - \lambda_0^\omega\mu_0^\omega(\mu_0^\omega)^T,
 \end{equation}
@@ -104,7 +127,7 @@ which we can rewrite
 This completes the derivation of Eq.~\ref{eq:updatedhp}. Notice in passing that as the number $\vert\omega\vert$ of samples $x_i\in\omega$ increases, all updated hyperparameters become overwhelmed by the data. Indeed the updated mean $\mu_0^\omega \rightarrow \bar x$, the udpated scale parameter $\lambda_0^\omega \rightarrow \vert\omega\vert$, the updated precision matrix $\Psi_0^\omega\rightarrow \sum_{j\in\omega}(x_j - \bar x)(x_j - \bar x)^T$, and the updated number of degrees of freedom $\nu_0^\omega \rightarrow \vert\omega\vert$, all functions of the data only.
 \subsubsection{Hyperpriors}
 The model specification Eq.~\ref{eq:model} contains five hyperparameters: $\alpha$, $\mu_0$, $\lambda_0$, $\Psi_0$, and $\nu_0$. As it stands, these hyperparameters have to be fixed to some values in order to completely specify the model. We could use an empirical Bayes approach but we don't like the idea of "double-dipping" in the data. There are some suggestions in the literature for fixed choices of the hyperparameters of the niW but none of them are completely satisfactory. For $\alpha$, a vague logarithmic prior is sometimes used but this also seems arbitrary and solely base on the fact that $\alpha > 0$. We would like instead to close the hierarchy by introducing hyperpriors for hyperparameters and in doing so make the model parameter-free. We choose instead to use the (improper) independence Jeffreys prior, i.e. the product of the five one-parameter Jeffreys prior
-$$P_{hyper}(\alpha,\mu_0,\lambda_0,\Psi_0,\nu_0)=J_\alpha (\alpha) J_{\mu_0}(\mu_0) J_{\lambda_0}(\lambda_0) J_{\Psi_0}(\Psi_0) J_{\nu_0}(\nu_0),$$
+$$J(\alpha,\mu_0,\lambda_0,\Psi_0,\nu_0)=J_\alpha (\alpha) J_{\mu_0}(\mu_0) J_{\lambda_0}(\lambda_0) J_{\Psi_0}(\Psi_0) J_{\nu_0}(\nu_0),$$
 where $J_{\vec \theta}(\vec \theta)~\propto~\sqrt{\vert\mathcal I(\vec \theta)\vert}$ and the Fisher information matrix $\mathcal I(\vec\theta) = -E[\partial_{\theta_i}\partial_{\theta_j} \log P(\vec\theta)]$. This is a well behaved alternative to the full multi-parameters Jeffreys prior which unfortunately we found to be, of course, improper, but more damingly divergent in $\lambda_0$ and $\nu_0$ and to depend on the ordering of the parameters.
 
 For $\alpha$, we recall the probability distribution of the CRP
@@ -116,7 +139,7 @@ The $1\times 1$ Fisher information matrix is given by
 &= E\left[\frac{K}{\alpha^2} + \psi'(\alpha + N) - \psi'(\alpha)\right],\\
 &= \frac{E[K]}{\alpha^2} + \psi'(\alpha + N) - \psi'(\alpha),
 \end{split}\end{equation}
-where $\psi(x)$ is the digamma function and $\psi'(x)$ its derivative. The expectation value of the number of clusters $K$ in a partition $\pi$ distributed according the the CRP is given by a sum of Bernouilli variables, each parametrized by the probability that the $m$'th customer sits at a new table, namely
+where $\psi(x)$ is the digamma function and $\psi'(x)$ the polygamma function of order 1. The expectation value of the number of clusters $K$ in a partition $\pi$ distributed according the the CRP is given by a sum of Bernouilli variables, each parametrized by the probability that the $m$'th customer sits at a new table, namely
 \begin{equation}\begin{split}
 E[K] &= \sum_{m = 1}^N E[b_m],\\
 \text{where}\quad b_m~&\sim~\operatorname{Bernoulli}\left[\frac{\alpha}{m - 1 + \alpha}\right],\\
@@ -128,7 +151,7 @@ We have therefore for $\alpha$ the Jeffreys prior
 J_\alpha(\alpha)~\propto~\sqrt{\frac{\psi(\alpha + N) - \psi(\alpha)}{\alpha} + \psi'(\alpha +N) - \psi'(\alpha)}.
 \label{eq:jeffalpha}
 \end{equation}
-This prior differs from the often used logarithmic prior $1/\alpha$ in that $J_{\alpha}(\alpha) \sim \alpha^{-1/2}$ for $\alpha\rightarrow 0$ and $J_{\alpha}(\alpha) \sim\alpha^{-3/2}$ for $\alpha\rightarrow\infty$. In other words it gives more weight than the logarithmic prior at small $\alpha$ and less weight at large $\alpha$, which is to say the logarithmic prior comparatively overestimates the number of clusters.
+This prior differs from the often used logarithmic prior $1/\alpha$ in that $J_{\alpha}(\alpha) \sim \alpha^{-1/2}$ for $\alpha\rightarrow 0$ and $J_{\alpha}(\alpha) \sim\alpha^{-3/2}$ for $\alpha\rightarrow\infty$. In other words it gives more weight than the logarithmic prior at small $\alpha$ and less weight at large $\alpha$, which is to say the logarithmic prior comparatively overestimates the number of clusters. Note that it decreases faster than $x^{-1}$, respectively increases slower than $x^{-1}$, at large and small $\alpha$ and is therefore a proper distribution.
 
 For $\mu_0$, the $d\times d$ Fisher information matrix
 \begin{equation}\begin{split}
@@ -136,7 +159,7 @@ For $\mu_0$, the $d\times d$ Fisher information matrix
 &= \lambda_0 E[\Sigma^{-1}],\\
 &= \lambda_0\nu_0\Psi_0^{-1}.
 \end{split}\end{equation}
-The last equality was obtained from the correspondance between the inverse-Wishart and Wishart distributions. Now notice that it does not depend on $\mu_0$ and therefore
+The last equality is obtained by the correspondance between the inverse-Wishart and Wishart distributions. It does not depend on $\mu_0$ and therefore
 $$J_{\mu_0}(\mu_0)~\propto~1$$
 the uniform prior over $\mathbb{R}^d$.
 
@@ -225,34 +248,20 @@ $$J_{multi}(\vec\theta)~\propto~ \sqrt{\vert\mathcal I(\vec\theta)\vert}~\propto
 Notice how terms in $\lambda_0$ for $d > 2$ and especially in $\nu_0$ diverge rather dramatically, making the prior not only improper, but ill-defined for those two parameters. The divergence stems from the fact that we cannot immediately get rid of the factors $\nu_0$ and $\lambda_0\nu_0$ in the blocks of $\Psi_0$ and $\mu_0$ after taking the determinant and claiming the proportionality between the Jeffreys prior and the square-root of the determinant of the Fisher information matrix. There is no apparent remedy to this problem and we therefore stick with the independence Jeffreys prior.
 
 \section{Algorithm}
-The generative model is sampled using MCMC. Our MCMC algorithm uses three kinds of sampling strategies. For sampling the CRP we use both traditional Gibbs sampling (Neal 2000, algorithm 3) and the more ambitious split-merge moves (Jain \& Neal 2004). Hyperparameters of the model for both the CRP and the niW base distributions have their own hyperpriors which we sample using a traditional Metropolis-Hastings approach.
-
-We must begin with the expression for full generative model (omitting the hyperpriors). Letting $K = \vert\pi\vert$ and $N = \vert\lbrace x_j\rbrace\vert = \sum_{\omega\in\pi}\vert\omega\vert$,
-\begin{equation}\begin{split}
-&P_{gen}(\pi, \lbrace\mu_\omega\rbrace, \lbrace\Sigma_\omega\rbrace)\\
-&= \left[\frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)!\right]\left[\prod_{\omega\in\pi}\niW(\mu_\omega,\Sigma_\omega~\vert~\mu_0,\lambda_0,\Psi_0,\nu_0)\prod_{x_j\in\omega} \operatorname{mvn}(x_j~\vert~\mu_\omega,\Sigma_\omega)\right],\\
-&= \left[\frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)!\right]\prod_{\omega\in\pi}\frac{Z^\omega_{\niW}}{Z_{\niW}^0 z^{\vert\omega\vert}}\niW(\mu_\omega,\Sigma_\omega~\vert~\mu_0^\omega, \lambda_0^\omega, \Psi_0^\omega, \nu_0^\omega).
-\end{split}\end{equation}
-Notice how the conjugacy allows us to easily marginalize over $\mu_\omega$ and $\Sigma_\omega$. Indeed
-\begin{equation}\begin{split}
-P_{gen}(\pi) &= \left[\prod_{\omega\in\pi}\int d\mu_\omega d\Sigma_\omega\right]P(\pi, \lbrace x_j\rbrace, \lbrace\mu_0^\omega\rbrace, \lbrace\Sigma_\omega\rbrace),\\
-&= \left[\frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)!\right]\prod_{\omega\in\pi}\frac{Z^\omega_{\niW}}{Z_{\niW}^0 z^{\vert\omega\vert}}\int d\mu_\omega d\Sigma_\omega \niW(\mu_\omega,\Sigma_\omega~\vert~\mu_0^\omega, \lambda_0^\omega, \Psi_0^\omega, \nu_0^\omega),\\
-&= \frac{\alpha^K}{\alpha^{(N)}}\prod_{\omega\in\pi}(\vert\omega\vert - 1)! \frac{Z^\omega_{\niW}}{Z_{niW}^0 z^{\vert\omega\vert}}.
-\end{split}\end{equation}
-This is the central expression from which we can derive the Gibbs moves as described in algorithm 3 of Neal 2000, which we do next.
+The generative model is sampled using MCMC. Our MCMC algorithm uses three kinds of sampling strategies. For sampling the CRP we use both traditional Gibbs sampling (Neal 2000, algorithm 3) and the more ambitious split-merge moves (Jain \& Neal 2004). Hyperparameters of the model for both the CRP and the niW base distributions have their own hyperpriors which we sample using a traditional Metropolis-Hastings approach. Eq.~\ref{eq:generative} is the central expression from which we can derive the Gibbs moves as described in algorithm 3 of Neal 2000 and recapitulate below.
 
 \subsection{Gibbs sampling of partitions}
 Let $\pi_{-i}$ be the partition where we remove the sample point $x_i$ from whichever cluster in $\pi$ it was in. We now want to reassign $x_i$ to either an existing cluster in $\pi_{-i}$ or to its own new cluster. This reassignment gives rise to a new partition $\pi'$. There are two possibilities: either we reassign $x_i$ to an existing cluster $c$ in $\pi_{-i}$, namely $\pi' = \pi_{-i} - c + c\cup\lbrace x_i\rbrace$, or to its own cluster, namely $\pi' = \pi_{-i} + \lbrace x_i\rbrace$. Let's start with the second case where $x_i$ is assigned its own cluster. Cancelling common factors in the numerator and denominator,
 \begin{equation}\begin{aligned}
 P_{gen}(\pi'~\vert~\pi_{-i}) &= \frac{P_{gen}(\pi')}{P_{gen}(\pi_{-i})}, &  \pi' = \pi_{-i} + \lbrace x_i\rbrace,\\
-&=\frac{\alpha^K 0!}{\alpha^{(N)}}\frac{\alpha^{(N-1)}}{\alpha^{K-1}}\frac{Z^{\lbrace x_i\rbrace}_{\niW}}{Z_{niW}^0 z},\\
-&= \frac{\alpha}{\alpha + N - 1}\frac{Z^{\lbrace x_i\rbrace}_{\niW}}{Z_{niW}^0 z}.
+&=\frac{\alpha^K}{\alpha^{(N)}}\Gamma(1)\frac{\alpha^{(N-1)}}{\alpha^{K-1}}\frac{Z^{\lbrace x_i\rbrace}}{z Z_0 },\\
+&= \frac{\alpha}{\alpha + N - 1}\frac{Z^{\lbrace x_i\rbrace}}{zZ_0}.
 \end{aligned}\label{eq:gibbsnewcluster}\end{equation}
 Now for the first case, the probability that $x_i$ gets assigned to a cluster $c\in\pi_{-i}$, namely that $\pi' = \pi_{-i} - c + c\cup\lbrace x_i\rbrace$, is given by
 \begin{equation}\begin{split}
 P_{gen}(\pi'~\vert~\pi_{-i}) &= \frac{P_{gen}(\pi')}{P_{gen}(\pi_{-i})}, \\
-&=\frac{\alpha^K}{\alpha^{(N)}}\frac{\alpha^{(N-1)}}{\alpha^{K}}\frac{\vert c\vert!}{(\vert c\vert - 1)!}\frac{Z^{c\cup\lbrace x_i\rbrace}_{\niW}}{Z_{\niW}^0 z^{\vert c\vert + 1}}\frac{Z_{\niW}^0 z^{\vert c\vert}}{Z_{\niW}^{c}},\\
-&= \frac{\vert c\vert}{\alpha + N - 1}\frac{Z_{\niW}^{c\cup\lbrace x_i\rbrace}}{Z_{\niW}^c z}.
+&=\frac{\alpha^K}{\alpha^{(N)}}\frac{\alpha^{(N-1)}}{\alpha^{K}}\frac{\Gamma(\vert c\vert+1)}{\Gamma(\vert c\vert)}\frac{Z^{c\cup\lbrace x_i\rbrace}}{z^{\vert c\vert + 1}Z_0}\frac{z^{\vert c\vert} Z_0}{Z^{c}},\\
+&= \frac{\vert c\vert}{\alpha + N - 1}\frac{Z^{c\cup\lbrace x_i\rbrace}}{z Z^c}.
 \end{split}\label{eq:gibbsoldcluster}\end{equation}
 The algorithm for the Gibbs sampling is therefore straightforward. Pick a sample $x_i$ at random and remove it from its cluster. Then draw at random either one of the remaining existing cluster $c\in\pi_{-i}$, each of which is assigned the probability Eq.~\ref{eq:gibbsoldcluster}, or a new empty cluster with probability Eq.~\ref{eq:gibbsnewcluster}. Add the sample $x_i$ to this cluster. Repeat for all samples either at random with replacement or without replacement. We elect to sample without replacement because it guarantees that every sample is redrawn after one sweep. If one instead draws samples at random without replacement, the probability $p$ that a given samples is picked at least once after $x$ of sweeps, i.e. $Nx$ draws, satisfies $1 - p = 1 - (1 - 1/N)^{Nx}$, and therefore $x = 1/N \log(1 - p)/\log(1 - 1/N)$. For large $N$, the number or sweeps $x\rightarrow -\log(1 -p)$. To give an idea of what this means, the number of sweeps with replacement necessary to be 95\% sure that every sample has been picked up at least once is roughly 3. To be 99\% sure one would need around 5 sweeps with replacement. Using sweeps with replacement therefore lead to an algorithm with slower mixing time than using sweeps without replacement. This is somewhat obvious.
 \subsection{Restricted Gibbs split-merge moves}
@@ -323,10 +332,34 @@ The acceptance probability
 $$P_{acc}(\alpha\rightarrow\alpha') = \min\left[1, \frac{\alpha'}{\alpha}\frac{P_{gen}(\alpha')}{P_{gen}(\alpha)}\frac{J_{\alpha}(\alpha')}{J_\alpha(\alpha)}\right] = \frac{\alpha'^{K+1}}{\alpha^{K+1}}\frac{\Gamma(\alpha + N)}{\Gamma(\alpha)}\frac{\Gamma(\alpha')}{\Gamma(\alpha' + N)}\frac{J_\alpha(\alpha')}{J_\alpha(\alpha)}$$
 where $\log\alpha' = \log\alpha + \varepsilon$ and $\varepsilon\sim\operatorname{AnySymmetricDist}$.
 
+\section{Predictive posterior}
+Given a partition $\pi_D$ over the data $D$ we seek the predictive posterior $g(y\vert\pi_D)$. Let $\lbrace\pi_D\rbrace^{+y}$ be the set of new partitions created by taking $y$ as a mobile element that is added to the existing parts of $\pi_D$ and the one where $y$ forms its own singleton part. For example, if $\pi_D = \lbrace (x_1, x_2),(x_3)\rbrace$, then
+\begin{equation}\begin{split}
+\lbrace \pi_D\rbrace^{+y} =&\left\lbrace\lbrace (x_1, x_2, y),( x_3)\rbrace,\right.\\
+&\left.\lbrace( x_1, x_2),( x_3, y)\rbrace,\right.\\
+&\left.\lbrace (x_1, x_2),( x_3), ( y)\rbrace\right\rbrace.
+\end{split}\end{equation}
+Therefore after cancelling common factors,
+\begin{equation}\begin{split}\label{eq:predpost}
+g(y \vert\pi_D) &= \sum_{\pi'\in\lbrace\pi_D\rbrace^{+y}}\frac{P(\pi')}{P(\pi_D)},\\
+&= \sum_{\omega\in\pi_D} \frac{n_\omega}{N + \alpha}\frac{Z^{\lbrace y\rbrace\cup\omega}}{z Z^\omega} + \frac{\alpha}{N + \alpha} \frac{Z^{\lbrace y\rbrace}}{z Z_0}.
+\end{split}\end{equation}
+where the per-cluster predictive posterior is given by
+$$\frac{Z^{\lbrace y\rbrace\cup\omega}}{z Z^\omega} = t_{\nu^{\omega}_0 - d + 1}\left(x~\vert~\mu_0^{\omega}, \frac{\lambda_0^\omega + 1}{\lambda_0^\omega(\lambda_0^\omega - d + 1)} \Psi_0^\omega\right)$$
+where the multivariate $t$-distribution (mvt)
+$$ t_\nu(x\vert\mu,\Sigma) = \frac{\Gamma((\nu + d)/2)}{\Gamma(\nu/2)\nu^{d/2}\pi^{d/2}\vert\Sigma\vert^{1/2}}\left[1 + \frac{1}{\nu}(x - \mu)^T\Sigma^{-1}(x - \mu)\right]^{-(\nu + p)/2}.$$
+In other words, the predictive posterior is a mixture of mvt. The transition from cluster components being given by mvn's to mvt's comes from the integration of the uncertainty over the mean and covariance of each cluster given by the niW prior.
 
+\section{Presence-only species distribution model}
+To turn our mixture of mvt's, into a presence-only species distribution model (SDM) we use a simple trick inspired by BIOCLIM. In BIOCLIM, a box in drawn with the width in each dimension is given by the difference between the 0.05 and 0.95 quantiles of the marginal empirical distribution in each dimension. All points that fall outside of the box are given a probability of presence of 0, and each point inside the box a probability of 1. We extend this definition as follows. Now suppose that the empirical distribution is given by a single normal distribution with mean $\mu$ and deviation $\sigma$. in 1 dimension. The probability of presence at point $x$ is given by the two-tail probability of $x$, in other words $1 - \Phi((x-\mu)/\sigma) - \Phi((x - \mu)/\sigma)$. This means that the probability of presence is given by the mass of individual samples that were observed at that specific environmental condition or worst. Generalizing to $d$-dimensions, the probability of presence at environmental point is given by the tail of the isosurface in environmental space of a given samples. In other words the probability of presence is given proportional to the mass of observation at a given environmental condition or environmental conditions that are harsher. Explicitly, for a given probability density $g(x)$ and $X\sim g$,
+\begin{equation}
+s(y) = E_X\left[\mathds{1}_{g(X) \le g(y)}\right].
+\end{equation}
+This trick works in theory for any kernel density estimate, regardless of the method, and applies to unimodal distributions as well as multimodal distributions where the tail of the isosurface can includes potential "internal" valleys, or holes, of the distribution.
+
+Performing this expectation exactly is a very hard problem, but if one is able to sample out of the inferred mixture it can be approximated very easily using rejection sampling. This is the case for our model because there are methods that are readily available to sample out of a multivariate $t$-distribution. Let $\lbrace X_i\rbrace_{i=1}^M$ be $M$ draws out of Eq.~\ref{eq:predpost}. Then
+$$s(y) = E_X\left[\mathds{1}_{g(X) \le g(y)}\right] \approx \frac{1}{M}\sum_{i=1}^M \mathds{1}_{g(X_i) \le g(y)}.$$
 \end{document}
-
-
 
 
 
