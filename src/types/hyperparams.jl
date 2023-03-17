@@ -179,37 +179,40 @@ function project_hyperparams(hyperparams::MNCRPHyperparams, dims::Vector{Int64})
     return project_hyperparams(hyperparams, dims_to_proj(dims, d))
 end
 
-function opt_pack(x::Vector{Float64}; transformed=true)
 
-    d = Int64((sqrt(8 * length(x) - 15) - 3)/2)
+function pack(theta::Vector{Float64}; backtransform=true)::Tuple{Float64, Vector{Float64}, Float64, Vector{Float64}, LowerTriangular{Float64}, Matrix{Float64}, Float64}
+    d = Int64((sqrt(8 * length(theta) - 15) - 3)/2)
 
-    alpha = x[1]
-    mu = x[2:2 + d - 1]
-    lambda = x[2 + d]
-    flatL = x[2 + d + 1:2 + d + div(d * (d + 1), 2)]
-    nu = x[end]
+    alpha = theta[1]
+    mu = theta[2:(2 + d - 1)]
+    lambda = theta[2 + d]
+    flatL = theta[(2 + d + 1):(2 + d + div(d * (d + 1), 2))]
+    nu = theta[end]
 
-    if transformed
+    if backtransform
         alpha = exp(alpha)
         lambda = exp(lambda)
         nu = d - 1 + exp(nu)
     end
 
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, nu)
+    L = foldflat(flatL)
+    psi = L * L'
+
+    return (alpha, mu, lambda, flatL, L, psi, nu)
 end
 
-function opt_unpack(hp::MNCRPHyperparams; transform=true)
-    
-    d = length(hp.mu)
-    alpha = hp.alpha
-    lambda = hp.lambda
-    nu = hp.nu
+function unpack(hyperparams::MNCRPHyperparams; transform=true)::Vector{Float64}
+    d = length(hyperparams.mu)
+    alpha = hyperparams.alpha
+    lambda = hyperparams.lambda
+    nu = hyperparams.nu
 
     if transform
         alpha = log(alpha)
         lambda = log(lambda)
-        nu = log(nu - (d - 1))
+        nu = log(nu - d + 1)
     end
 
-    return vcat([alpha], hp.mu, [lambda], hp.flatL, [nu])
+    return vcat(alpha, hyperparams.mu, lambda, hyperparams.flatL, nu)
+
 end
