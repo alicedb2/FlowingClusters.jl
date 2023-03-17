@@ -7,7 +7,7 @@ mutable struct MNCRPChain
     hyperparams::MNCRPHyperparams
 
     # original_data::Dict{Vector{Float64}, Vector{<:Real}}
-    data_mean::Vector{Float64}
+    data_zero::Vector{Float64}
     data_scale::Vector{Float64}
 
     # Some chains of interests
@@ -37,8 +37,7 @@ function show(io::IO, chain::MNCRPChain)
     println(io)
     println(io, "       last MAP at: $(chain.map_idx)")
     println(io, "  #clusters in MAP: $(length(chain.map_clusters))")
-    println(io, "       MAP logprob: $(round(chain.map_logprob, digits=2))")
-    println(io)
+    print(io, "       MAP logprob: $(round(chain.map_logprob, digits=2))")
 end
 
 alpha_chain(chain::MNCRPChain) = [p.alpha for p in chain.hyperparams_chain]
@@ -58,7 +57,7 @@ function elements(chain::MNCRPChain; destandardize=false)
     if !destandardize
         return Vector{Float64}[x for cluster in chain.clusters for x in cluster]
     else
-        return Vector{Float64}[chain.data_scale .* x .+ chain.data_mean for cluster in chain.clusters for x in cluster]
+        return Vector{Float64}[chain.data_scale .* x .+ chain.data_zero for cluster in chain.clusters for x in cluster]
     end
 end
 
