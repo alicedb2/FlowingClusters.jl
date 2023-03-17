@@ -1,8 +1,8 @@
 module Dataset
     using DataFrames: DataFrame, groupby
     using CSV: File
-    using SimpleSDMLayers: SimpleSDMLayer
-    import SimpleSDMLayers: longitudes, latitudes
+    using SpeciesDistributionToolkit: SimpleSDMLayer
+    import SpeciesDistributionToolkit: longitudes, latitudes
     using StatsBase: std, mean
     import StatsBase: standardize
     using Random: shuffle!, shuffle
@@ -11,29 +11,30 @@ module Dataset
     import Base: show, split
 
     export MNCRPDataset
-    export load_dataset, dataframe, original, longitudes, latitudes, standardize, split
+    export load_dataset, dataframe, original, longitudes, latitudes, standardize_with, split
 
-    struct MNCRPDataset
+    mutable struct MNCRPDataset
         dataframe::DataFrame
-        predictors::Vector{<:SimpleSDMLayer}
-        predictornames::Vector{String}
+        layers::Vector{<:SimpleSDMLayer}
+        layernames::Vector{String}
         longlatcols::Vector{Union{Symbol, String, Int}}
-        data_mean::Vector{Float64}
+        data_zero::Vector{Float64}
         data_scale::Vector{Float64}
-        unique_map::Dict
+        unique_map::Union{Dict, Nothing}
         data::Vector{Vector{Float64}}
+        data_raw::Vector{Vector{Float64}}
     end
 
     function show(io::IO, dataset::MNCRPDataset)
         println(io, "          records: $(size(dataset.dataframe, 1))")
         println(io, "   unique records: $(length(dataset.unique_map))")
-        println(io, "       predictors: $(length(dataset.predictors))")
-        println(io, "  predictor names: $(dataset.predictornames)")
+        println(io, "       predictors: $(length(dataset.layers))")
+        println(io, "  predictor names: $(dataset.layernames)")
     end
 
 
     """
-        load_dataset(dataframe::Union{DataFrame, AbstractString}, predictors::Vector{<:SimpleSDMLayer}; predictornames=nothing, longlatcols=[:decimalLongitude, :decimalLatitude], perturb=false, delim="\\t", eps=1e-5)
+        load_dataset(dataframe::Union{DataFrame, AbstractString}, predictors::Vector{<:SimpleSDMLayer}; layernames=nothing, longlatcols=[:decimalLongitude, :decimalLatitude], perturb=false, delim="\\t", eps=1e-5)
 
     Load a dataset from a DataFrame `dataframe` (optionally a CSV filename) 
     
@@ -44,7 +45,7 @@ module Dataset
 
     The optional keywords are:
 
-    * `predictornames`: list the predictor names that will be added as new columns to the dataframe saved into the dataset. Defaults to ["predictor1", "predictor2", ...].
+    * `layernames`: list the predictor names that will be added as new columns to the dataframe saved into the dataset. Defaults to ["predictor1", "predictor2", ...].
 
     * `longlatcols`: specify longitude/latitude columns names. Can be a mix of symbols, strings, and indices. Defaults to [:decimalLongitude, :decimalLatitude].
 
@@ -53,9 +54,9 @@ module Dataset
     * `perturb`: perturb each predictor value by a small value < `eps`. This is an approximate way to allow repeats (e.g. when loading in MNCRP chain).
 
     """
-    function load_dataset(dataframe::Union{DataFrame, AbstractString}, 
-                          predictors::Vector{<:SimpleSDMLayer};
-                          predictornames=nothing,
+    function MNCRPDataset(dataframe::Union{DataFrame, AbstractString}, 
+                          layers::Vector{<:SimpleSDMLayer};
+                          layernames=nothing,
                           longlatcols=[:decimalLongitude, :decimalLatitude],
                           delim="\t",
                           perturb=false,
@@ -63,7 +64,7 @@ module Dataset
                           )
     
         @assert length(longlatcols) == 2
-        @assert isnothing(predictornames) || length(predictors) == length(predictornames)
+        @assert isnothing(layernames) || length(layers) == length(layernames)
         
         if typeof(longlatcols) == Tuple
             longlatcols = collect(longlatcols)
@@ -75,8 +76,8 @@ module Dataset
             dataframe = copy(dataframe)
         end
 
-        if isnothing(predictornames)
-            predictornames = ["predictor$i" for i in 1:length(predictors)]
+        if isnothing(layernames)
+            layernames = ["predictor$i" for i in 1:length(layers)]
         end
 
         longc, latc = longlatcols
@@ -86,7 +87,7 @@ module Dataset
                   .&& .!isnothing.(dataframe[!, latc])
                   .&& .!ismissing.(dataframe[!, latc]))
 
-        obspredvals = [valid_mask[k] ? [predictor[obs[longc], obs[latc]] for predictor in predictors] : [nothing for _ in 1:length(predictors)] for (k, obs) in enumerate(eachrow(dataframe))]
+        obspredvals = [valid_mask[k] ? [predictor[obs[longc], obs[latc]] for predictor in layers] : [nothing for _ in 1:length(layers)] for (k, obs) in enumerate(eachrow(dataframe))]
 
         valid_mask = BitVector(valid_mask .&& map(x -> !any(isnothing.(x)), obspredvals))
 
@@ -95,7 +96,7 @@ module Dataset
         dataframe = dataframe[valid_mask, :]
         predobsvals = predobsvals[:, valid_mask]
 
-        for (predname, vals) in zip(predictornames, eachrow(predobsvals))
+        for (predname, vals) in zip(layernames, eachrow(predobsvals))
             vals = collect(vals)
             if perturb
                 vals .+= epsilon * (rand(length(vals)) .- 0.5)
@@ -103,14 +104,16 @@ module Dataset
             dataframe[!, predname] = vals
         end
         
-        unique_predclusters = groupby(dataframe, predictornames)
-        unique_predvals = [collect(first(group)[predictornames]) for group in unique_predclusters]
-
+        unique_predclusters = groupby(dataframe, layernames)
+        unique_predvals = [collect(first(group)[layernames]) for group in unique_predclusters]
         # standardize #
-        unique_predvals = reduce(hcat, unique_predvals)
-        m = mean(unique_predvals, dims=2)
-        s = std(unique_predvals, dims=2)
-        unique_standardized_predvals = 1.0 .* eachcol((unique_predvals .- m) ./ s)
+        data_zero = mean(unique_predvals)
+        data_scale = std(unique_predvals)
+        unique_standardized_predvals = [(X .- data_zero) ./ data_scale for X in unique_predvals]
+        # unique_predvals = reduce(hcat, unique_predvals)
+        # data_zero = mean(unique_predvals, dims=2)
+        # data_scale = std(unique_predvals, dims=2)
+        # unique_standardized_predvals = 1.0 .* eachcol((unique_predvals .- data_zero) ./ data_scale)
         ################
 
         unique_map = Dict(val => group 
@@ -122,14 +125,33 @@ module Dataset
         # Those points will be loaded onto the chain
         
         return MNCRPDataset(dataframe,
-                            predictors[:], 
-                            predictornames,
-                            longlatcols,
-                            m[:, 1], s[:, 1],
+                            layers[:], 
+                            layernames[:],
+                            longlatcols[:],
+                            data_zero[:, 1], data_scale[:, 1],
                             unique_map,
-                            unique_standardized_predvals)
+                            unique_standardized_predvals,
+                            unique_predvals
+                            )
     end
 
+
+    function MNCRPDataset(lonlats::NamedTuple, layers::Vector{<:SimpleSDMLayer}; standardize_with::Union{MNCRPDataset, Nothing}=nothing)
+        @assert :longitudes in keys(lonlats) && :latitudes in keys(lonlats)
+        
+        dataset = MNCRPDataset(
+            DataFrame(Dict(:longitude => lonlats.longitudes[:], :latitude => lonlats.latitudes[:])),
+            layers[:],
+            longlatcols=[:longitude, :latitude]
+            )
+
+        if standardize_with !== nothing
+            standardize!(dataset, standardize_with)
+        end
+        
+        return dataset
+
+    end
 
     """
     `split(dataset::MNCRPDataset, n::Int=2; rescaletofirst=true)`
@@ -141,50 +163,24 @@ module Dataset
     * `rescaletofirst=true (default)` insures that the rescaling is redone according to the first split and not simply a copy of the original. This should be `true` when splitting into training/validation/test datasets.
 
     """
-    function split(dataset::MNCRPDataset, n::Int=3; rescaletofirst=true)
+    function split(dataset::MNCRPDataset, n::Int=3; standardize_with_first=true)
         n <= 1 && return dataset
 
         datasets = MNCRPDataset[]
         data = shuffle(dataset.data)
         uv_splits = [data[i:n:end] for i in 1:n]
 
-        if rescaletofirst
-            first_dataframe = reduce(vcat, (dataset.unique_map[x] for x in uv_splits[1]))
-            first_dataset = load_dataset(first_dataframe, 
-                                        dataset.predictors, 
-                                        predictornames=dataset.predictornames,
-                                        longlatcols=dataset.longlatcols,
-                                        )
-        end
-
         for i in 1:n
-
             reduced_dataframe = reduce(vcat, (dataset.unique_map[x] for x in uv_splits[i]))
-
-            if rescaletofirst                
-                reduced_unique_map = Dict(((dataset.data_scale .* x + dataset.data_mean) .- first_dataset.data_mean) ./ first_dataset.data_scale
-                                          => dataset.unique_map[x] 
-                                          for x in uv_splits[i])
-                split_m = first_dataset.data_mean[:]
-                split_s = first_dataset.data_scale[:]
-                split_uv = collect(keys(reduced_unique_map))
-            else
-                reduced_unique_map = Dict(x => dataset.unique_map[x] for x in uv_splits[i])
-                split_m = dataset.data_mean[:]
-                split_s = dataset.data_scale[:]
-                split_uv = uv_splits[i]
+            reduced_dataset = MNCRPDataset(reduced_dataframe,
+                                           dataset.layers[:],
+                                           layernames=dataset.layernames[:],
+                                           longlatcols=dataset.longlatcols[:]
+                                          )
+            if i > 1 && standardize_with_first
+                standardize_with!(reduced_dataset, datasets[1])
             end
-
-            reduced_dataset = MNCRPDataset(reduced_dataframe, 
-                                           dataset.predictors[:], 
-                                           dataset.predictornames[:], 
-                                           dataset.longlatcols[:],
-                                           split_m, split_s,
-                                           reduced_unique_map,
-                                           split_uv)
-
             push!(datasets, reduced_dataset)
-
         end
 
         return datasets
@@ -208,7 +204,7 @@ module Dataset
     end
 
     function original(element::Vector{Float64}, dataset::MNCRPDataset)
-        return collect(first(dataset.unique_map[element])[dataset.predictornames])
+        return collect(first(dataset.unique_map[element])[dataset.layernames])
     end
     
     function original(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset)
@@ -266,8 +262,8 @@ module Dataset
 
     Return standard score of `element` against mean and standard deviation already determined for `dataset`.
     """
-    function standardize(element::Vector{Float64}, dataset::MNCRPDataset)
-        return (element .- dataset.data_mean) ./ dataset.data_scale
+    function standardize_with(element::Vector{Float64}, dataset::MNCRPDataset)
+        return (element .- dataset.data_zero) ./ dataset.data_scale
     end
     
     
@@ -276,9 +272,21 @@ module Dataset
 
     Return standard score of `elements` against mean and standard deviation already determined for `dataset`.
     """
-    function standardize(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
-        return standardize.(elements, Ref(dataset))
+    function standardize_with(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
+        return standardize_with.(elements, Ref(dataset))
     end
 
+    function standardize_with!(dataset::MNCRPDataset, standardize_with::MNCRPDataset)
+        
+        new_data_z = standardize_with.data_zero[:]
+        new_data_s = standardize_with.data_scale[:]
+        new_data = [((dataset.data_scale .* old_X + dataset.data_zero) .- new_data_z) ./ new_data_s for old_X in dataset.data]
+        dataset.unique_map = Dict(new_X => dataset.unique_map[old_X] for (old_X, new_X) in zip(dataset.data, new_data)) 
+        dataset.data_zero = new_data_z
+        dataset.data_scale = new_data_s
+        dataset.data = new_data
+        
+        return dataset
 
+    end
 end
