@@ -3,7 +3,7 @@ module MultivariateNormalCRP
     using Random: randperm, shuffle, shuffle!, seed!
     using StatsFuns: logsumexp, logmvgamma
     using StatsBase: sample, mean, var, Weights, std, cov, percentile, quantile, median, iqr, scattermat, fit, Histogram, autocor, autocov
-    using LinearAlgebra: logdet, det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd
+    using LinearAlgebra: logdet, det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd, I
     using SpecialFunctions: loggamma, polygamma
     using Base.Iterators: cycle
     import Base.Iterators: flatten
@@ -12,7 +12,8 @@ module MultivariateNormalCRP
     using StatsPlots: covellipse!, covellipse
     using JLD2
     using ProgressMeter
-    using Optim: optimize, minimizer, LBFGS, NelderMead
+    using FiniteDiff: finite_difference_hessian
+    using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
 
     import RecipesBase: plot
@@ -22,13 +23,14 @@ module MultivariateNormalCRP
 
     export Cluster, elements
     export initiate_chain, advance_chain!, attempt_map!, burn!
-    export clear_diagnostics!
+    export clear_diagnostics!, diagnostics
     export log_Pgenerative, stats, ess
     # export drawNIW
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain, logprob_chain, nbclusters_chain, largestcluster_chain
     export plot, covellipses!
     export project_clusters, project_cluster, project_hyperparams, project_mu, project_psi
     export local_covprec, local_covariance, local_precision, local_covariance_summary
+    export eigen_mode, importances, local_geometry, map_cluster_assignment_idx
     export response_correlation
     export tail_probability, tail_probability_summary, predictive_logpdf
     export presence_probability, presence_probability_summary
@@ -41,17 +43,16 @@ module MultivariateNormalCRP
     include("types/chain.jl")
 
     include("types/dataset.jl")
-    # import SimpleSDMLayers: longitudes, latitudes, rescale
     using .Dataset
     export MNCRPDataset
-    export load_dataset, dataframe, original, longitudes, latitudes, standardize, split
+    export load_dataset, dataframe, original, longitudes, latitudes, standardize_with, split
 
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
     export bioclim_predictor
 
-    # Quick and dirty logdet of positive-definite matrix
-    # 2x faster than logdet()
+    # Quick and dirty and faster logdet
+    # for positive-definite matrix
     function logdetpsd(A::Matrix{Float64})
         chol = cholesky(Symmetric(A))
         acc = 0.0
@@ -61,6 +62,18 @@ module MultivariateNormalCRP
         return 2 * acc
     end
 
+    function logdetflatLL(flatL::Vector{Float64})
+        acc = 0.0
+        i = 1
+        delta = 2
+        while i <= length(flatL)
+           acc += log(flatL[i])
+           i += delta
+           delta += 1 
+        end
+        return 2 * acc
+    end
+    
     # function drawNIW(
     #     mu::Vector{Float64}, 
     #     lambda::Float64, 
@@ -101,18 +114,8 @@ module MultivariateNormalCRP
             lambda_c = lambda + n
             nu_c = nu + n
 
-            # mean_x = cluster.sum_x ./ n
-
-            # mu_c = (lambda * mu + n * mean_x) / (lambda + n)
-            # psi_c = psi + lambda * mu * mu' + cluster.sum_xx - lambda_c * mu_c * mu_c'
-
-            # psi_c_2 = (psi 
-            #         + sum((x - mean_x) * (x - mean_x)' for x in cluster) 
-            #         + lambda * n / (lambda + n) * (mean_x - mu) * (mean_x - mu)')
-
             # mu_c = Array{Float64}(undef, d)
             # psi_c = Array{Float64}(undef, d, d)
-
             mu_c = cluster.mu_c_volatile
             psi_c = cluster.psi_c_volatile
 
@@ -143,9 +146,6 @@ module MultivariateNormalCRP
         lambda::Float64,
         psi::Matrix{Float64},
         nu::Float64)::Float64
-
-        # empty_cluster = Cluster(length(mu))
-        # return log_Zniw(empty_cluster, mu, lambda, psi, nu)
         
         d = length(mu)
         log_numerator = d/2 * log(2pi) + nu * d/2 * log(2) + logmvgamma(d, nu/2)
@@ -179,15 +179,25 @@ module MultivariateNormalCRP
     
     end
 
-    # Return the log-likelihood of the model
     function log_Pgenerative(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; hyperpriors=true)
+        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+        return log_Pgenerative(clusters, alpha, mu, lambda, psi, nu; hyperpriors=hyperpriors)
+    end
+
+    function log_Pgenerative(clusters::Vector{Cluster}, theta::Vector{Float64}; hyperpriors=true)
+        alpha, mu, lambda, flatL, L, psi, nu = pack(theta)
+        return log_Pgenerative(clusters, alpha, mu, lambda, psi, nu; hyperpriors=hyperpriors)
+    end
+
+    # Return the log-likelihood of the model
+    function log_Pgenerative(clusters::Vector{Cluster}, alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; hyperpriors=true)
     
         @assert all(length(c) > 0 for c in clusters)
         
         N = sum([length(c) for c in clusters])
         K = length(clusters)
 
-        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+        # alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         d = length(mu)
     
         # Log-probability associated with the Chinese Restaurant Process
@@ -220,7 +230,7 @@ module MultivariateNormalCRP
     
     end
 
-    function log_cluster_weight(element::Vector{Float64}, cluster::Cluster, alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; N=nothing)
+    function log_cluster_weight(element::Vector{Float64}, cluster::Cluster, alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; N::Union{Int64, Nothing}=nothing)
 
         @assert !(element in cluster) "$(element)"
         
@@ -258,7 +268,7 @@ module MultivariateNormalCRP
 
             pop!(clusters, e)
             
-            if sum(isempty.(clusters)) == 0
+            if sum(isempty.(clusters)) < 1
                 push!(clusters, Cluster(d))
             end
 
@@ -587,7 +597,6 @@ module MultivariateNormalCRP
             log_acc += log_hastings
 
             log_acc += d * (logdetpsd(hyperparams.psi) - logdetpsd(proposed_psi))
-            # log_acc += d * (logdetpsd(hyperparams.psi) - logdetpsd(proposed_psi))
             # log_acc += d * (log(det(hyperparams.psi)) - log(det(proposed_psi)))
             
             log_acc = min(0.0, log_acc)
@@ -601,6 +610,27 @@ module MultivariateNormalCRP
             
         end
     
+    end
+
+    function log_slicef_flatL(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, flatL::Vector{Float64})
+        mu, lambda, nu = hyperparams.mu, hyperparams.lambda, hyperparams.nu
+        d = length(mu)
+        K = length(clusters)
+        
+        L = foldflat(flatL)
+        psi = L * L'
+
+        ret = (K * nu / 2 - d) * 2 * sum(log.(diag(L)))
+        for cluster in clusters
+            _, _, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
+            ret -= nu_c / 2 * logdetpsd(psi_c)
+        end
+
+        return ret
+    end
+
+    function advance_psi_slice!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams)
+
     end
 
     function advance_nu!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams;
@@ -644,6 +674,74 @@ module MultivariateNormalCRP
     
     end
 
+    function optimal_step_scale_local(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; optimize=true, verbose=false)::Matrix{Float64}
+        d = length(hyperparams.mu)
+        D = 3 + d + div(d * (d + 1), 2)
+
+        if optimize
+            hyperparams = optimize_hyperparams(clusters, hyperparams, verbose=verbose)
+        end
+
+        theta = unpack(hyperparams, transform=true)
+        if verbose
+            println()
+            println(" * Calculating Hessian")
+        end
+        hessian = finite_difference_hessian(x -> log_Pgenerative(clusters, x; hyperpriors=true), theta)
+        return -(2.38^2/D) * inv(hessian)
+    end
+
+    function optimal_step_scale_adaptive(chain::MNCRPChain; n=1, epsilon=1e-2)::Matrix{Float64}
+        d = length(chain.hyperparams.mu)
+        D = 3 + d + div(d * (d + 1), 2)
+        emp_sigma = cov(unpack.(chain.hyperparams_chain[1:n:end]))        
+        return 2.38^2 / D * (emp_sigma + epsilon / D * I(D))
+    end
+
+    function advance_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, step_scale::Matrix{Float64})
+        alpha, mu, lambda, flatL, L, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.flatL, hyperparams.L, hyperparams.psi, hyperparams.nu
+        d = length(mu)
+        log_alpha = log(alpha)
+        log_lambda = log(lambda)
+        log_x = log(nu - d + 1)
+        current_theta = unpack(hyperparams, transform=true)
+        
+        thetaD = 3 + d + div(d * (d + 1), 2)
+        delta_theta = rand(MvNormal(zeros(thetaD), step_scale))
+        proposed_theta = current_theta + delta_theta
+        proposed_alpha, proposed_mu, proposed_lambda, proposed_flatL, proposed_L, proposed_psi, proposed_nu = pack(proposed_theta, backtransform=true)
+
+        log_metropolis = log_Pgenerative(clusters, proposed_alpha, proposed_mu, proposed_lambda, proposed_psi, proposed_nu, hyperpriors=true)
+        log_metropolis -= log_Pgenerative(clusters, alpha, mu, lambda, psi, nu, hyperpriors=true)
+
+        log_hastings = log(proposed_alpha) - log(alpha)
+        log_hastings += sum((d:-1:1) .* (log.(abs.(diag(proposed_L))) - log.(abs.(diag(L)))))
+        log_hastings += log(proposed_nu - d + 1) - log_x
+
+        log_acc = min(0.0, log_metropolis + log_hastings)
+        if log(rand()) <= log_acc
+            hyperparams.alpha = proposed_alpha
+            hyperparams.mu = proposed_mu
+            hyperparams.lambda = proposed_lambda
+            hyperparams.flatL = proposed_flatL
+            hyperparams.L = proposed_L
+            hyperparams.psi = proposed_psi
+            hyperparams.nu = proposed_nu
+
+            hyperparams.diagnostics.accepted_alpha += 1
+            hyperparams.diagnostics.accepted_mu .+= 1
+            hyperparams.diagnostics.accepted_lambda += 1
+            hyperparams.diagnostics.accepted_flatL .+= 1
+            hyperparams.diagnostics.accepted_nu += 1
+        else
+            hyperparams.diagnostics.rejected_alpha += 1
+            hyperparams.diagnostics.rejected_mu .+= 1
+            hyperparams.diagnostics.rejected_lambda += 1
+            hyperparams.diagnostics.rejected_flatL .+= 1
+            hyperparams.diagnostics.rejected_nu += 1
+        end
+    end
+
     # Very cute!
     function jeffreys_alpha(alpha::Float64, n::Int64)
 
@@ -665,7 +763,7 @@ module MultivariateNormalCRP
 
     function initiate_chain(dataset::MNCRPDataset; chain_samples=200, strategy=:hot)
         chain = initiate_chain(dataset.data, chain_samples=chain_samples, standardize=false, strategy=strategy)
-        chain.data_mean = dataset.data_mean[:]
+        chain.data_zero = dataset.data_zero[:]
         chain.data_scale = dataset.data_scale[:]
         return chain
     end
@@ -683,24 +781,29 @@ module MultivariateNormalCRP
         clusters_samples = CircularBuffer{Vector{Cluster}}(chain_samples)
         hyperparams_samples = CircularBuffer{MNCRPHyperparams}(chain_samples)
 
-        chain = MNCRPChain([], hyperparams, 
-        # Dict{Vector{Float64}, Vector{<:Real}}(), # data point => original datapoint
-        zeros(d), ones(d), [], [], [], [],
-        clusters_samples, hyperparams_samples,
-        [], deepcopy(hyperparams), -Inf, 1)
         
         # Keep unique observations only in case we standardize
         data = Set{Vector{Float64}}(data)
-        println("    $(length(data)) unique data points")
+        println("    Loaded $(length(data)) unique data points into chain")
         data = collect(data)
+
+        data_zero = zeros(d)
+        data_scale = ones(d)
         if standardize
-            chain.data_mean = mean(data)
-            chain.data_scale = std(data)
-            data = Vector{Float64}[(x .- chain.data_mean) ./ chain.data_scale for x in data]
+            data_zero = mean(data)
+            data_scale = std(data)
+            data = Vector{Float64}[(x .- data_zero) ./ data_scale for x in data]
         end
+
+        chain = MNCRPChain([], hyperparams, 
+        data_zero, data_scale, [], [], [], [],
+        clusters_samples, hyperparams_samples,
+        [], deepcopy(hyperparams), -Inf, 1)
+
 
         # chain.original_data = Dict{Vector{Float64}, Vector{<:Real}}(k => v for (k, v) in zip(data, original_data))
 
+        println("    Initializing clusters...")
         if strategy == :hot
             ##### 1st initialization method: fullseq
             chain.clusters = [Cluster(data)]
@@ -712,6 +815,9 @@ module MultivariateNormalCRP
         elseif strategy == :1
             chain.clusters = [Cluster(data)]
         end
+        println("    Initializing hyperparameters...")
+        optimize_hyperparams!(chain.clusters, chain.hyperparams, verbose=true)
+        chain.hyperparams.diagnostics.step_scale = optimal_step_scale_local(chain.clusters, chain.hyperparams, optimize=true)
 
         chain.nbclusters_chain = [length(chain.clusters)]
         chain.largestcluster_chain = [maximum(length.(chain.clusters))]
@@ -779,21 +885,37 @@ module MultivariateNormalCRP
             # namelyby subtracting the mean and dividing
             # by the standard deviation along each dimension.
 
+            # for i in 1:nb_mhhyperparams
+            #     advance_alpha!(chain.clusters, chain.hyperparams, 
+            #                     step_type=:gaussian, step_size=0.5 * mh_stepscale[1])
+                
+            #     advance_mu!(chain.clusters, chain.hyperparams, 
+            #                 step_type=:gaussian, step_size=0.3 * mh_stepscale[2])
+                
+            #     advance_lambda!(chain.clusters, chain.hyperparams, 
+            #                     step_type=:gaussian, step_size=0.5 * mh_stepscale[3])
+
+            #     advance_psi!(chain.clusters, chain.hyperparams,
+            #                 step_type=:gaussian, step_size=0.1 * mh_stepscale[4])
+
+            #     advance_nu!(chain.clusters, chain.hyperparams, 
+            #                 step_type=:gaussian, step_size=0.3 * mh_stepscale[5])
+            # end
+
+
+            
+            # if length(chain.logprob_chain) < 20
+            #     d = length(chain.hyperparams.mu)
+            #     D = 3 + d + div(d * (d + 1), 2)
+            #     mh_stepscale = 0.01/D * diagm(ones(D))
+            # else
+            #     if mod(length(chain.logprob_chain), 10) == 0 || step == 1
+            #         mh_stepscale = optimal_step_scale_adaptive(chain)
+            #     end
+            # end
+
             for i in 1:nb_mhhyperparams
-                advance_alpha!(chain.clusters, chain.hyperparams, 
-                                step_type=:gaussian, step_size=0.5 * mh_stepscale[1])
-                
-                advance_mu!(chain.clusters, chain.hyperparams, 
-                            step_type=:gaussian, step_size=0.3 * mh_stepscale[2])
-                
-                advance_lambda!(chain.clusters, chain.hyperparams, 
-                                step_type=:gaussian, step_size=0.5 * mh_stepscale[3])
-
-                advance_psi!(chain.clusters, chain.hyperparams,
-                            step_type=:gaussian, step_size=0.1 * mh_stepscale[4])
-
-                advance_nu!(chain.clusters, chain.hyperparams, 
-                            step_type=:gaussian, step_size=0.3 * mh_stepscale[5])
+                advance_hyperparams!(chain.clusters, chain.hyperparams, chain.hyperparams.diagnostics.step_scale)
             end
 
             push!(chain.hyperparams_chain, deepcopy(chain.hyperparams))
@@ -845,6 +967,13 @@ module MultivariateNormalCRP
                     catch e
                         map_success = false
                     end
+
+                    # if map_success
+                    #     new_step_scale = optimal_step_scale_local(chain.map_clusters, chain.map_hyperparams)
+                    #     if all(eigen(new_step_scale).values .> 0.0)
+                    #         chain.hyperparams.diagnostics.step_scale = new_step_scale
+                    #     end
+                    # end
 
                     nb_map_successes += map_success
                     last_map_idx = chain.map_idx
@@ -906,19 +1035,22 @@ module MultivariateNormalCRP
     function attempt_map!(chain::MNCRPChain; max_nb_pushes=15, optimize_hyperparams=true)
             
         map_clusters_attempt = copy(chain.clusters)
-        map_mll = log_Pgenerative(map_clusters_attempt, chain.hyperparams)
-        
-        hyperparams = deepcopy(chain.hyperparams)
+        map_hyperparams = deepcopy(chain.hyperparams)
+
+        map_mll = log_Pgenerative(map_clusters_attempt, chain.map_hyperparams)
         
         # if optimize_hyperparams
-        #     optimize_hyperparams!(map_clusters_attempt, hyperparams)
+        #     optimize_hyperparams!(map_clusters_attempt, map_hyperparams)
         # end
 
         # Greedy Gibbs!
         for p in 1:max_nb_pushes
             test_attempt = copy(map_clusters_attempt)
-            advance_gibbs!(test_attempt, hyperparams; temperature=0.0)
-            test_mll = log_Pgenerative(test_attempt, hyperparams)
+            advance_gibbs!(test_attempt, map_hyperparams; temperature=0.0)
+            if optimize_hyperparams
+                optimize_hyperparams!(map_clusters_attempt, map_hyperparams, verbose=true)
+            end
+            test_mll = log_Pgenerative(test_attempt, map_hyperparams)
             if test_mll <= map_mll
                 # We've regressed, so stop and leave
                 # the previous state before this test
@@ -932,15 +1064,12 @@ module MultivariateNormalCRP
             end
         end
 
-        if optimize_hyperparams
-            optimize_hyperparams!(map_clusters_attempt, hyperparams)
-        end
 
-        attempt_logprob = log_Pgenerative(map_clusters_attempt, hyperparams)
+        attempt_logprob = log_Pgenerative(map_clusters_attempt, map_hyperparams)
         if attempt_logprob > chain.map_logprob
             chain.map_logprob = attempt_logprob
             chain.map_clusters = map_clusters_attempt
-            chain.map_hyperparams = hyperparams
+            chain.map_hyperparams = map_hyperparams
             chain.map_idx = lastindex(chain.logprob_chain)
             return true
         else
@@ -948,18 +1077,19 @@ module MultivariateNormalCRP
         end
     end
 
-    function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, plot_kw...)
+    function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
         
         @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
-        p = plot(
-            legend_position=:topleft, grid=:no, 
-            showaxis=:yes, ticks=:true;
-            plot_kw...)
+        p = plot(; legend_position=:topleft, grid=:no, showaxis=:yes, ticks=:true, plot_kw...)
 
         clusters = project_clusters(sort(clusters, by=length, rev=rev), dims)
 
-        for (cluster, color) in zip(clusters, cycle(tableau_20))
+        if nb_clusters === nothing || nb_clusters > length(clusters) || nb_clusters <= 0
+            nb_clusters = length(clusters)
+        end
+
+        for (cluster, color, _) in zip(clusters, cycle(tableau_20), 1:nb_clusters)
             scatter!(collect(Tuple.(cluster)), label="$(length(cluster))", 
             color=color, markerstrokewidth=0)
         end
@@ -980,7 +1110,7 @@ module MultivariateNormalCRP
 
     # end
     
-    function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=false)
+    function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=false, nb_clusters=nothing)
         
         @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
@@ -988,18 +1118,18 @@ module MultivariateNormalCRP
         
         proj = dims_to_proj(dims, d)
 
-        return plot(chain, proj, burn=burn, rev=rev)
+        return plot(chain, proj, burn=burn, rev=rev, nb_clusters=nb_clusters)
     end
 
-    function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false)
+    function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_clusters=nothing)
         
         @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
         
         map_marginals = project_clusters(chain.map_clusters, proj)
         current_marginals = project_clusters(chain.clusters, proj)
         
-        p_map = plot(map_marginals; rev=rev, title="MAP state ($(length(chain.map_clusters)) clusters)")
-        p_current = plot(current_marginals; rev=rev, title="Current state ($(length(chain.clusters)) clusters)", legend=false)
+        p_map = plot(map_marginals; rev=rev, nb_clusters=nb_clusters, title="MAP state ($(length(chain.map_clusters)) clusters)")
+        p_current = plot(current_marginals; rev=rev, nb_clusters=nb_clusters, title="Current state ($(length(chain.clusters)) clusters)", legend=false)
 
         lpc = chain.logprob_chain
         p_logprob = plot(burn+1:length(lpc), lpc[burn+1:end], grid=:no, label=nothing, title="log probability chain")
@@ -1055,10 +1185,48 @@ module MultivariateNormalCRP
     end
 
     function eigen_mode(cluster::Cluster, hyperparams::MNCRPHyperparams)
-        _, _, psi_c, nu_c = updated_niw_hyperparams(cluster, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
+        mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
         d = length(hyperparams.mu)
-        sigma_mode = Symmetric(psi_c / (nu_c + d + 1))
+        sigma_mode = Symmetric((lambda_c + 1)/lambda_c/(nu_c - d + 1) * psi_c)
         return eigen(sigma_mode)
+    end
+
+    """
+    For each eigenvalue/eigenvector pair (sorted from largest to smallest eigenvalue) of the (predictive) covariance matrix of the cluster,
+    return the layer loadings (elements of the eigenvector) from the largest in absolute value (most important) to the smallest.
+    """
+    function importances(cluster::Cluster, hyperparams::MNCRPHyperparams)
+        evals, evecs = eigen_mode(cluster, hyperparams)
+
+        imps = []
+        for (eva, eve) in reverse(collect(zip(evals, eachcol(evecs))))
+            imp = sort(collect(zip(eve, 1:length(eve))), by=x->abs(x[1]), rev=true)
+            push!(imps, imp)
+        end
+
+        return imps
+    end
+
+    function local_geometry(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams)
+        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+        d = length(hyperparams.mu)
+        
+        local_scale, _ = local_covprec(coordinate, clusters, hyperparams)
+
+        evals, evecs = eigen(local_scale)
+        
+        imps = []
+        for (eva, eve) in reverse(collect(zip(evals, eachcol(evecs))))
+            imp = sort(collect(zip(eve, 1:length(eve))), by=x->abs(x[1]), rev=true)
+            push!(imps, (eval=eva, sorted_evecs=imp))
+        end
+
+        normalized_evals = [imp.eval for imp in imps]
+        normalized_evals = normalized_evals ./ sum(normalized_evals)
+        entropy = - sum(normalized_evals .* log.(normalized_evals))
+
+        return (importances=imps, entropy=entropy)
+
     end
 
     function covellipses!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; dims::Vector{Int64}=[1, 2], n_std=2, scalematrix=nothing, offset=nothing, type=:predictive, lowest_weight=nothing, plot_kw...)
@@ -1138,31 +1306,19 @@ module MultivariateNormalCRP
 
         N = sum(length(c) for c in clusters)
         
-        clusters = vcat(clusters, [Cluster(d)])
-        
-        coordinate_set = Cluster([coordinate])
+        clusters = vcat(clusters, [Cluster(d)])        
         log_parts = []
         cluster_covs = []
         cluster_precs = []
         
+        coordinate = coordinate .* (1.0 .+ 1e-7 * rand(d))
+
         for cluster in clusters
             
-            log_crp_weight = (length(cluster) > 0 ? log(length(cluster)) - log(alpha + N) : log(alpha)) - log(alpha + N)
-
-            coordinate = coordinate .* (1.0 .+ 1e-7 * rand(d))
-            
-            push!(cluster, coordinate)
-            log_data_weight = log_Zniw(cluster, mu, lambda, psi, nu)
-            _, _, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
-            pop!(cluster, coordinate)
-            log_data_weight -= log_Zniw(cluster, mu, lambda, psi, nu) 
-            log_data_weight -= d/2 * log(2pi)
-            
-            push!(log_parts, log_crp_weight + log_data_weight)
-
-            push!(cluster_covs, psi_c / (nu_c + d + 1))
-            push!(cluster_precs, nu_c * inv(psi_c))
-
+            push!(log_parts, log_cluster_weight(coordinate, cluster, alpha, mu, lambda, psi, nu))            
+            _, _, mvstudent_sigma = updated_mvstudent_params(cluster, mu, lambda, psi, nu)
+            push!(cluster_covs, mvstudent_sigma)
+            push!(cluster_precs, inv(mvstudent_sigma))
         end
             
         log_parts = log_parts .- logsumexp(log_parts)
@@ -1308,25 +1464,41 @@ module MultivariateNormalCRP
 
     end
 
-    function optimize_hyperparams(clusters::Vector{Cluster}, hyperparams0::MNCRPHyperparams)
+    function optimize_hyperparams(clusters::Vector{Cluster}, hyperparams0::MNCRPHyperparams; verbose=false)
 
-        objfun(x) = -log_Pgenerative(clusters, opt_pack(x))
+        objfun(x) = -log_Pgenerative(clusters, x)
 
-        optres = optimize(objfun, opt_unpack(hyperparams0), NelderMead())
+        x0 = unpack(hyperparams0)
 
-        opt_hp = opt_pack(minimizer(optres))
+        if verbose
+            function callback(x)
+                print(" * Iter $(x.iteration),   objfun $(-round(x.value, digits=2)),   g_norm $(round(x.g_norm, digits=8))\r")
+                return false
+            end
+        else
+            callback =  nothing
+        end
+        opt_options = Options(iterations=9999, 
+                              f_tol=1e-5,
+                              callback=callback)
 
-        return opt_hp
+        optres = optimize(objfun, x0, LBFGS(), opt_options)
+
+        opt_hp = pack(minimizer(optres))
+
+        return MNCRPHyperparams(opt_hp..., deepcopy(hyperparams0.diagnostics))
 
     end
 
-    function optimize_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams)
+    function optimize_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; verbose=false)
         
-        opt_res = optimize_hyperparams(clusters, hyperparams)
+        opt_res = optimize_hyperparams(clusters, hyperparams, verbose=verbose)
 
         hyperparams.alpha = opt_res.alpha
         hyperparams.mu = opt_res.mu
         hyperparams.lambda = opt_res.lambda
+        hyperparams.flatL = opt_res.flatL
+        hyperparams.L = opt_res.L
         hyperparams.psi = opt_res.psi
         hyperparams.nu = opt_res.nu
 
@@ -1413,7 +1585,8 @@ module MultivariateNormalCRP
     function tail_probability(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}}, hyperparams_samples::AbstractVector{MNCRPHyperparams}, rejection_samples=10000; nb_samples=nothing)
         
         @assert length(clusters_samples) == length(hyperparams_samples)
-
+        @assert length(clusters_samples) > 1
+        
         if nb_samples === nothing
             first_idx = 1
             nb_samples = length(clusters_samples)
@@ -1443,7 +1616,7 @@ module MultivariateNormalCRP
         
         emp_summaries = empirical_distribution_summary.(tail_probs_distributions)
         
-        emp_summaries_t = (mean=[], std=[], mode=[], median=[], iqr=[], iqr90=[], q5=[], q25=[], q75=[], q95=[])
+        emp_summaries_t = (mean=Float64[], std=Float64[], mode=Float64[], median=Float64[], iqr=Float64[], iqr90=Float64[], q5=Float64[], q25=Float64[], q75=Float64[], q95=Float64[])
         for summ in emp_summaries
             push!(emp_summaries_t.mean, summ.mean)
             push!(emp_summaries_t.std, summ.std)
@@ -1464,80 +1637,6 @@ module MultivariateNormalCRP
     function tail_probability_summary(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, rejection_samples=10000; nb_samples=nothing)
         return tail_probability_summary(coordinates, chain.clusters_samples, chain.hyperparams_samples, rejection_samples, nb_samples=nb_samples)
     end
-
-    # function response_correlation(coordinates::Vector{Vector{Float64}}, clusters_samples::AbstractVector{Vector{Cluster}},  hyperparams_samples::AbstractVector{MNCRPHyperparams}, rejection_samples=10000; kernel_covs=:auto)
-
-    #     d = size(first(coordinates), 1)
-
-    #     if kernel_covs == :auto
-    #         println("Calculating local covariances at coordinates");flush(stdout)
-    #         kernel_covs = local_covariance_summary(coordinates, clusters_samples, hyperparams_samples).median
-    #     elseif typeof(kernel_covs) == Float64
-    #         kernel_covs = Matrix{Float64}[diagm(kernel_covs^2 * ones(d)) for _ in coordinates]
-    #     elseif typeof(kernel_covs) == Vector{Float64}
-    #         @assert length(kernel_covs) == d
-    #         kernel_covs = Matrix{Float64}[diagm(kernel_covs.^2) for _ in coordinates]
-    #     elseif typeof(kernel_covs) == Matrix{Float64}
-    #         @assert size(kernel_covs) == (d, d)
-    #         kernel_covs = Matrix{Float64}[kernel_covs for _ in coordinates]
-    #     end
-
-    #     elements = Vector{Float64}[x for cluster in first(clusters_samples) for x in cluster]
-        
-    #     logodd(p) = log(p) - log(1 - p)
-    #     println("Calculating tail probabilitiessc"); flush(stdout)
-    #     elements_tail_probs = tail_probability_summary(elements, clusters_samples, hyperparams_samples, rejection_samples).median
-    #     elements_tail_logodds = logodd.(elements_tail_probs)
-    #     elements = Vector{Float64}[element for (element, lo) in zip(elements, elements_tail_logodds) if isfinite(lo)]
-    #     augmented_elements = Vector{Float64}[vcat(element, lo) for (element, lo) in zip(elements, elements_tail_logodds) if isfinite(lo)]
-    #     augmented_elements_matrix = reduce(hcat, augmented_elements)    
-    #     # coordinates = coordinates .* (1.0 .+ 1e-7 * rand(length(coordinates)))
-    #     # coordinates_tail_probs = tail_probability_summary(coordinates, clusters_samples, hyperparams_samples, rejection_samples).median
-    #     # coordinates_tail_logodds = logodd.(coordinates_tail_probs)
-    #     # augmented_coordinates = Vector{Float64}[vcat(coordinate, lo) for (coordinate, lo) in zip(coordinates, coordinates_tail_logodds)]
-    #     # mask = isfinite.(coordinates_tail_logodds)
-
-    #     correlations = Matrix{Float64}[]
-    #     partial_correlations = Matrix{Float64}[]
-
-    #     for (i, (coordinate, kernel_cov)) in enumerate(zip(coordinates, kernel_covs))
-    #         if mod(i, 100) == 0
-    #             print("\rCalculating correlations...$(i)"); flush(stdout);
-    #         end
-    #         weights = zeros(size(augmented_elements))
-    #         for k in 1:length(weights)
-    #             weights[k] = exp(-1/2 * (elements[k] .- coordinate)' * inv(kernel_cov) * (elements[k] - coordinate))
-    #         end
-    #         weights ./= sqrt(det(2 * pi * kernel_cov))
-            
-    #         m = mean(augmented_elements_matrix, Weights(weights), 2)
-    #         sm = scattermat(augmented_elements_matrix .- hcat(m), Weights(weights), mean=0, dims=2)
-    #         covariance = sm ./ sum(weights)
-    #         # covariance = cov(augmented_elements_matrix, Weights(weights), 2)
-    #         precision = inv(covariance)
-            
-    #         correlation = zeros(d + 1, d + 1)
-    #         partial_correlation = zeros(d+1, d+1)
-    #         for m in 1:d+1
-    #             for n in 1:m
-    #                 correlation[m, n] = covariance[m, n] / sqrt(covariance[m, m] * covariance[n, n])
-    #                 correlation[n, m] = correlation[m, n]
-
-    #                 partial_correlation[m, n] = -precision[m, n] / sqrt(precision[m, m] * precision[n, n])
-    #                 partial_correlation[n, m] = partial_correlation[m, n]
-    #             end
-    #         end
-    #         push!(correlations, correlation)
-    #         push!(partial_correlations, partial_correlation)
-    #     end
-
-    #     return (correlation=correlations, partial_correlation=partial_correlations)
-    # end
-
-
-    # function response_correlation(coordinates::Vector{Vector{Float64}}, chain::MNCRPChain, rejection_samples=10000; kernel_covs=kernel_covs)
-    #     return response_correlation(coordinates, chain.clusters_samples, chain.hyperparams_samples, rejection_samples; kernel_covs=kernel_covs)
-    # end
 
     function presence_probability(presence_clusters::AbstractVector{Cluster}, presence_hyperparams::MNCRPHyperparams, absence_clusters::AbstractVector{Cluster}, absence_hyperparams::MNCRPHyperparams; logprob=false)
         
@@ -1583,6 +1682,7 @@ module MultivariateNormalCRP
         )
 
         @assert length(presence_clusters_samples) == length(presence_hyperparams_samples) == length(absence_clusters_samples) == length(absence_hyperparams_samples)
+        @assert length(presence_clusters_samples) > 1
 
         if nb_samples === nothing
             first_idx = 1
@@ -1621,7 +1721,7 @@ module MultivariateNormalCRP
 
         emp_summaries = empirical_distribution_summary.(presence_probability_distributions)
         
-        emp_summaries_t = (mean=[], std=[], mode=[], median=[], iqr=[], iqr90=[], q5=[], q25=[], q75=[], q95=[])
+        emp_summaries_t = (mean=Float64[], std=Float64[], mode=Float64[], median=Float64[], iqr=Float64[], iqr90=Float64[], q5=Float64[], q25=Float64[], q75=Float64[], q95=Float64[])
         for summ in emp_summaries
             push!(emp_summaries_t.mean, summ.mean)
             push!(emp_summaries_t.std, summ.std)
@@ -1671,6 +1771,23 @@ module MultivariateNormalCRP
         emp_iqr90 = emp_quantile95 - emp_quantile5
         
         return (mean=emp_mean, std=emp_std, mode=emp_mode, median=emp_median, iqr=emp_iqr, iqr90=emp_iqr90, q5=emp_quantile5, q25=emp_quantile25, q75=emp_quantile75, q95=emp_quantile95)
+
+    end
+
+    function map_cluster_assignment_idx(coordinate::Vector{Float64}, clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams)
+        alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+        d = length(hyperparams.mu)
+        
+        clusters = sort(clusters, by=length, rev=true)
+        push!(clusters, Cluster(d))
+
+        cluster_weights = Float64[log_cluster_weight(coordinate, cluster, alpha, mu, lambda, psi, nu) for cluster in clusters]
+        map_cluster, map_idx = findmax(cluster_weights)
+        
+        # map_idx = 0 indicates new cluster assignment
+        map_idx = map_idx == length(cluster_weights) ? 0 : map_idx
+        
+        return map_idx
 
     end
 
