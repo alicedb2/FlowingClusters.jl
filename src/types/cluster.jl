@@ -37,22 +37,7 @@ function Cluster(elements::Vector{Vector{Float64}})
     d = length(first(elements))
     @assert all(length.(elements) .== d) "All elements must be of dimension $d"
 
-    sum_x = zeros(Float64, d)
-    @inbounds for i in 1:d
-        for x in elements
-            sum_x[i] += x[i]
-        end
-    end
-
-    sum_xx = zeros(Float64, d, d)
-    @inbounds for j in 1:d
-        @inbounds for i in 1:j
-            for x in elements
-                sum_xx[i, j] += x[i] * x[j]
-            end
-            sum_xx[j, i] = sum_xx[i, j]
-        end
-    end
+    sum_x, sum_xx = calculate_sums(elements)
 
     elements = Set{Vector{Float64}}(elements)
 
@@ -82,8 +67,7 @@ end
 
 function pop!(cluster::Cluster)
     x = pop!(cluster.elements)
-    # cluster.sum_xx -= x * x'
-    # cluster.sum_x -= x
+
     d = length(x)
 
     @inbounds for i in 1:d
@@ -117,8 +101,7 @@ end
 
 function push!(cluster::Cluster, x::Vector{Float64})
     if !(x in cluster.elements)
-        # cluster.sum_xx += x * x'
-        # cluster.sum_x += x
+
         d = length(x)
         @inbounds for i in 1:d
             cluster.sum_x[i] += x[i]
@@ -170,30 +153,7 @@ function union(cluster1::Cluster, cluster2::Cluster)
 
     elements = union(cluster1.elements, cluster2.elements)
 
-    # we don't know if they have elements in common
-    # so we need to recompute sum_x and sum_xx
-    # maybe we'll accelerate this by
-    # tracking the intersection
-
-    # new_sum_xx = sum([x * x' for x in elements])
-    # new_sum_x = sum(elements)
-
-    new_sum_x = zeros(Float64, d)
-    @inbounds for i in 1:d
-        @inbounds for x in elements
-            new_sum_x[i] += x[i]
-        end
-    end
-
-    new_sum_xx = zeros(Float64, d, d)
-    @inbounds for j in 1:d
-        @inbounds for i in 1:j
-            @inbounds for x in elements
-                new_sum_xx[i, j] += x[i] * x[j]
-            end
-            new_sum_xx[j, i] = new_sum_xx[i, j]
-        end
-    end
+    new_sum_x, new_sum_xx = calculate_sums(elements)
     
     return Cluster(elements, new_sum_x, new_sum_xx, Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 end
@@ -267,6 +227,39 @@ function elements(clusters::Vector{Cluster})
     return Vector{Float64}[x for cluster in clusters for x in cluster]
 end
 
+function elements(cluster::Cluster)
+    return collect(cluster.elements)
+end
+
 function first(cluster::Cluster)
     return first(cluster.elements)
+end
+
+function calculate_sums(cluster::Union{Cluster, Set{Vector{Float64}}, Vector{Vector{Float64}}})
+    d = length(first(cluster))
+    @assert all(length.(cluster) .== d) "All elements must be of dimension $d"
+
+    sum_x = zeros(Float64, d)
+    @inbounds for i in 1:d
+        for x in cluster
+            sum_x[i] += x[i]
+        end
+    end
+
+    sum_xx = zeros(Float64, d, d)
+    @inbounds for j in 1:d
+        @inbounds for i in 1:j
+            for x in cluster
+                sum_xx[i, j] += x[i] * x[j]
+            end
+            sum_xx[j, i] = sum_xx[i, j]
+        end
+    end
+
+    return sum_x, sum_xx
+end
+
+function recalculate_sums!(cluster::Cluster)
+    cluster.sum_x, cluster.sum_xx = calculate_sums(cluster)
+    return cluster
 end

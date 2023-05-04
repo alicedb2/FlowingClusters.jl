@@ -10,6 +10,12 @@ mutable struct MNCRPHyperparams
     diagnostics::Diagnostics
 end
 
+function Base.show(io::IO, h::MNCRPHyperparams)
+    d = length(h.mu)
+    D = 3 + d + div(d * (d + 1), 2)
+    print(io, "MNCRPHyperparams(d=$d, D=$D from sum(1, $d, 1, $(div(d * (d + 1), 2)), 1))")
+end
+
 function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu)
     d = length(mu)
 
@@ -54,7 +60,13 @@ function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
 end
 
 function MNCRPHyperparams(d::Int64)
-    return MNCRPHyperparams(1.0, zeros(d), 1.0, LowerTriangular(diagm(fill(sqrt(0.1), d))), 1.0 * d)
+    return MNCRPHyperparams(
+        7.77, 
+        zeros(d), 
+        0.01, 
+        LowerTriangular(diagm(fill(0.1, d))), 
+        d + 1.0
+        )
 end
 
 function clear_diagnostics!(hyperparams::MNCRPHyperparams)
@@ -65,6 +77,9 @@ function clear_diagnostics!(hyperparams::MNCRPHyperparams)
     return hyperparams    
 end
 
+function Base.collect(hyperparams::MNCRPHyperparams)
+    return [hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu]
+end
 
 function ij(flat_k::Int64)
     i = Int64(ceil(1/2 * (sqrt(1 + 8 * flat_k) - 1)))
@@ -89,6 +104,8 @@ function flatten(L::LowerTriangular{Float64})
 
     return flatL
 end
+
+
 
 function foldflat(flatL::Vector{Float64})
     
@@ -151,8 +168,8 @@ function psi!(hyperparams::MNCRPHyperparams, value::Matrix{Float64})
         error("Dimension mismatch, value should have size $d x $d")
     end
     hyperparams.L = cholesky(value).L
-    hyperparams.flatL = flatten(hyperparams._L)
-    hyperparams.psi = value
+    hyperparams.flatL = flatten(hyperparams.L)
+    hyperparams.psi = deepcopy(value)
 end
 
 project_vec(vec::Vector{Float64}, proj::Matrix{Float64}) = proj * vec
@@ -193,6 +210,8 @@ function pack(theta::Vector{Float64}; backtransform=true)::Tuple{Float64, Vector
         alpha = exp(alpha)
         lambda = exp(lambda)
         nu = d - 1 + exp(nu)
+        # diag_idx = div.((1:d) .* (2:d+1), 2)
+        # flatL[diag_idx] = exp.(flatL[diag_idx])
     end
 
     L = foldflat(flatL)
@@ -211,8 +230,105 @@ function unpack(hyperparams::MNCRPHyperparams; transform=true)::Vector{Float64}
         alpha = log(alpha)
         lambda = log(lambda)
         nu = log(nu - d + 1)
+        # diag_idx = div.((1:d) .* (2:d+1), 2)
+        # flatL[diag_idx] = log.(flatL[diag_idx])
     end
 
     return vcat(alpha, hyperparams.mu, lambda, hyperparams.flatL, nu)
 
+end
+
+function add_one_dimension!(hyperparams::MNCRPHyperparams)
+
+    d = length(hyperparams.mu)
+    hyperparams.mu = vcat(hyperparams.mu, 0.0)
+    hyperparams.nu += 1
+    psi = hcat(hyperparams.psi, zeros(d))
+    psi = vcat(psi, zeros(1, d + 1))
+    psi[d+1, d+1] = 0.01
+    L = cholesky(psi).L
+    flatL = flatten(L)
+    hyperparams.flatL, hyperparams.L, hyperparams.psi = flatL, L, psi
+    
+    add_one_dimension!(hyperparams.diagnostics)
+
+    return hyperparams
+end
+
+# We gotta go fast!
+# Propagate what theta[i] locally affects
+# This is mostly to avoid an explicit matrix multiplication
+# for Psi = LL' when one element of L is modified.
+function set_theta!(hyperparams::MNCRPHyperparams, val::Float64, i::Int64; backtransform=true)::MNCRPHyperparams
+    d = length(hyperparams.mu)
+    D = 3 + d + div(d * (d + 1), 2)
+    @assert 1 <= i <= D
+    if i == 1
+        if backtransform
+            val = exp(val)
+        end
+        hyperparams.alpha = val
+    elseif 1 + 1 <= i <= 1 + d
+        k = i - 1
+        hyperparams.mu[k] = val
+    elseif i == 2 + d
+        if backtransform
+            val = exp(val)
+        end
+        hyperparams.lambda = val
+    elseif 2 + d + 1 <= i <= 2 + d + div(d * (d + 1), 2)
+        k = i - 2 - d
+        hyperparams.flatL[k] = val
+        i, j = ij(k)
+        L = hyperparams.L
+        hyperparams.psi[i, i] += val * val - L[i, j] * L[i, j]
+        for k in i+1:d
+            hyperparams.psi[k, i] += val * L[k, j] - L[i, j] * L[k, j]
+            hyperparams.psi[i, k] = hyperparams.psi[k, i]
+        end
+        for l in j:i-1
+            hyperparams.psi[i, l] += L[l, j] * val - L[l, j] * L[i, j]
+            hyperparams.psi[l, i] = hyperparams.psi[i, l]
+        end
+        L[i, j] = val
+    elseif i == D
+        if backtransform
+            val = d - 1 + exp(val)
+        end
+        hyperparams.nu = val
+    end
+
+    return hyperparams
+end
+
+function get_theta(hyperparams::MNCRPHyperparams, i::Int64; transform=true)
+    d = length(hyperparams.mu)
+    D = 3 + d + div(d * (d + 1), 2)
+    @assert 1 <= i <= D
+    if i == 1
+        if transform
+            return log(hyperparams.alpha)
+        else
+            return hyperparams.alpha
+        end
+    elseif 1 + 1 <= i <= 1 + d
+        k = i - 1
+        return hyperparams.mu[k]
+    elseif i == 2 + d
+        if transform
+            return log(hyperparams.lambda)
+        else
+            return hyperparams.lambda
+        end
+    elseif 2 + d + 1 <= i <= 2 + d + div(d * (d + 1), 2)
+        k = i - 2 - d
+        i, j = ij(k)
+        return hyperparams.L[i, j]
+    elseif i == D
+        if transform
+            return log(hyperparams.nu - d + 1)
+        else
+            return hyperparams.nu
+        end
+    end
 end

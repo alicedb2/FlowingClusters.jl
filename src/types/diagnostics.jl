@@ -21,10 +21,18 @@ mutable struct Diagnostics
     rejected_merge::Int64
 
     step_scale::Matrix{Float64}
+    slice_s::Vector{Float64}
 
+    # Global AM with componentwise adaptive scaling
+    step_sigma::Matrix{Float64}
+    step_mu::Vector{Float64}
+    step_loglambda::Vector{Float64}
+    step_i::Int64
+
+    slice_sampler_scales::Vector{Float64}
 end
 
-function show(io::IO, d::Diagnostics)
+function Base.show(io::IO, d::Diagnostics)
     println(io, "   Accepted/Rejected")
     println(io, "                alpha : $(round(d.accepted_alpha/d.rejected_alpha, digits=2))")
     println(io, "    (mean,min,max) mu : $(round(sum(d.accepted_mu)/sum(d.rejected_mu), digits=2)), $(round(minimum(d.accepted_mu ./ d.rejected_mu), digits=2)), $(round(maximum(d.accepted_mu ./ d.rejected_mu), digits=2))")
@@ -43,7 +51,7 @@ function Diagnostics(d)
 
     sizeflatL = div(d * (d + 1), 2)
 
-    D = 3 + d + div(d * (d + 1), 2)
+    D = 3 + d + sizeflatL
 
     return Diagnostics(
         0, 0, 
@@ -53,7 +61,13 @@ function Diagnostics(d)
         0, 0, 
         0, 0, 
         0, 0,
-        0.01 / D * diagm(ones(D)))
+        0.01 / D * diagm(ones(D)),
+        ones(D),
+        0.01 / D * diagm(ones(D)),
+        vcat(0.0, zeros(d), 0.0, flatten(LowerTriangular(diagm(fill(1.0, d)))), 0.0),
+        zeros(D),
+        0,
+        ones(D))
 end
 
 function clear_diagnostics!(diagnostics::Diagnostics; keepstepscale=true)
@@ -78,10 +92,30 @@ function clear_diagnostics!(diagnostics::Diagnostics; keepstepscale=true)
     diagnostics.accepted_merge = 0
     diagnostics.rejected_merge = 0
 
+    D = size(diagnostics.step_scale, 1)
+
     if !keepstepscale
-        D = size(diagnostics.step_scale, 1)
         diagnostics.step_scale = 0.01 ./ D * diagm(ones(D))
     end
+
+    diagnostics.slice_s = ones(D)
+
+    return diagnostics
+end
+
+function add_one_dimension!(diagnostics::Diagnostics)
+    
+    d = length(diagnostics.accepted_mu)
+    
+    diagnostics.accepted_mu = vcat(diagnostics.accepted_mu, 0)
+    diagnostics.rejected_mu = vcat(diagnostics.rejected_mu, 0)
+    diagnostics.accepted_flatL = vcat(diagnostics.accepted_flatL, zeros(Int64, d + 1))
+    diagnostics.rejected_flatL = vcat(diagnostics.rejected_flatL, zeros(Int64, d + 1))
+    
+    new_D = 3 + (d + 1) + div((d + 1) * (d + 2), 2)
+    diagnostics.step_scale = 0.01 ./ new_D * diagm(ones(new_D))
+    
+    diagnostics.slice_s = vcat(diagnostics.slice_s, 1.0)
 
     return diagnostics
 end
