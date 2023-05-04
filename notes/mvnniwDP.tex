@@ -77,7 +77,9 @@ The probability distribution function of the niW is given by
 \niW(\mu, \Sigma~\vert~\mu_0, \lambda_0,\Psi_0,\nu_0) = \frac{1}{Z_0} \vert\Sigma\vert^{-\frac{\nu_0 + d + 2}{2}}e^{-\frac{1}{2}\Tr\Psi_0\Sigma^{-1} - \frac{\lambda_0}{2}(\mu - \mu_0)^T\Sigma^{-1}(\mu - \mu_0)},
 \label{eq:niW}\end{equation}
 where 
-$$Z_0 = \frac{(2\pi)^{d/2} 2^{\nu_0 d/2} \Gamma_d(\frac{\nu_0}{2})}{\lambda_0^{d/2}\vert\Psi_0\vert^{\nu_0/2}},$$
+\begin{equation}\label{eq:Z0}
+Z_0 = \frac{(2\pi)^{d/2} 2^{\nu_0 d/2} \Gamma_d(\frac{\nu_0}{2})}{\lambda_0^{d/2}\vert\Psi_0\vert^{\nu_0/2}},
+\end{equation}
 and $\Gamma_d(x)$ is the multivariate gamma function
 $$\Gamma_d(x) = \pi^{d(d-1)/4}\prod_{i=1}^d\Gamma(a + (1 - i)/2).$$
 
@@ -151,7 +153,7 @@ We have therefore for $\alpha$ the Jeffreys prior
 J_\alpha(\alpha)~\propto~\sqrt{\frac{\psi(\alpha + N) - \psi(\alpha)}{\alpha} + \psi'(\alpha +N) - \psi'(\alpha)}.
 \label{eq:jeffalpha}
 \end{equation}
-This prior differs from the often used logarithmic prior $1/\alpha$ in that $J_{\alpha}(\alpha) \sim \alpha^{-1/2}$ for $\alpha\rightarrow 0$ and $J_{\alpha}(\alpha) \sim\alpha^{-3/2}$ for $\alpha\rightarrow\infty$. In other words it gives more weight than the logarithmic prior at small $\alpha$ and less weight at large $\alpha$, which is to say the logarithmic prior comparatively overestimates the number of clusters. Note that it decreases faster than $x^{-1}$, respectively increases slower than $x^{-1}$, at large and small $\alpha$ and is therefore a proper distribution.
+This prior differs from the often used logarithmic prior $1/\alpha$ in that $J_{\alpha}(\alpha) \sim \alpha^{-1/2}$ for $\alpha\rightarrow 0$ and $J_{\alpha}(\alpha) \sim\alpha^{-3/2}$ for $\alpha\rightarrow\infty$. In other words it gives more weight than the logarithmic prior at small $\alpha$ and less weight at large $\alpha$, which is to say the logarithmic prior comparatively overestimates the number of clusters. Note that it decreases faster than $x^{-1}$ at large $\alpha$ and increases slower than $x^{-1}$ at small $\alpha$ and is therefore a proper distribution.
 
 For $\mu_0$, the $d\times d$ Fisher information matrix
 \begin{equation}\begin{split}
@@ -176,8 +178,8 @@ For $\Psi_0$, which we will write $\Psi$ for now, the Fisher information matrix 
 \begin{equation}\begin{split}
 -E\left[\partial_{\Psi_{ij}}\partial_{\Psi_{kl}}\log \niW(\mu,\Sigma~\vert~\mu_0,\lambda_0,\Psi,\nu_0)\right] &= -\frac{\nu_0}{2}E[\partial_{\Psi_{ij}}\partial_{\Psi_{kl}}\log\vert\Psi\vert], \\
 &=-\frac{\nu_0}{2}\partial_{\Psi_{ij}}\frac{1}{\vert\Psi\vert}\partial_{\Psi_{kl}}\vert\Psi\vert,\\
-&= -\frac{\nu_0}{2}\partial_{\Psi_{ij}}\frac{1}{\vert\Psi\vert}\vert\Psi\vert \Psi^{-1}_{kl},\\
-&=-\frac{\nu_0}{2} \partial_{\Psi_{ij}}\Psi_{kl}^{-1}.
+&= -\frac{\nu_0}{2}\partial_{\Psi_{ij}}\frac{1}{\vert\Psi\vert}\vert\Psi\vert \Psi^{-1}_{lk},\\
+&=-\frac{\nu_0}{2} \partial_{\Psi_{ij}}\Psi_{lk}^{-1}.
 \end{split}\end{equation}
 We can show by taking the derivative of $A^{-1} A = \mathbb{1}$ that $\partial_A A^{-1} = -A^{-
 T}\otimes A^{-1}$ and therefore
@@ -344,11 +346,11 @@ Therefore after cancelling common factors,
 g(y \vert\pi_D) &= \sum_{\pi'\in\lbrace\pi_D\rbrace^{+y}}\frac{P(\pi')}{P(\pi_D)},\\
 &= \sum_{\omega\in\pi_D} \frac{n_\omega}{N + \alpha}\frac{Z^{\lbrace y\rbrace\cup\omega}}{z Z^\omega} + \frac{\alpha}{N + \alpha} \frac{Z^{\lbrace y\rbrace}}{z Z_0}.
 \end{split}\end{equation}
-where the per-cluster predictive posterior is given by
-$$\frac{Z^{\lbrace y\rbrace\cup\omega}}{z Z^\omega} = t_{\nu^{\omega}_0 - d + 1}\left(x~\vert~\mu_0^{\omega}, \frac{\lambda_0^\omega + 1}{\lambda_0^\omega(\lambda_0^\omega - d + 1)} \Psi_0^\omega\right)$$
+Using Eq.~\ref{eq:Z0} and the matrix determinant lemma we find that the per-cluster predictive posterior is given by
+$$\frac{Z^{\lbrace y\rbrace\cup\omega}}{z Z^\omega} = t_{\nu^{\omega}_0 - d + 1}\left(y~\vert~\mu_0^{\omega}, \frac{\lambda_0^\omega + 1}{\lambda_0^\omega(\nu_0^\omega - d + 1)} \Psi_0^\omega\right)$$
 where the multivariate $t$-distribution (mvt)
-$$ t_\nu(x\vert\mu,\Sigma) = \frac{\Gamma((\nu + d)/2)}{\Gamma(\nu/2)\nu^{d/2}\pi^{d/2}\vert\Sigma\vert^{1/2}}\left[1 + \frac{1}{\nu}(x - \mu)^T\Sigma^{-1}(x - \mu)\right]^{-(\nu + p)/2}.$$
-In other words, the predictive posterior is a mixture of mvt. The transition from cluster components being given by mvn's to mvt's comes from the integration of the uncertainty over the mean and covariance of each cluster given by the niW prior.
+$$ t_\nu(y\vert\mu,\Sigma) = \frac{\Gamma((\nu + d)/2)}{\Gamma(\nu/2)\nu^{d/2}\pi^{d/2}\vert\Sigma\vert^{1/2}}\left[1 + \frac{1}{\nu}(y - \mu)^T\Sigma^{-1}(y - \mu)\right]^{-(\nu + p)/2}.$$
+In other words, the predictive posterior is made of a mixture of mvt. %%The transition from cluster components being given by mvn's to mvt's comes from the integration of the uncertainty over the mean and covariance of each cluster given by the niW prior.
 
 \section{Presence-only species distribution model}
 To turn our mixture of mvt's, into a presence-only species distribution model (SDM) we use a simple trick inspired by BIOCLIM. In BIOCLIM, a box in drawn with the width in each dimension is given by the difference between the 0.05 and 0.95 quantiles of the marginal empirical distribution in each dimension. All points that fall outside of the box are given a probability of presence of 0, and each point inside the box a probability of 1. We extend this definition as follows. Now suppose that the empirical distribution is given by a single normal distribution with mean $\mu$ and deviation $\sigma$. in 1 dimension. The probability of presence at point $x$ is given by the two-tail probability of $x$, in other words $1 - \Phi((x-\mu)/\sigma) - \Phi((x - \mu)/\sigma)$. This means that the probability of presence is given by the mass of individual samples that were observed at that specific environmental condition or worst. Generalizing to $d$-dimensions, the probability of presence at environmental point is given by the tail of the isosurface in environmental space of a given samples. In other words the probability of presence is given proportional to the mass of observation at a given environmental condition or environmental conditions that are harsher. Explicitly, for a given probability density $g(x)$ and $X\sim g$,
