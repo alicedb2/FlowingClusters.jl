@@ -39,27 +39,27 @@
             
 # end
 
-
-function clr(layers::Array{T}; detection_limit=1.0) where {T <: SimpleSDMLayer}
+function clr(layers::Array{T}; detection_limit=1.0, uniform=true) where {T <: SimpleSDMLayer}
     @assert SimpleSDMLayers._layers_are_compatible(layers)
     l, r, b, t = first(layers).left, first(layers).right, first(layers).bottom, first(layers).top
     clr_layers = [SimpleSDMPredictor(Array{Union{Nothing, Float64}}(nothing, size(first(layers).grid)), l, r, b, t) for layer in layers]
     
     p = Progress(prod(size(first(layers).grid)), showspeed=true)
     
-    for i in eachindex(first(layers).grid)
+    Threads.@threads for i in eachindex(first(layers).grid)
         x = [isnothing(layer.grid[i]) ? nothing : Float64(layer.grid[i]) for layer in layers]
         if any(isnothing.(x))
-            for nl in clr_layers
-                nl.grid[i] = nothing
+            for l in clr_layers
+                l.grid[i] = nothing
             end
         else
+            c = sum(x)
             zeros_mask = x .== 0
-            x[zeros_mask] = detection_limit * (0.1 .+ 0.55 * rand(sum(zeros_mask)))
-            x[.!zeros_mask] = (1 - sum(x[zeros_mask])/sum(x)) * x[.!zeros_mask]
+            x[zeros_mask] .= uniform ? detection_limit * (0.1 .+ 0.55 * rand(sum(zeros_mask))) : 0.65 * detection_limit
+            x[.!zeros_mask] *= 1 - sum(x[zeros_mask])/c
         end
-        for (xi, nl) in zip(x, clr_layers)
-            nl.grid[i] = log(xi) - 1/length(x) * sum(log.(x))
+        for (xi, l) in zip(x, clr_layers)
+            l.grid[i] = log(xi) - 1/length(x) * sum(log.(x))
         end
         next!(p)
     end
