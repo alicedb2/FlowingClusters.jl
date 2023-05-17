@@ -47,8 +47,7 @@ end
 
 function pop!(cluster::Cluster, x::Vector{Float64})
     x = pop!(cluster.elements, x)
-    # cluster.sum_xx -= x * x'
-    # cluster.sum_x -= x
+
     d = length(x)
     @inbounds for i in 1:d
         cluster.sum_x[i] -= x[i]
