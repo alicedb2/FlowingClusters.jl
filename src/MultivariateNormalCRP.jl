@@ -36,7 +36,7 @@ module MultivariateNormalCRP
     export optimize_hyperparams, optimize_hyperparams!
     export optimal_step_scale_local
     export drawNIW
-
+    
     include("types/diagnostics.jl")
     export Diagnostics
     export clear_diagnostics!, diagnostics
@@ -61,6 +61,9 @@ module MultivariateNormalCRP
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
     export bioclim_predictor
+
+    include("helpers.jl")
+    export performance_scores
 
     include("MNDPVariational.jl")
 
@@ -307,7 +310,7 @@ module MultivariateNormalCRP
     end
 
     function grad_log_Pgenerative(clusters::Vector{Cluster}, storage::Vector{Float64}, theta::Vector{Float64}; hyperpriors=true, backtransform=true, jacobian=true)::Vector{Float64}
-        g = grad_log_Pgenerative(clusters, theta, hyperpriors=true, backtransform=true, jacobian=true)
+        g = grad_log_Pgenerative(clusters, theta, hyperpriors=true, backtransform=backtransform, jacobian=jacobian)
         storage[:] .= g
         println(storage)
         return storage
@@ -315,11 +318,12 @@ module MultivariateNormalCRP
 
     function grad_log_Pgenerative(clusters::Vector{Cluster}, theta::Vector{Float64}; hyperpriors=true, backtransform=true, jacobian=true)::Vector{Float64}
         alpha, mu, lambda, flatL, L, psi, nu = pack(theta, backtransform=backtransform)
-        grad_logP = grad_log_Pgenerative(clusters::Vector{Cluster}, alpha, mu, lambda, psi, nu, hyperpriors=hyperpriors)
+        grad_logP = collect(grad_log_Pgenerative(clusters::Vector{Cluster}, alpha, mu, lambda, psi, nu, hyperpriors=hyperpriors))
         d = length(mu)
 
         grad_psi = grad_logP[4]
         grad_L = zeros(div(d * (d + 1), 2))
+        # The Jacobian for L -> Psi is always included
         for k in 1:length(grad_L)
             m, n = ij(k)
             if m >= n
@@ -337,13 +341,12 @@ module MultivariateNormalCRP
         end
     
         if jacobian
-            grad_logalpha = alpha * grad_logP[1] + 1
-            grad_loglambda = lambda * grad_logP[3] + 1
-            grad_logx = (nu - d + 1) * grad_logP[5] + 1
+            grad_logP[1] += alpha * grad_logP[1]
+            grad_logP[3] += lambda * grad_logP[3]
+            grad_logP[5] += (nu - d + 1) * grad_logP[5]
         end
         
         return vcat(grad_logP[1], grad_logP[2], grad_logP[3], grad_L, grad_logP[5])
-        # return grad_logalpha, grad_logP[2], grad_loglambda, grad_L, grad_logx
     end
 
     function grad_log_Pgenerative(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; hyperpriors=true)
@@ -390,8 +393,7 @@ module MultivariateNormalCRP
 
             grad_lambda -= 1 / lambda
 
-            # grad_psi -= d * (2 * (invpsi - diagm(diag(invpsi))) + diagm(diag(invpsi)))
-            grad_psi -= d * invpsi .* (2 .- I(d))
+            grad_psi -= d * (2 .- I(d)) .* invpsi
 
             grad_nu += 1/4 * sum([polygamma(2, nu/2 + (1-j)/2) for j in 1:d])/sum([polygamma(1, nu/2 + (1-j)/2) for j in 1:d])
         end
@@ -418,9 +420,9 @@ module MultivariateNormalCRP
         end
 
         push!(cluster, element)
-        log_weight += log_Zniw(cluster, mu, lambda, psi, nu) # - log_Zniw(nothing, mu, lambda, psi, nu)
+        log_weight += log_Zniw(cluster, mu, lambda, psi, nu)
         pop!(cluster, element)
-        log_weight -= log_Zniw(cluster, mu, lambda, psi, nu) # - log_Zniw(nothing, mu, lambda, psi, nu)
+        log_weight -= log_Zniw(cluster, mu, lambda, psi, nu)
         log_weight -= d/2 * log(2pi)
         
         return log_weight
@@ -1177,20 +1179,18 @@ module MultivariateNormalCRP
     #     return new_alpha, s
     # end
 
-
-    function initiate_chain(filename::AbstractString)
-        # Expects a JLD2 file
-        return load(filename)["chain"]
+    function MNCRPChain(filename::AbstractString)
+        return JLD2.load(filename)["chain"]
     end
 
-    function initiate_chain(dataset::MNCRPDataset; chain_samples=200, strategy=:hot)
-        chain = initiate_chain(dataset.data, chain_samples=chain_samples, standardize=false, strategy=strategy)
+    function MNCRPChain(dataset::MNCRPDataset; chain_samples=200, strategy=:hot)
+        chain = MNCRPChain(dataset.data, chain_samples=chain_samples, standardize=false, strategy=strategy)
         chain.data_zero = dataset.data_zero[:]
         chain.data_scale = dataset.data_scale[:]
         return chain
     end
 
-    function initiate_chain(data::Vector{Vector{Float64}}; standardize=true, chain_samples=100, strategy=:hot, optimize=false)
+    function MNCRPChain(data::Vector{Vector{Float64}}; standardize=true, chain_samples=100, strategy=:sequential, optimize=false)
         
         d = length(first(data))
 
@@ -1318,7 +1318,11 @@ module MultivariateNormalCRP
                 if temperature_schedule isa Float64
                     splitmerge_temp = gibbs_temp = mh_temp = temperature_schedule
                 else
-                    splitmerge_temp = gibbs_temp = mh_temp = temperature_schedule[step]
+                    if step > length(temperature_schedule)
+                        splitmerge_temp = gibbs_temp = mh_temp = last(temperature_schedule)
+                    else    
+                        splitmerge_temp = gibbs_temp = mh_temp = temperature_schedule[step]
+                    end
                 end
             end
 
@@ -1425,7 +1429,7 @@ module MultivariateNormalCRP
                     # Summit attempt
                     nb_map_attemps += 1
                     try
-                        map_success = attempt_map!(chain, max_nb_pushes=15, verbose=false)
+                        map_success = attempt_map!(chain, max_nb_pushes=15, verbose=true)
                     catch e
                         map_success = false
                     end                    
@@ -1440,9 +1444,17 @@ module MultivariateNormalCRP
                     chain.hyperparams.diagnostics.slice_sampler_scales = 3*iqr.(eachrow(reduce(hcat, unpack.(chain.hyperparams_chain, transform=false))))
                     # slice_sampling_scales = 2*abs.(unpack(chain.hyperparams, transform=false))
                 else
-                    map_success || attempt_map!(chain, max_nb_pushes=15)
-                    chain.hyperparams.diagnostics.step_scale = optimal_step_scale_local(chain.map_clusters, chain.map_hyperparams, optimize=false, verbose=true)
+                    # map_success || attempt_map!(chain, max_nb_pushes=15)
+                    # chain.hyperparams.diagnostics.step_scale = optimal_step_scale_local(chain.map_clusters, chain.map_hyperparams, optimize=false, verbose=true)
                 end
+            end
+
+            # Recalculate step_scale when chain length hits powers of 2.
+            # The bias vanishes as length(chain) -> infinity
+            if length(chain.logprob_chain) >= 16 && floor(log(2, length(chain.logprob_chain))) == log(2, length(chain.logprob_chain))
+                chain.hyperparams.diagnostics.step_scale = optimal_step_scale_local(
+                    chain.clusters, chain.hyperparams, 
+                    optimize=true, jacobian=false, verbose=true)
             end
 
             if sample_every !== nothing && sample_every >= 1
@@ -1550,8 +1562,7 @@ module MultivariateNormalCRP
         clusters = project_clusters(sort(clusters, by=length, rev=rev), dims)
 
 
-        
-        if nb_clusters === nothing || nb_clusters > length(clusters) || nb_clusters <= 0
+        if nb_clusters === nothing || nb_clusters < 0
             nb_clusters = length(clusters)
         end
 
@@ -1917,9 +1928,10 @@ module MultivariateNormalCRP
         else
             callback =  nothing
         end
-        opt_options = Options(iterations=200000, 
+        opt_options = Options(iterations=50000,
+                              x_tol=1e-8,
                               f_tol=1e-6,
-                              g_tol=1e-2,
+                              g_tol=2e-2,
                               callback=callback)
 
         optres = optimize(objfun, x0, NelderMead(), opt_options)
