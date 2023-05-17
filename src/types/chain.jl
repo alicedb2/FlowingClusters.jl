@@ -35,9 +35,9 @@ function Base.show(io::IO, chain::MNCRPChain)
     println(io, "    current logprob: $(round(last(chain.logprob_chain), digits=2)) (best $(round(maximum(chain.logprob_chain), digits=2)))")
     println(io, "   nb chain samples: $(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer))")
     println(io)
-    println(io, "       last MAP at: $(chain.map_idx)")
-    println(io, "  #clusters in MAP: $(length(chain.map_clusters))")
-    print(io, "       MAP logprob: $(round(chain.map_logprob, digits=2))")
+    println(io, "        last MAP at: $(chain.map_idx)")
+    println(io, "   #clusters in MAP: $(length(chain.map_clusters))")
+      print(io, "        MAP logprob: $(round(chain.map_logprob, digits=2))")
 end
 
 alpha_chain(chain::MNCRPChain) = [p.alpha for p in chain.hyperparams_chain]
