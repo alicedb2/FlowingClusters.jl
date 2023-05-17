@@ -1,0 +1,63 @@
+variable,type,full_name,description
+sp1,species,Setophaga_coronata,Yellow-rumped Warbler
+sp2,species,Geothlypis_trichas,Common Yellowthroat
+sp3,species,Setophaga_petechia,Yellow Warbler
+sp4,species,Setophaga_ruticilla,American Redstart
+sp5,species,Mniotilta_varia,Black-and-white Warbler
+sp6,species,Oreothlypis_celata,Orange-crowned Warbler
+sp7,species,Seiurus_aurocapilla,Ovenbird
+sp8,species,Setophaga_palmarum,Palm Warbler
+sp9,species,Setophaga_pinus,Pine Warbler
+sp10,species,Setophaga_americana,Northern Parula
+sp11,species,Setophaga_virens,Black-throated Green Warbler
+sp12,species,Cardellina_pusilla,Wilson's Warbler
+sp13,species,Setophaga_magnolia,Magnolia Warbler
+sp14,species,Oreothlypis_ruficapilla,Nashville Warbler
+sp15,species,Setophaga_pensylvanica,Chestnut-sided Warbler
+sp16,species,Oreothlypis_peregrina,Tennessee Warbler
+sp17,species,Setophaga_caerulescens,Black-throated Blue Warbler
+sp18,species,Parkesia_noveboracensis,Northern Waterthrush
+sp19,species,Setophaga_striata,Blackpoll Warbler
+sp20,species,Setophaga_fusca,Blackburnian Warbler
+sp21,species,Setophaga_dominica,Yellow-throated Warbler
+sp22,species,Setophaga_discolor,Prairie Warbler
+sp23,species,Setophaga_citrina,Hooded Warbler
+sp24,species,Setophaga_townsendi,Townsend's Warbler
+sp25,species,Vermivora_cyanoptera,Blue-winged Warbler
+sp26,species,Parkesia_motacilla,Louisiana Waterthrush
+sp27,species,Protonotaria_citrea,Prothonotary Warbler
+sp28,species,Setophaga_tigrina,Cape May Warbler
+sp29,species,Setophaga_nigrescens,Black-throated Gray Warbler
+sp30,species,Cardellina_canadensis,Canada Warbler
+sp31,species,Setophaga_castanea,Bay-breasted Warbler
+sp32,species,Geothlypis_tolmiei,MacGillivray's Warbler
+sp33,species,Helmitheros_vermivorum,Worm-eating Warbler
+sp34,species,Geothlypis_philadelphia,Mourning Warbler
+sp35,species,Geothlypis_formosa,Kentucky Warbler
+sp36,species,Oreothlypis_luciae,Lucy's Warbler
+sp37,species,Setophaga_cerulea,Cerulean Warbler
+sp38,species,Vermivora_chrysoptera,Golden-winged Warbler
+sp39,species,Setophaga_occidentalis,Hermit Warbler
+sp40,species,Myioborus_pictus,Painted Redstart
+sp41,species,Oreothlypis_virginiae,Virginia's Warbler
+sp42,species,Setophaga_graciae,Grace's Warbler
+sp43,species,Limnothlypis_swainsonii,Swainson's Warbler
+sp44,species,Oporornis_agilis,Connecticut Warbler
+sp45,species,Cardellina_rubrifrons,Red-faced Warbler
+sp46,species,Setophaga_chrysoparia,Golden-cheeked Warbler
+sp47,species,Setophaga_pitiayumi,Tropical Parula
+sp48,species,Basileuterus_rufifrons,Rufous-capped Warbler
+sp49,species,Setophaga_kirtlandii,Kirtland's Warbler
+sp50,species,Myioborus_miniatus,Slate-throated Redstart
+sp51,species,Geothlypis_poliocephala,Gray-crowned Yellowthroat
+sp52,species,Basileuterus_culicivorus,Golden-crowned Warbler
+sp53,species,Oreothlypis_superciliosa,Crescent-chested Warbler
+sp54,species,Oreothlypis_crissalis,Colima Warbler
+sp55,species,Basileuterus_lachrymosus,Fan-tailed Warbler
+sp56,species,Geothlypis_beldingi,Belding's Yellowthroat
+sp57,species,Basileuterus_belli,Golden-browed Warbler
+sp58,species,Cardellina_rubra,Red Warbler
+sp59,species,Geothlypis_flavovelata,Altamira Yellowthroat
+sp60,species,Geothlypis_nelsoni,Hooded Yellowthroat
+sp61,species,Geothlypis_speciosa,Black-polled Yellowthroat
+sp62,species,Vermivora_bachmanii,Bachman's Warbler
