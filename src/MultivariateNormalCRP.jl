@@ -1302,7 +1302,9 @@ module MultivariateNormalCRP
             mh_stepscale = mh_stepscale * ones(5)
         end
 
-        progbar = Progress(nb_steps; showspeed=true)
+        if pretty_progress
+            progbar = Progress(nb_steps; showspeed=true)
+        end
 
         d = length(chain.hyperparams.mu)
         D = 3 + d + div(d * (d + 1), 2)
@@ -1429,7 +1431,7 @@ module MultivariateNormalCRP
                     # Summit attempt
                     nb_map_attemps += 1
                     try
-                        map_success = attempt_map!(chain, max_nb_pushes=15, verbose=true)
+                        map_success = attempt_map!(chain, max_nb_pushes=15, verbose=false)
                     catch e
                         map_success = false
                     end                    
@@ -1454,7 +1456,7 @@ module MultivariateNormalCRP
             if length(chain.logprob_chain) >= 16 && floor(log(2, length(chain.logprob_chain))) == log(2, length(chain.logprob_chain))
                 chain.hyperparams.diagnostics.step_scale = optimal_step_scale_local(
                     chain.clusters, chain.hyperparams, 
-                    optimize=true, jacobian=false, verbose=true)
+                    optimize=true, jacobian=false, verbose=false)
             end
 
             if sample_every !== nothing && sample_every >= 1
