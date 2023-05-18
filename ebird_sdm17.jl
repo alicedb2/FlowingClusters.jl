@@ -9,8 +9,11 @@ using CodecBzip2
 using Random
 using EvoTrees
 
-species, ebird_csv, output_prefix = ARGS[1], ARGS[2], ARGS[3]
-nb_iter_burn, nb_iter, sample_every = parse.(Int64, [ARGS[4], ARGS[5], ARGS[6]])
+function task(args...)
+
+species, ebird_csv, output_prefix = args[1], args[2], args[3]
+nb_iter_burn, nb_iter, sample_every = parse.(Int64, [args[4], args[5], args[6]])
+rng_seed = parse(Int64, args[7])
 
 bioclim_layernames = "BIO" .* string.([1, 2, 3, 4, 12, 15])
 landcover_layernames = collect(keys(layerdescriptions(RasterData(EarthEnv, LandCover))))
@@ -18,13 +21,13 @@ deleteat!(landcover_layernames, 5) # Remove open water to remove null direction
 
 layernames = vcat(bioclim_layernames, landcover_layernames)
 
-
 ebird_df = DataFrame(CSV.File(joinpath(pwd(), ebird_csv), delim="\t"))
 
 ebird_pres_dataset = MNCRPDataset(subset(ebird_df, species => x -> x .== 1.0), layernames)
 ebird_abs_dataset = MNCRPDataset(subset(ebird_df, species => x -> x .== 0.0), layernames)
 
-Random.seed!(7651)
+Random.seed!(rng_seed)
+
 train_pres, valid_pres, test_pres = split(ebird_pres_dataset, 3)
 train_abs, valid_abs, test_abs = split(ebird_abs_dataset, 3)
 
@@ -34,6 +37,11 @@ standardize!(test_pres, with=train_pres)
 standardize!(train_abs, with=train_pres)
 standardize!(valid_abs, with=train_pres)
 standardize!(test_abs, with=train_pres)
+
+JLD2.jldsave(joinpath(output_prefix, "$(species)_datasets.jld2");
+            train_pres=train_pres, train_abs=train_abs,
+            valid_pres=valid_pres, valid_abs=valid_abs,
+            test_pres=test_pres, test_abs=test_abs)
 
 presence_chain = MNCRPChain(train_pres, chain_samples=100)
 advance_chain!(presence_chain, nb_iter_burn; nb_splitmerge=200, 
@@ -220,3 +228,6 @@ mappclass_test_scores_atbestJ=mappclass_test_scores_atbestJ,
 maptail_test_scores=maptail_test_scores, 
 maptail_test_scores_atbestJ=maptail_test_scores_atbestJ
 )
+end
+
+task(ARGS...)
