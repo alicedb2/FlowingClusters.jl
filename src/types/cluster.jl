@@ -8,10 +8,9 @@ mutable struct Cluster
     psi_c_volatile::Matrix{Float64}
 end
 
-function show(io::IO, ::MIME"text/plain", cluster::Cluster)
-   print("$(length(cluster)) elements")
-end
-
+Base.show(io::IO, cluster::Cluster) = print("Cluster($(length(cluster)))")
+Base.show(io::IO, ::MIME"text/plain", cluster::Cluster) = print("Cluster($(length(cluster)))")
+Base.show(io::IO, ::MIME"text/plain", arr::AbstractArray{Cluster}) = print(io, arr)
 
 function Cluster(d::Int64)
     return Cluster(Set{Vector{Float64}}(), zeros(Float64, d), zeros(Float64, d, d), Array{Float64}(undef, d), Array{Float64}(undef, d, d))
@@ -19,6 +18,10 @@ end
 
 function Cluster(elements::Set{Vector{Float64}})
     return Cluster(collect(elements))
+end
+
+function Cluster(matrix::Matrix{Float64})
+    return Cluster(collect.(eachcol(matrix)))
 end
 
 function Cluster(elements::Vector{Vector{Float64}})
@@ -44,6 +47,9 @@ function Cluster(elements::Vector{Vector{Float64}})
     return Cluster(elements, sum_x, sum_xx, Array{Float64}(undef, d), Array{Float64}(undef, d, d))
 
 end
+
+Base.Matrix(cluster::Cluster) = reduce(hcat, elements(cluster), init=zeros(Float64, size(cluster.sum_x, 1), 0))
+Base.Matrix(cluster::Cluster, base2original::Dict{Vector{Float64}, Vector{Float64}}) = reduce(hcat, [base2original[el] for el in cluster], init=zeros(Float64, size(cluster.sum_x, 1), 0))
 
 function pop!(cluster::Cluster, x::Vector{Float64})
     x = pop!(cluster.elements, x)

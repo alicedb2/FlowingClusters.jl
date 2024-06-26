@@ -5,8 +5,10 @@ mutable struct MNCRPChain
     clusters::Vector{Cluster}
     # Current value of hyperparameters
     hyperparams::MNCRPHyperparams
+    # Map from base data (ffjord) to original data
+    base2original::Dict{Vector{Float64}, Vector{Float64}}
 
-    # original_data::Dict{Vector{Float64}, Vector{<:Real}}
+    # Standardization parameters
     data_zero::Vector{Float64}
     data_scale::Vector{Float64}
 
@@ -21,6 +23,7 @@ mutable struct MNCRPChain
     # Maximum a-posteriori state and location
     map_clusters::Vector{Cluster}
     map_hyperparams::MNCRPHyperparams
+    map_base2original::Dict{Vector{Float64}, Vector{Float64}}
     map_logprob::Float64
     map_idx::Int64
 
@@ -129,7 +132,7 @@ function burn!(chain::MNCRPChain, n::Int64)
     if chain.map_idx <= n        
         chain.map_clusters = deepcopy(chain.clusters)
         chain.map_hyperparams = deepcopy(chain.hyperparams)
-        chain.map_logprob = log_Pgenerative(chain.clusters, chain.hyperparams)
+        chain.map_logprob = logprobgenerative(chain.clusters, chain.hyperparams)
         chain.map_idx = length(chain.logprob_chain)
     else
         chain.map_idx -= n
@@ -143,8 +146,8 @@ function Base.length(chain::MNCRPChain)
     return length(chain.logprob_chain)
 end
 
-function ess_rhat(chain::MNCRPChain; transform=false, kwargs...)
-    return ess_rhat(reshape(reduce(hcat, unpack.(chain.hyperparams_chain, transform=transform))', (length(chain.hyperparams_chain), 1, 3 + length(chain.hyperparams.mu) + length(chain.hyperparams.flatL))); kwargs...)
+function ess_rhat(chain::MNCRPChain; transform=false, burn=0, kwargs...)
+    return ess_rhat(reshape(reduce(hcat, unpack.(chain.hyperparams_chain[burn+1:end], transform=transform))', (length(chain.hyperparams_chain[burn+1:end]), 1, 3 + length(chain.hyperparams.mu) + length(chain.hyperparams.flatL))); kwargs...)
 end
 
 function stats(chain::MNCRPChain; burn=0)

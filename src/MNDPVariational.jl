@@ -33,6 +33,10 @@ mutable struct MNDPVariational
     eta4_k::Vector{Float64}
 end
 
+function Base.show(io::IO, ::MIME"text/plain", var::MNDPVariational)
+    print("MNDPVariational(N=$(var.N), d=$(var.d), T=$(var.T))")
+end
+
 function MNDPVariational(data::Vector{Vector{Float64}}, T::Int64; randomize_phi=true)
     data = copy(reduce(hcat, data)')
     N, d = size(data)
@@ -99,7 +103,7 @@ function MNDPVariational(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparam
     
     mndp = MNDPVariational(data, d, T, N, 0, hyperparams, s1, s2, w1, w2, logphi_nk, gamma1_k, gamma2_k, eta1_k, eta2_k, eta3_k, eta4_k)
     
-    advance_phi!(mndp)
+    advance_phi!(mndp, nothing, 1.0)
 
     return mndp
 
