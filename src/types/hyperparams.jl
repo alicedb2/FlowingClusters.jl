@@ -12,7 +12,7 @@ mutable struct MNCRPHyperparams
     nn::Union{Nothing, Chain}
     nn_params::Union{Nothing, ComponentArray}
     nn_state::Union{Nothing, NamedTuple}
-
+    
 end
 
 function Base.show(io::IO, h::MNCRPHyperparams)

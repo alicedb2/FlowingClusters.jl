@@ -25,11 +25,6 @@ mutable struct Diagnostics
     accepted_nn::Vector{Int64}
     rejected_nn::Vector{Int64}
 
-    step_scale::Matrix{Float64}
-    slice_s::Vector{Float64}
-
-    slice_sampler_scales::Vector{Float64}
-
     amwg_nbbatches::Int64
     amwg_logscales::Vector{Float64}
 
@@ -83,9 +78,6 @@ function Diagnostics(d; nn_params=nothing)
         0, 0,                             # split
         0, 0,                             # merge
         zeros(Int64, nn_D), zeros(Int64, nn_D), # ffjord nn 
-        0.01 / D * diagm(ones(D)),        # step_scale
-        ones(D),                          # slice_s
-        ones(D),                          # slice_sampler_scales
         0,                                # amwg_nbbatches
         zeros(D + nn_D)                   # amwg_logscales
         )
@@ -120,12 +112,6 @@ function clear_diagnostics!(diagnostics::Diagnostics; clearhyperparams=true, cle
 
     
     if !keepstepscale
-        D = size(diagnostics.step_scale, 1)
-        
-        diagnostics.step_scale = 0.01 ./ D * diagm(ones(D))
-
-        diagnostics.slice_s = ones(D)
-
         diagnostics.amwg_nbbatches = 0
         diagnostics.amwg_logscales = zeros(size(diagnostics.amwg_logscales, 1))
     end
@@ -142,10 +128,5 @@ function add_one_dimension!(diagnostics::Diagnostics)
     diagnostics.accepted_flatL = vcat(diagnostics.accepted_flatL, zeros(Int64, d + 1))
     diagnostics.rejected_flatL = vcat(diagnostics.rejected_flatL, zeros(Int64, d + 1))
     
-    new_D = 3 + (d + 1) + div((d + 1) * (d + 2), 2)
-    diagnostics.step_scale = 0.01 ./ new_D * diagm(ones(new_D))
-    
-    diagnostics.slice_s = vcat(diagnostics.slice_s, 1.0)
-
     return diagnostics
 end

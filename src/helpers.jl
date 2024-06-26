@@ -92,3 +92,19 @@ function performance_scores(scores_at_presences, scores_at_absences; threshold=n
         )
     
 end
+
+
+function drawNIW(
+    mu::AbstractVector{Float64}, 
+    lambda::Float64, 
+    psi::AbstractMatrix{Float64}, 
+    nu::Float64)::Tuple{Vector{Float64}, Matrix{Float64}}
+
+    invWish = InverseWishart(nu, psi)
+    sigma = rand(invWish)
+
+    multNorm = MvNormal(mu, sigma/lambda)
+    mu = rand(multNorm)
+
+    return mu, sigma
+end
