@@ -108,3 +108,8 @@ function drawNIW(
 
     return mu, sigma
 end
+
+sqrtsigmoid(x::T; a=1/2) where {T} = T(1/2) + T(a) * x / sqrt(T(1) + T(a)^2 * x^2) / T(2)
+sqrttanh(x::T) where {T} = T(2) * sqrtsigmoid(x, a=1) - T(1)
+sqrttanhgrow(x) = x + sqrttanh(x)
+    
