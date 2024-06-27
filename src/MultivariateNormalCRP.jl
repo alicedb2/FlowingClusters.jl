@@ -978,7 +978,7 @@ module MultivariateNormalCRP
     function advance_chain!(chain::MNCRPChain, nb_steps=100;
         nb_splitmerge=30, splitmerge_t=3, splitmerge_temp=1.0,
         nb_gibbs=1, gibbs_temp=1.0,
-        nb_hyperparams=10, mh_stepscale=1.0, mh_temp=1.0, 
+        nb_hyperparams=1, mh_stepscale=1.0, mh_temp=1.0, 
         ffjord_sampler=:am, ffjord_every=nothing,
         temperature_schedule=nothing,
         sample_every=10,
@@ -1269,9 +1269,13 @@ module MultivariateNormalCRP
         
         @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
         
-        if burn < 0
-            burn = length(chain.logprob_chain) + burn
+        N = length(chain)
+
+        if burn >= N
+            @error("Can't burn the whole chain, burn must be smaller than $N")
         end
+    
+        map_idx = chain.map_idx - burn
 
         map_marginals = project_clusters(realspace_clusters(Cluster, chain.map_clusters, chain.map_base2original), proj)
         current_marginals = project_clusters(realspace_clusters(Cluster, chain.clusters, chain.base2original), proj)
@@ -1309,72 +1313,90 @@ module MultivariateNormalCRP
         deco!(p_basecurrent_axis)
         plot!(p_basecurrent_axis, basecurrent_marginals; rev=rev, nb_clusters=nb_clusters)
 
-        lpc = chain.logprob_chain
+        lpc = logprob_chain(chain, burn)
         logprob_axis = Axis(fig[5, 1], title="log probability chain", aspect=3)
         deco!(logprob_axis)
-        lines!(logprob_axis, burn+1:length(lpc), lpc[burn+1:end])
+        lines!(logprob_axis, burn+1:N, lpc)
         hlines!(logprob_axis, [chain.map_logprob], label=nothing, color=:green)
         hlines!(logprob_axis, [maximum(chain.logprob_chain)], label=nothing, color=:black)
-        vlines!(logprob_axis, [chain.map_idx], label=nothing, color=:black)
+        if map_idx > 0
+            vlines!(logprob_axis, [map_idx], label=nothing, color=:black)
+        end
 
-        nbc = chain.nbclusters_chain
-        # N = sum(length.(chain.clusters))
-        # p_nbc = plot(burn+1:length(nbc), log(N) * ac[burn+1:end], grid=:no, label="Asymptotic mean", title="#cluster chain", legend=true)
+        nbc = nbclusters_chain(chain, burn)
         nbc_axis = Axis(fig[5, 2], title="#cluster chain", aspect=3)
         deco!(nbc_axis)
-        lines!(nbc_axis, burn+1:length(nbc), nbc[burn+1:end])
-        vlines!(nbc_axis, [chain.map_idx], label=nothing, color=:black)
+        lines!(nbc_axis, burn+1:N, nbc)
+        if map_idx > 0
+            vlines!(nbc_axis, [map_idx], label=nothing, color=:black)
+        end
 
-        lcc = chain.largestcluster_chain
+        lcc = largestcluster_chain(chain, burn)
         lcc_axis = Axis(fig[6, 1], title="Largest cluster chain", aspect=3)
         deco!(lcc_axis)
-        lines!(lcc_axis, burn+1:length(lcc), lcc[burn+1:end])
-        vlines!(lcc_axis, [chain.map_idx], label=nothing, color=:black)
+        lines!(lcc_axis, burn+1:N, lcc)
+        if map_idx > 0
+            vlines!(lcc_axis, [map_idx], label=nothing, color=:black)
+        end
 
-        ac = alpha_chain(chain)
+        ac = alpha_chain(chain, burn)
         alpha_axis = Axis(fig[6, 2], title="α chain", aspect=3)
         deco!(alpha_axis)
-        lines!(alpha_axis, burn+1:length(ac), ac[burn+1:end], label=nothing)
-        vlines!(alpha_axis, [chain.map_idx], label=nothing, color=:black)
+        lines!(alpha_axis, burn+1:N, ac, label=nothing)
+        if map_idx > 0
+            vlines!(alpha_axis, [map_idx], label=nothing, color=:black)
+        end
 
-        muc = reduce(hcat, mu_chain(chain))'
+        muc = mu_chain(Matrix, chain, burn)
         mu_axis = Axis(fig[7, 1], title="μ chain", aspect=3)
         deco!(mu_axis)
-        for mucomponent in eachcol(muc[burn+1:end, :])
-            lines!(mu_axis, burn+1:size(muc, 1), mucomponent)
+        for mucomponent in eachrow(muc)
+            lines!(mu_axis, burn+1:N, mucomponent)
         end
-        vlines!(mu_axis, [chain.map_idx], label=nothing, color=:black)
+        if map_idx > 0
+            vlines!(mu_axis, [map_idx], label=nothing, color=:black)
+        end
 
-        lc = lambda_chain(chain)
+        lc = lambda_chain(chain, burn)
         lambda_axis = Axis(fig[7, 2], title="λ chain", aspect=3)
         deco!(lambda_axis)
-        lines!(lambda_axis, burn+1:length(lc), lc[burn+1:end])
-        vlines!(lambda_axis, [chain.map_idx], label=nothing, color=:black)
-        
-        pc = flatten.(LowerTriangular.(psi_chain(chain)))
-        pc = reduce(hcat, pc)'
+        lines!(lambda_axis, burn+1:N, lc)
+        if map_idx > 0
+            vlines!(lambda_axis, [map_idx], label=nothing, color=:black)
+        end
+
+        # pc = flatten.(LowerTriangular.(psi_chain(chain)))
+        # pc = reduce(hcat, pc)'
+        pc = psi_chain(Matrix, chain, burn)
         psi_axis = Axis(fig[8, 1], title="Ψ chain", aspect=3)
         deco!(psi_axis)
-        for psicomponent in eachcol(pc[burn+1:end, :])
-            lines!(psi_axis, burn+1:size(pc, 1), psicomponent)
+        for psicomponent in eachrow(pc)
+            lines!(psi_axis, burn+1:N, psicomponent)
         end
-        vlines!(psi_axis, [chain.map_idx], label=nothing, color=:black)
+        if map_idx > 0
+            vlines!(psi_axis, [map_idx], label=nothing, color=:black)
+        end
 
-        nc = nu_chain(chain)
+        nc = nu_chain(chain, burn)
         nu_axis = Axis(fig[8, 2], title="ν chain", aspect=3)
         deco!(nu_axis)
-        lines!(nu_axis, burn+1:length(nc), nc[burn+1:end])
-        vlines!(nu_axis, [chain.map_idx], label=nothing, color=:black)
-        
+        lines!(nu_axis, burn+1:N, nc)
+        if map_idx > 0
+            vlines!(nu_axis, [map_idx], label=nothing, color=:black)
+        end
+
         if chain.hyperparams.nn !== nothing
             nnc = nn_chain(Matrix, chain)
             nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network chain")
             deco!(nn_axis)
             for p in eachrow(nnc)
-                lines!(nn_axis, burn+1:size(nnc, 2), collect(p))
+                lines!(nn_axis, burn+1:N, collect(p))
             end
-            vlines!(nn_axis, [chain.map_idx], label=nothing, color=:black)
+            if map_idx > 0
+                vlines!(nn_axis, [map_idx], label=nothing, color=:black)
+            end
         end
+
 
         return fig
     end

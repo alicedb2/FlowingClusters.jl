@@ -156,34 +156,31 @@ function MNCRPChain(
 end
 
 
-alpha_chain(chain::MNCRPChain) = [p.alpha for p in chain.hyperparams_chain]
-mu_chain(chain::MNCRPChain) = [p.mu[:] for p in chain.hyperparams_chain]
-mu_chain(::Type{Matrix}, chain::MNCRPChain) = reduce(hcat, mu_chain(chain))
-mu_chain(chain::MNCRPChain, i) = [p.mu[i] for p in chain.hyperparams_chain]
-lambda_chain(chain::MNCRPChain) = [p.lambda for p in chain.hyperparams_chain]
-function psi_chain(chain::MNCRPChain; flatten=false)
+alpha_chain(chain::MNCRPChain, burn=0) = [p.alpha for p in chain.hyperparams_chain[burn+1:end]]
+mu_chain(chain::MNCRPChain, burn=0) = [p.mu[:] for p in chain.hyperparams_chain[burn+1:end]]
+mu_chain(::Type{Matrix}, chain::MNCRPChain, burn=0) = reduce(hcat, mu_chain(chain, burn))
+lambda_chain(chain::MNCRPChain, burn=0) = [p.lambda for p in chain.hyperparams_chain[burn+1:end]]
+function psi_chain(chain::MNCRPChain, burn=0; flatten=false)
     if flatten
-        return [MultivariateNormalCRP.flatten(LowerTriangular(p.psi)) for p in chain.hyperparams_chain]
+        return [MultivariateNormalCRP.flatten(LowerTriangular(p.psi)) for p in chain.hyperparams_chain[burn+1:end]]
     else
-        return [p.psi[:, :] for p in chain.hyperparams_chain]
+        return [p.psi[:, :] for p in chain.hyperparams_chain[burn+1:end]]
     end
 end
-psi_chain(::Type{Matrix}, chain::MNCRPChain) = reduce(hcat, psi_chain(chain, flatten=true))
-psi_chain(::Type{Array}, chain::MNCRPChain) = reduce((x,y)->cat(x, y, dims=3), psi_chain(chain))
-psi_chain(chain::MNCRPChain, i, j) = [p.psi[i, j] for p in chain.hyperparams_chain]
+psi_chain(::Type{Matrix}, chain::MNCRPChain, burn=0) = reduce(hcat, psi_chain(chain, burn, flatten=true))
+psi_chain(::Type{Array}, chain::MNCRPChain, burn=0) = reduce((x,y)->cat(x, y, dims=3), psi_chain(chain, burn))
 
-flatL_chain(chain::MNCRPChain) = [p.flatL[:] for p in chain.hyperparams_chain]
-flatL_chain(::Type{Matrix}, chain::MNCRPChain) = reduce(hcat, flatL_chain(chain))
-flatL_chain(chain::MNCRPChain, i) = [p.flatL[i] for p in chain.hyperparams_chain]
+flatL_chain(chain::MNCRPChain, burn=0) = [p.flatL[:] for p in chain.hyperparams_chain[burn+1:end]]
+flatL_chain(::Type{Matrix}, chain::MNCRPChain, burn=0) = reduce(hcat, flatL_chain(chain, burn))
 
-nu_chain(chain::MNCRPChain) = [p.nu for p in chain.hyperparams_chain]
+nu_chain(chain::MNCRPChain, burn=0) = [p.nu for p in chain.hyperparams_chain[burn+1:end]]
 
-logprob_chain(chain::MNCRPChain) = chain.logprob_chain[:]
-nbclusters_chain(chain::MNCRPChain) = chain.nbclusters_chain[:]
-largestcluster_chain(chain::MNCRPChain) = chain.largestcluster_chain[:]
+logprob_chain(chain::MNCRPChain, burn=0) = chain.logprob_chain[burn+1:end]
+nbclusters_chain(chain::MNCRPChain, burn=0) = chain.nbclusters_chain[burn+1:end]
+largestcluster_chain(chain::MNCRPChain, burn=0) = chain.largestcluster_chain[burn+1:end]
 
-nn_chain(chain::MNCRPChain) = [p.nn_params for p in chain.hyperparams_chain]
-nn_chain(::Type{Matrix}, chain::MNCRPChain) = reduce(hcat, nn_chain(chain))
+nn_chain(chain::MNCRPChain, burn=0) = [p.nn_params for p in chain.hyperparams_chain[burn+1:end]]
+nn_chain(::Type{Matrix}, chain::MNCRPChain, burn=0) = reduce(hcat, nn_chain(chain, burn))
 
 function elements(chain::MNCRPChain; destandardize=false)
     if !destandardize
@@ -192,50 +189,6 @@ function elements(chain::MNCRPChain; destandardize=false)
         return Vector{Float64}[chain.data_scale .* x .+ chain.data_zero for cluster in chain.clusters for x in cluster]
     end
 end
-
-# function ess(param_chain::Vector{<:Number})
-#     ac = autocor(param_chain, 1:length(param_chain)-1)
-#     ac = ac[1:findfirst(x -> x < 0, ac)-1]
-#     return length(param_chain) / (1 + 2 * sum(ac))
-# end
-
-# function ess(chain::MNCRPChain)
-#     d = length(chain.hyperparams.mu)
-
-#     alpha_ess = ess(alpha_chain(chain))
-#     mu_ess = [ess(mu_chain(chain, i)) for i in 1:d]
-#     lambda_ess = ess(lambda_chain(chain))
-#     psi_ess = [ess(psi_chain(chain, i, j)) for i in 1:d, j in 1:d]
-#     flatL_ess = [ess(flatL_chain(chain, i)) for i in 1:length(chain.hyperparams.flatL)]
-#     nu_ess = ess(nu_chain(chain))
-#     logprob_ess = ess(logprob_chain(chain))
-#     nbclusters_ess = ess(nbclusters_chain(chain))
-#     largestcluster_ess = ess(largestcluster_chain(chain))
-#     min_ess = minimum(vcat([alpha_ess, 
-#                             minimum(mu_ess),                             
-#                             lambda_ess, 
-#                             minimum(psi_ess),
-#                             minimum(flatL_ess),
-#                             nu_ess, 
-#                             logprob_ess,
-#                             nbclusters_ess,
-#                             largestcluster_ess]))
-    
-#     println("         logprob ESS: $(round(logprob_ess, digits=1))")
-#     println("       #clusters ESS: $(round(nbclusters_ess, digits=1))")
-#     println(" largest cluster ESS: $(round(largestcluster_ess, digits=1))")
-#     println("           alpha ESS: $(round(alpha_ess, digits=1))")
-#     println("              mu ESS: $(round.(mu_ess, digits=1))")
-#     println("          lambda ESS: $(round(lambda_ess, digits=1))")
-#     println("             Psi ESS: $(round.(psi_ess, digits=1))")
-#     println("           flatL ESS: $(round.(flatL_ess, digits=1))")
-#     println("              nu ESS: $(round(nu_ess, digits=1))")
-#     println("           alpha ESS: $(round(alpha_ess, digits=1))")
-#     println()
-#     println("             min ESS: $(round(min_ess, digits=1))")
-
-# end
-
 
 function burn!(chain::MNCRPChain, n::Int64=0; burn_map=true)
 
@@ -269,8 +222,30 @@ function Base.length(chain::MNCRPChain)
     return length(chain.logprob_chain)
 end
 
-function ess_rhat(chain::MNCRPChain; transform=false, burn=0, kwargs...)
-    return ess_rhat(reshape(reduce(hcat, unpack.(chain.hyperparams_chain[burn+1:end], transform=transform))', (length(chain.hyperparams_chain[burn+1:end]), 1, 3 + length(chain.hyperparams.mu) + length(chain.hyperparams.flatL))); kwargs...)
+function ess_rhat(chain::MNCRPChain, burn=0)
+
+    N = length(chain.hyperparams_chain)
+    if burn >= N
+        @error("Can't burn the whole chain, n must be smaller than $N")
+    end
+    N -= burn
+
+    d = dimension(chain.hyperparams)
+    flatL_d = size(chain.hyperparams.flatL, 1)
+    nn_D = chain.hyperparams.nn_params !== nothing ? size(chain.hyperparams.nn_params, 1) : 0
+
+    return (;
+    alpha = ess_rhat(alpha_chain(chain, burn)),
+    mu = ess_rhat(reshape(mu_chain(Matrix, chain, burn)', N, 1, d)),
+    lambda = ess_rhat(lambda_chain(chain, burn)),
+    psi = ess_rhat(reshape(psi_chain(Matrix, chain, burn)', N, 1, flatL_d)),
+    flatL = ess_rhat(reshape(flatL_chain(Matrix, chain, burn)', N, 1, flatL_d)),
+    nu = ess_rhat(nu_chain(chain, burn)),
+    nn = chain.hyperparams.nn_params !== nothing ? ess_rhat(reshape(nn_chain(Matrix, chain, burn)', N, 1, nn_D)) : nothing,
+    logprob = ess_rhat(logprob_chain(chain, burn)),
+    nbclusters = ess_rhat(nbclusters_chain(chain, burn)),
+    largestcluster = ess_rhat(largestcluster_chain(chain, burn))
+    )
 end
 
 function stats(chain::MNCRPChain; burn=0)
