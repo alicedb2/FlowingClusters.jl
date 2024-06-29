@@ -8,17 +8,15 @@ mutable struct MNCRPChain
     # Map from base data (ffjord) to original data
     base2original::Dict{Vector{Float64}, Vector{Float64}}
 
-    # Standardization parameters
-    data_zero::Vector{Float64}
-    data_scale::Vector{Float64}
-
     # Some chains of interests
     nbclusters_chain::Vector{Int64}
     largestcluster_chain::Vector{Int64}
     hyperparams_chain::Vector{MNCRPHyperparams}
     logprob_chain::Vector{Float64}
+
     clusters_samples::CircularBuffer{Vector{Cluster}}
     hyperparams_samples::CircularBuffer{MNCRPHyperparams}
+    base2original_samples::CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}
 
     # Maximum a-posteriori state and location
     map_clusters::Vector{Cluster}
@@ -48,20 +46,17 @@ function MNCRPChain(filename::AbstractString)
 end
 
 function MNCRPChain(dataset::MNCRPDataset; chain_samples=200, strategy=:hot, ffjord_nn=nothing)
-    chain = MNCRPChain(dataset.data, chain_samples=chain_samples, standardize=false, strategy=strategy, ffjord_nn=ffjord_nn)
-    chain.data_zero = dataset.data_zero[:]
-    chain.data_scale = dataset.data_scale[:]
+    chain = MNCRPChain(dataset.data, chain_samples=chain_samples, strategy=strategy, ffjord_nn=ffjord_nn)
     return chain
 end
 
-function MNCRPChain(dataset::Matrix{Float64}; standardize=true, chain_samples=100, strategy=:sequential, optimize=false, ffjord_nn=nothing)
-    return MNCRPChain(eachrow(dataset), standardize=standardize, chain_samples=chain_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
+function MNCRPChain(dataset::Matrix{Float64}; chain_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing)
+    return MNCRPChain(eachrow(dataset), chain_samples=chain_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
 end
 
 function MNCRPChain(
     data::Vector{Vector{Float64}}; 
-    standardize=true, 
-    chain_samples=100, 
+    chain_samples=200, 
     strategy=:sequential, 
     optimize=false, 
     ffjord_nn=nothing)
@@ -75,27 +70,18 @@ function MNCRPChain(
 
     clusters_samples = CircularBuffer{Vector{Cluster}}(chain_samples)
     hyperparams_samples = CircularBuffer{MNCRPHyperparams}(chain_samples)
+    base2original_samples = CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}(chain_samples)
 
     
-    # Keep unique observations only in case we standardize
+    # Keep unique observations only
     data = Set{Vector{Float64}}(deepcopy(data))
     println("    Loaded $(length(data)) unique data points into chain")
-    data = collect(data)
-
-    original_data = data
-
-    data_zero = zeros(d)
-    data_scale = ones(d)
-    if standardize
-        data_zero = mean(data)
-        data_scale = std(data)
-        data = Vector{Float64}[(x .- data_zero) ./ data_scale for x in data]
-    end
+    original_data = collect(data)
 
     if ffjord_nn !== nothing
-        matdata = reduce(hcat, data)
+        original_matdata = reduce(hcat, original_data)
         ffjord_model = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (d,), Tsit5(), ad=AutoForwardDiff())
-        ret, _ = ffjord_model(matdata, hyperparams.nn_params, hyperparams.nn_state)
+        ret, _ = ffjord_model(original_matdata, hyperparams.nn_params, hyperparams.nn_state)
         data = collect.(eachcol(ret.z))
     end
 
@@ -103,15 +89,12 @@ function MNCRPChain(
     base2original = Dict{Vector{Float64}, Vector{Float64}}(data .=> original_data)
 
     chain = MNCRPChain(
-        [], hyperparams, # clusters, hyperparams
-        base2original,
-        data_zero, data_scale, 
-        [], [], [], [],
-        clusters_samples, hyperparams_samples,
+        [], hyperparams, base2original, # current state of the chain
+        [], [], [], [],                 # chains of interest
+        clusters_samples, hyperparams_samples, base2original_samples, # MCMC samples of states
         [], deepcopy(hyperparams), deepcopy(base2original), # MAP clusters, MAP hyperparams, MAP base2original
         -Inf, 1 # MAP logprob, MAP index
         )
-
 
     # chain.original_data = Dict{Vector{Float64}, Vector{<:Real}}(k => v for (k, v) in zip(data, original_data))
 
@@ -162,7 +145,7 @@ mu_chain(::Type{Matrix}, chain::MNCRPChain, burn=0) = reduce(hcat, mu_chain(chai
 lambda_chain(chain::MNCRPChain, burn=0) = [p.lambda for p in chain.hyperparams_chain[burn+1:end]]
 function psi_chain(chain::MNCRPChain, burn=0; flatten=false)
     if flatten
-        return [MultivariateNormalCRP.flatten(LowerTriangular(p.psi)) for p in chain.hyperparams_chain[burn+1:end]]
+        return [FlowingClusters.flatten(LowerTriangular(p.psi)) for p in chain.hyperparams_chain[burn+1:end]]
     else
         return [p.psi[:, :] for p in chain.hyperparams_chain[burn+1:end]]
     end
@@ -179,16 +162,12 @@ logprob_chain(chain::MNCRPChain, burn=0) = chain.logprob_chain[burn+1:end]
 nbclusters_chain(chain::MNCRPChain, burn=0) = chain.nbclusters_chain[burn+1:end]
 largestcluster_chain(chain::MNCRPChain, burn=0) = chain.largestcluster_chain[burn+1:end]
 
+nn_chain(chain::Vector{MNCRPHyperparams}, burn=0) = [p.nn_params for p in chain[burn+1:end]]
 nn_chain(chain::MNCRPChain, burn=0) = [p.nn_params for p in chain.hyperparams_chain[burn+1:end]]
-nn_chain(::Type{Matrix}, chain::MNCRPChain, burn=0) = reduce(hcat, nn_chain(chain, burn))
+nn_chain(::Type{Matrix}, chain::Union{MNCRPChain, Vector{MNCRPHyperparams}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
 
-function elements(chain::MNCRPChain; destandardize=false)
-    if !destandardize
-        return Vector{Float64}[x for cluster in chain.clusters for x in cluster]
-    else
-        return Vector{Float64}[chain.data_scale .* x .+ chain.data_zero for cluster in chain.clusters for x in cluster]
-    end
-end
+elements(::Type{T}, chain::MNCRPChain) where {T} = elements(T, chain.clusters)
+elements(chain::MNCRPChain) = elements(chain.clusters)
 
 function burn!(chain::MNCRPChain, n::Int64=0; burn_map=true)
 

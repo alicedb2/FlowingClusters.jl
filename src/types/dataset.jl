@@ -6,7 +6,7 @@ module Dataset
     using StatsBase: std, mean
     import StatsBase: standardize
     using Random: shuffle!, shuffle
-    using MultivariateNormalCRP: Cluster
+    using FlowingClusters: Cluster
 
     import Base: show, split
 

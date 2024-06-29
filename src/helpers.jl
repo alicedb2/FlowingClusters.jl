@@ -73,22 +73,16 @@ function performance_scores(scores_at_presences, scores_at_absences; threshold=n
     
     sensitivity = tp/(tp + fn)
     specificity = tn/(tn + fp)
+    MCC = (tp * tn - fp * fn)/sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
     J = sensitivity + specificity - 1
     kappa = 2 * (tp * tn - fn * fp)/((tp + fp) * (fp + tn) + (tp + fn) * (fn + tn))
     ppv = tp / (tp + fp)
     npv = tn / (tn + fn)
     
-    return (
-        J=J, 
-        kappa=kappa, 
-        sensitivity=sensitivity, 
-        specificity=specificity, 
-        ppv=ppv, 
-        npv=npv, 
-        tp=tp, 
-        fn=fn, 
-        tn=tn, 
-        fp=fp,
+    return (; MCC, J, kappa, 
+        sensitivity, specificity, 
+        ppv, npv, 
+        tp, fn, tn, fp,
         )
     
 end
@@ -113,3 +107,12 @@ sqrtsigmoid(x::T; a=1/2) where {T} = T(1/2) + T(a) * x / sqrt(T(1) + T(a)^2 * x^
 sqrttanh(x::T) where {T} = T(2) * sqrtsigmoid(x, a=1) - T(1)
 sqrttanhgrow(x) = x + sqrttanh(x)
     
+function chunkslices(sizes)
+    boundaries = cumsum(vcat(1, sizes))
+    return [boundaries[i]:boundaries[i+1]-1 for i in 1:length(sizes)]
+end
+
+function chunk(data::T, sizes) where {T}
+    sum(sizes) <= size(data, ndims(data)) || throw(ArgumentError("Sum of sizes ($(sum(sizes))) must be less than or equal to last dimension ($(size(data, ndims(data))))"))
+    return [T(selectdim(data, ndims(data), slice)) for slice in chunkslices(sizes)]
+end

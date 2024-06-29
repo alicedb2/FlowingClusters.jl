@@ -162,10 +162,10 @@ function dimension(hyperparams::MNCRPHyperparams)
     return size(hyperparams.mu, 1)
 end
 
-function param_dimension(hyperparams::MNCRPHyperparams)
+function param_dimension(hyperparams::MNCRPHyperparams; include_nn=true)
     d = dimension(hyperparams)
     D = 3 + d + div(d * (d + 1), 2)
-    if hyperparams.nn_params !== nothing
+    if hyperparams.nn_params !== nothing && include_nn
         D += size(hyperparams.nn_params, 1)
     end
     return D

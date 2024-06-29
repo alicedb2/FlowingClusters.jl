@@ -1,4 +1,4 @@
-name = "MultivariateNormalCRP"
+name = "FlowingClusters"
 uuid = "5977a314-3542-451c-9f16-3f345fa250de"
 authors = ["alicedb2 <alice.doucet.beaupre@gmail.com>"]
 version = "0.1.0"

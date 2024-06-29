@@ -1,4 +1,4 @@
-module MultivariateNormalCRP
+module FlowingClusters
     using Distributions: MvNormal, MvTDist, InverseWishart, Normal, Cauchy, Uniform, Exponential, Dirichlet, Multinomial, Beta, MixtureModel, Categorical, Distribution, logpdf
     using Random: randperm, shuffle, shuffle!, seed!, Xoshiro
     using StatsFuns: logsumexp, logmvgamma, logit, logistic
@@ -8,7 +8,6 @@ module MultivariateNormalCRP
     using SpecialFunctions: loggamma, polygamma, logbeta
     using Base.Iterators: cycle
     import Base.Iterators: flatten
-    # using StatsPlots: covellipse!, covellipse
     using Makie
     import Makie: plot, plot!
     using JLD2, CodecBzip2
@@ -19,7 +18,7 @@ module MultivariateNormalCRP
     import MCMCDiagnosticTools: ess_rhat
     
     using DiffEqFlux
-    using ComponentArrays: ComponentArray
+    using ComponentArrays: ComponentArray, valkeys
     using DifferentialEquations
     import Optimization, OptimizationOptimisers
 
@@ -65,6 +64,8 @@ module MultivariateNormalCRP
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain, logprob_chain, nbclusters_chain, largestcluster_chain, nn_chain
     export ess_rhat, stats
 
+    include("plotting.jl")
+
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
     export bioclim_predictor
@@ -72,6 +73,7 @@ module MultivariateNormalCRP
     include("helpers.jl")
     export performance_scores, drawNIW
     export sqrtsigmoid, sqrttanh, sqrttanhgrow
+    export chunk
 
     include("MNDPVariational.jl")
 
@@ -118,7 +120,6 @@ module MultivariateNormalCRP
         return (mu, lambda, psi, nu)
 
     end
-
 
     function updated_niw_hyperparams(cluster::Cluster, 
         mu::Vector{Float64}, 
@@ -243,6 +244,20 @@ module MultivariateNormalCRP
 
     end
 
+    function nn_prior(nn_params::AbstractArray; weightsonly=false)
+        # return sum(logpdf(Cauchy(6), nn_params))
+        if weightsonly
+            weights = [w for k in valkeys(nn_params) for w in nn_params[k].weight]
+            wD = length(weights)
+            return sum(logpdf(Normal(6), weights))
+            # return logpdf(MvTDist(1, zeros(wD), PDMat(I(wD))), weights)
+        else
+            return sum(logpdf(Normal(6), nn_params))
+            # D = length(nn_params)
+            # return logpdf(MvTDist(1, zeros(D), PDMat(100*I(D))), nn_params)
+        end
+    end
+
     function logprobgenerative(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing; hyperpriors=true, temperature=1.0, ffjord=false)
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
         logp = logprobgenerative(clusters, alpha, mu, lambda, psi, nu; hyperpriors=hyperpriors, temperature=temperature)
@@ -252,7 +267,7 @@ module MultivariateNormalCRP
             ret, _ = ffjord_model(origmat, hyperparams.nn_params, hyperparams.nn_state)
             logp -= sum(ret.delta_logp)
 
-            logp += logpdf(MvNormal(6^2 * I(size(hyperparams.nn_params, 1))), hyperparams.nn_params)
+            logp += nn_prior(hyperparams.nn_params)
         end
 
         return logp
@@ -776,20 +791,32 @@ module MultivariateNormalCRP
 
         if ffjord_sampler === :am && hyperparams.nn_params !== nothing
 
-            if length(hyperparams_chain) <= 2 * nn_D
+            nbskip = 20 * param_dimension(hyperparams, include_nn=false)
+
+            if nbskip < length(hyperparams_chain) <= nbskip + 2 * nn_D
                 step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-            else
-                nn_sigma_chain = reduce(hcat, [h.nn_params for h in hyperparams_chain], init=zeros(Float64, nn_D, 0))
-                sigma_n = cov(nn_sigma_chain, dims=2)
+            elseif length(hyperparams_chain) > nbskip + 2 * nn_D
+                L = length(hyperparams_chain) - nbskip
+                am_N, am_NN = hyperparams.diagnostics.am_N, hyperparams.diagnostics.am_NN
+                nn_sigma = (am_NN - am_N * am_N' / L) / (L - 1)
+                nn_sigma = (nn_sigma + nn_sigma') / 2
+                # nn_sigma = cov(nn_chain(Matrix, hyperparams_chain), dims=2)
+                
                 safety_component = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-                empirical_estimate_component = MvNormal(2.38^2 / nn_D * sigma_n)
+                empirical_estimate_component = MvNormal(2.38^2 / nn_D * nn_sigma)
+
                 step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
             end
-
-            advance_ffjord!(clusters, hyperparams, base2original, 
-                            step_type=:batch,
-                            step_distrib=step_distrib,
+            
+            if length(hyperparams_chain) > nbskip
+                advance_ffjord!(clusters, hyperparams, base2original, 
+                            step_type=:batch, step_distrib=step_distrib,
                             temperature=temperature)
+            
+                hyperparams.diagnostics.am_N .+= hyperparams.nn_params
+                hyperparams.diagnostics.am_NN .+= hyperparams.nn_params * hyperparams.nn_params'
+            end
+
         end
         
         return hyperparams
@@ -859,8 +886,7 @@ module MultivariateNormalCRP
     function advance_ffjord!(
         clusters::Vector{Cluster}, 
         hyperparams::MNCRPHyperparams, 
-        base2original::Dict{Vector{Float64}, Vector{Float64}}, 
-        original_clusters::Union{Nothing, Vector{Matrix{Float64}}}=nothing; 
+        base2original::Dict{Vector{Float64}, Vector{Float64}};
         step_type=:batch, step_distrib=nothing,
         temperature=1.0)
 
@@ -875,28 +901,25 @@ module MultivariateNormalCRP
         
         ffjord_model = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (dimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
         
-        if original_clusters === nothing
-            original_clusters = realspace_clusters(Matrix, clusters, base2original)
-        end
+        original_clusters = realspace_clusters(Matrix, clusters, base2original)
 
         if step_type === :batch
+            
             proposed_nn_params = hyperparams.nn_params .+ steps
-            proposed_baseclusters = Matrix{Float64}[]
-            proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}()
-
-            log_acceptance = 0.0
-
+            
             # We could have left the calculation of deltalogps
             # to logprobgenerative below, but we a proposal comes
             # a new base2original so we do both at once here and
             # call logprobgenerative with ffjord=false
-            for orig_cluster in original_clusters
-                ret, _ = ffjord_model(orig_cluster, proposed_nn_params, hyperparams.nn_state)
-                log_acceptance -= sum(ret.delta_logp)
-                push!(proposed_baseclusters, Matrix{Float64}(ret.z))
-                merge!(proposed_base2original, Dict(collect.(eachcol(ret.z)) .=> collect.(eachcol(orig_cluster))))
-            end
-
+            
+            original_elements = reduce(hcat, original_clusters)
+            proposed_base, _ = ffjord_model(original_elements, proposed_nn_params, hyperparams.nn_state)
+            proposed_elements = Matrix{Float64}(proposed_base.z)
+            proposed_baseclusters = chunk(proposed_elements, size.(original_clusters, 2))
+            proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}(eachcol(proposed_elements) .=> eachcol(original_elements))
+            
+            log_acceptance = -sum(proposed_base.delta_logp)
+            
             # We already accounted for the ffjord deltalogps above
             # so call logprobgenerative with ffjord=false on the
             # proposed state.
@@ -908,7 +931,7 @@ module MultivariateNormalCRP
             # We called logprobgenerative with ffjord=true on the current state
             # but not on the proposed state, so we need to account for the
             # prior on the neural network for the proposed state
-            log_acceptance += logpdf(MvNormal(6^2 * I(nn_D)), proposed_nn_params)
+            log_acceptance += nn_prior(proposed_nn_params)
 
             log_acceptance /= temperature
 
@@ -977,12 +1000,10 @@ module MultivariateNormalCRP
     end
     
     function advance_chain!(chain::MNCRPChain, nb_steps=100;
-        nb_splitmerge=30, splitmerge_t=3, splitmerge_temp=1.0,
-        nb_gibbs=1, gibbs_temp=1.0,
-        nb_hyperparams=1, mh_stepscale=1.0, mh_temp=1.0, 
+        nb_hyperparams=1, nb_gibbs=1,
+        nb_splitmerge=30, splitmerge_t=3,
         ffjord_sampler=:am, ffjord_every=nothing,
-        temperature_schedule=nothing,
-        sample_every=10,
+        sample_every=:ess,
         checkpoint_every=-1, checkpoint_prefix="chain",
         attempt_map=true, pretty_progress=true)
         
@@ -1009,29 +1030,20 @@ module MultivariateNormalCRP
 
         ###########################
 
-        if typeof(mh_stepscale) <: Real
-            mh_stepscale = mh_stepscale * ones(5)
-        end
-
         if pretty_progress
             progbar = Progress(nb_steps; showspeed=true)
         end
 
         nn_D = hp.nn_params === nothing ? 0 : size(hp.nn_params, 1)
+        delta_withoutnn = nn_prior(zeros(nn_D))
+
+        last_ess = 0
+
+
 
         for step in 1:nb_steps
-
-            if temperature_schedule !== nothing
-                if temperature_schedule isa Float64
-                    splitmerge_temp = gibbs_temp = mh_temp = temperature_schedule
-                else
-                    if step > length(temperature_schedule)
-                        splitmerge_temp = gibbs_temp = mh_temp = last(temperature_schedule)
-                    else    
-                        splitmerge_temp = gibbs_temp = mh_temp = temperature_schedule[step]
-                    end
-                end
-            end
+            
+            isfile("stop") && break
 
             for i in 1:nb_hyperparams
                 # So many ifs and elses ._.
@@ -1070,7 +1082,7 @@ module MultivariateNormalCRP
             # Sequential split-merge            
             if nb_splitmerge isa Int64
                 for i in 1:nb_splitmerge
-                    advance_splitmerge_seq!(chain.clusters, chain.hyperparams, t=splitmerge_t, temperature=splitmerge_temp)
+                    advance_splitmerge_seq!(chain.clusters, chain.hyperparams, t=splitmerge_t)
                 end
             elseif nb_splitmerge isa Float64 || nb_splitmerge === :matchgibbs
                 # old_nb_ssuccess = chain.hyperparams.diagnostics.accepted_split
@@ -1083,10 +1095,10 @@ module MultivariateNormalCRP
             # Gibbs sweep
             if nb_gibbs isa Int64
                 for i in 1:nb_gibbs
-                    advance_gibbs!(chain.clusters, chain.hyperparams, temperature=gibbs_temp)
+                    advance_gibbs!(chain.clusters, chain.hyperparams)
                 end
             elseif (0.0 < nb_gibbs < 1.0) && (rand() < nb_gibbs)
-                advance_gibbs!(chain.clusters, chain.hyperparams, temperature=gibbs_temp)
+                advance_gibbs!(chain.clusters, chain.hyperparams)
             end
 
             push!(chain.nbclusters_chain, length(chain.clusters))
@@ -1129,14 +1141,34 @@ module MultivariateNormalCRP
                     
                     nb_map_successes += map_success
                     last_map_idx = chain.map_idx
-
             end
 
-            if sample_every !== nothing && sample_every >= 1
-                if mod(length(chain.logprob_chain), sample_every) == 0
-                    push!(chain.clusters_samples, deepcopy(chain.clusters))
-                    push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
-                    # push!(chain.base2original, deepcopy(chain.base2original))
+            if sample_every !== nothing
+                if sample_every === :ess
+                    if length(chain) > 20
+                        conv = ess_rhat(largestcluster_chain(chain))
+                        if conv.ess - last_ess > 2
+                            push!(chain.clusters_samples, deepcopy(chain.clusters))
+                            push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
+                            push!(chain.base2original_samples, deepcopy(chain.base2original))
+                            if length(chain.clusters_samples) < chain.clusters_samples.capacity
+                                last_ess = length(chain.clusters_samples)
+                            else
+                                last_ess = conv.ess
+                            end
+                        end
+                        while length(chain.clusters_samples) > conv.ess
+                            pop!(chain.clusters_samples)
+                            pop!(chain.hyperparams_samples)
+                            pop!(chain.base2original_samples)
+                        end
+                    end
+                elseif sample_every >= 1
+                    if mod(length(chain.logprob_chain), sample_every) == 0
+                        push!(chain.clusters_samples, deepcopy(chain.clusters))
+                        push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
+                        push!(chain.base2original_samples, deepcopy(chain.base2original))
+                    end
                 end
             end
 
@@ -1150,18 +1182,23 @@ module MultivariateNormalCRP
                 jldsave(filename; chain)
             end
 
+
+            largestcluster_convergence = length(chain) > 20 ? ess_rhat(largestcluster_chain(chain)) : (ess=0.0, rhat=0.0)
+            samples_convergence = length(chain) > 20 ? ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]) : (ess=0.0, rhat=0.0)
+
             if pretty_progress
                 ProgressMeter.next!(progbar;
                 showvalues=[
-                (:"step (mh, sm, gb temps)", "$(step)/$(nb_steps) ($(round(mh_temp, digits=2)), $(round(splitmerge_temp, digits=2)), $(round(gibbs_temp, digits=2)))"),
-                (:"chain length (#chain samples)", "$(length(chain.logprob_chain)) ($(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer)))"),
-                (:"logprob (max, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
-                (:"clusters (>1, median, mean, max)", "$(length(chain.clusters)) ($(length(filter(c -> length(c) > 1, chain.clusters))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters])))"),
-                (:"split #successes/#total, merge #successes/#total", split_ratio * ", " * merge_ratio),
+                (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
+                (:"chain length (#chain samples, last ess, samples ess)", "$(length(chain)) ($(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer)), $(round(last_ess, digits=1)), $(round(samples_convergence.ess, digits=1)))"),
+                (:"logprob (max, q95, without nn)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)), $(round(maximum(chain.logprob_chain) - delta_withoutnn, digits=1)))"),
+                (:"nb clusters, nb>1, median, mean, smallest(>1), largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(maximum([length(c) for c in chain.clusters]))"),
+                (:"ess, rhat of largestcluster", "$(round(largestcluster_convergence.ess, digits=1)), $(round(largestcluster_convergence.rhat, digits=3))"),
+                (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
                 (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
                 (:"MAP #attempts/#successes", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
                 (:"MAP clusters (>1, median, mean, max)", "$(length(chain.map_clusters)) ($(length(filter(c -> length(c) > 1, chain.map_clusters))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters])))"),
-                (:"last MAP logprob", round(chain.map_logprob, digits=1)),
+                (:"last MAP logprob (without nn)", "$(round(chain.map_logprob, digits=1)) ($(round(chain.map_logprob - delta_withoutnn, digits=1)))"),
                 (:"last MAP at", last_map_idx),
                 (:"last checkpoint at", last_checkpoint)
                 ])
@@ -1227,190 +1264,6 @@ module MultivariateNormalCRP
         else
             return false
         end
-    end
-
-    function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
-        fig = Figure()
-        ax = Axis(fig[1, 1])
-        plot!(ax, clusters, dims=dims, rev=rev, nb_clusters=nb_clusters, plot_kw...)
-        return fig
-    end
-
-    function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
-
-        @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
-
-        clusters = project_clusters(sort(clusters, by=length, rev=rev), dims)
-
-        if nb_clusters === nothing || nb_clusters < 0
-            nb_clusters = length(clusters)
-        end
-
-        for (cluster, i) in zip(clusters, 1:nb_clusters)
-            x = getindex.(clusters[i], dims[1])
-            y = getindex.(clusters[i], dims[2])
-            scatter!(ax, x, y, label="$(length(cluster))", color=Cycled(i), plot_kw...)
-        end
-        axislegend(ax)
-
-        return ax
-    end
-    
-    function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=true, nb_clusters=nothing, plot_kw...)
-        
-        @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
-
-        d = length(chain.hyperparams.mu)
-        
-        proj = dims_to_proj(dims, d)
-
-        return plot(chain, proj, burn=burn, rev=rev, nb_clusters=nb_clusters; plot_kw...)
-    end
-
-    function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=true, nb_clusters=nothing)
-        
-        @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
-        
-        N = length(chain)
-
-        if burn >= N
-            @error("Can't burn the whole chain, burn must be smaller than $N")
-        end
-    
-        map_idx = chain.map_idx - burn
-
-        map_marginals = project_clusters(realspace_clusters(Cluster, chain.map_clusters, chain.map_base2original), proj)
-        current_marginals = project_clusters(realspace_clusters(Cluster, chain.clusters, chain.base2original), proj)
-
-        basemap_marginals = project_clusters(chain.map_clusters, proj)
-        basecurrent_marginals = project_clusters(chain.clusters, proj)
-
-        function deco!(axis)
-            hidespines!(axis, :t, :r)
-            hidedecorations!(axis, grid=true, minorgrid=true, ticks=false, label=false, ticklabels=false)
-            return axis
-        end
-
-        if chain.hyperparams.nn === nothing
-            ysize = 1800
-        else
-            ysize = 2300
-        end
-
-        fig = Figure(size=(1200, ysize))
-
-        p_map_axis = Axis(fig[1:2, 1], title="MAP state ($(length(chain.map_clusters)) clusters)")
-        deco!(p_map_axis)
-        plot!(p_map_axis, map_marginals; rev=rev, nb_clusters=nb_clusters)
-        # axislegend(p_map_axis, framecolor=:white)
-
-        p_current_axis = Axis(fig[1:2, 2], title="Current state ($(length(chain.clusters)) clusters)")
-        deco!(p_current_axis)
-        plot!(p_current_axis, current_marginals; rev=rev, nb_clusters=nb_clusters)
-        # axislegend(p_current_axis, framecolor=:white)
-
-        p_basemap_axis = Axis(fig[3:4, 1], title="Base MAP state ($(length(chain.map_clusters)) clusters)")
-        deco!(p_basemap_axis)
-        plot!(p_basemap_axis, basemap_marginals; rev=rev, nb_clusters=nb_clusters)
-        # axislegend(p_basemap_axis, framecolor=:white)
-
-        p_basecurrent_axis = Axis(fig[3:4, 2], title="Base current state ($(length(chain.clusters)) clusters)")
-        deco!(p_basecurrent_axis)
-        plot!(p_basecurrent_axis, basecurrent_marginals; rev=rev, nb_clusters=nb_clusters)
-        # axislegend(p_basecurrent_axis, framecolor=:white)
-
-        lpc = logprob_chain(chain, burn)
-        logprob_axis = Axis(fig[5, 1], title="log probability chain", aspect=3)
-        deco!(logprob_axis)
-        lines!(logprob_axis, burn+1:N, lpc, label=nothing)
-        hlines!(logprob_axis, [chain.map_logprob], label=nothing, color=:green)
-        hlines!(logprob_axis, [maximum(chain.logprob_chain)], label=nothing, color=:black)
-        if map_idx > 0
-            vlines!(logprob_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(logprob_axis, framecolor=:white)
-
-        nbc = nbclusters_chain(chain, burn)
-        nbc_axis = Axis(fig[5, 2], title="#cluster chain", aspect=3)
-        deco!(nbc_axis)
-        lines!(nbc_axis, burn+1:N, nbc, label=nothing)
-        if map_idx > 0
-            vlines!(nbc_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(nbc_axis, framecolor=:white)
-        
-        lcc = largestcluster_chain(chain, burn)
-        lcc_axis = Axis(fig[6, 1], title="Largest cluster chain", aspect=3)
-        deco!(lcc_axis)
-        lines!(lcc_axis, burn+1:N, lcc, label=nothing)
-        if map_idx > 0
-            vlines!(lcc_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(lcc_axis, framecolor=:white)
-        
-        ac = alpha_chain(chain, burn)
-        alpha_axis = Axis(fig[6, 2], title="α chain", aspect=3)
-        deco!(alpha_axis)
-        lines!(alpha_axis, burn+1:N, ac, label=nothing)
-        if map_idx > 0
-            vlines!(alpha_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(alpha_axis, framecolor=:white)
-
-        muc = mu_chain(Matrix, chain, burn)
-        mu_axis = Axis(fig[7, 1], title="μ chain", aspect=3)
-        deco!(mu_axis)
-        for mucomponent in eachrow(muc)
-            lines!(mu_axis, burn+1:N, mucomponent, label=nothing)
-        end
-        if map_idx > 0
-            vlines!(mu_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(mu_axis, framecolor=:white)
-
-        lc = lambda_chain(chain, burn)
-        lambda_axis = Axis(fig[7, 2], title="λ chain", aspect=3)
-        deco!(lambda_axis)
-        lines!(lambda_axis, burn+1:N, lc, label=nothing)
-        if map_idx > 0
-            vlines!(lambda_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(lambda_axis, framecolor=:white)
-
-        pc = psi_chain(Matrix, chain, burn)
-        psi_axis = Axis(fig[8, 1], title="Ψ chain", aspect=3)
-        deco!(psi_axis)
-        for psicomponent in eachrow(pc)
-            lines!(psi_axis, burn+1:N, psicomponent, label=nothing)
-        end
-        if map_idx > 0
-            vlines!(psi_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(psi_axis, framecolor=:white)
-        
-        nc = nu_chain(chain, burn)
-        nu_axis = Axis(fig[8, 2], title="ν chain", aspect=3)
-        deco!(nu_axis)
-        lines!(nu_axis, burn+1:N, nc, label=nothing)
-        if map_idx > 0
-            vlines!(nu_axis, [map_idx], label=nothing, color=:black)
-        end
-        # axislegend(nu_axis, framecolor=:white)
-
-        if chain.hyperparams.nn !== nothing
-            nnc = nn_chain(Matrix, chain, burn)
-            nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network chain")
-            deco!(nn_axis)
-            for p in eachrow(nnc)
-                lines!(nn_axis, burn+1:N, collect(p), label=nothing)
-            end
-            if map_idx > 0
-                vlines!(nn_axis, [map_idx], label=nothing, color=:black)
-            end
-            # axislegend(nn_axis, framecolor=:white)
-        end
-
-        return fig
     end
 
     function eigen_mode(cluster::Cluster, hyperparams::MNCRPHyperparams)

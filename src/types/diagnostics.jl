@@ -28,6 +28,9 @@ mutable struct Diagnostics
     amwg_nbbatches::Int64
     amwg_logscales::Vector{Float64}
 
+    am_N::Vector{Float64}
+    am_NN::Matrix{Float64}
+
 end
 
 function acceptance_rates(d::Diagnostics)
@@ -79,7 +82,9 @@ function Diagnostics(d; nn_params=nothing)
         0, 0,                             # merge
         zeros(Int64, nn_D), zeros(Int64, nn_D), # ffjord nn 
         0,                                # amwg_nbbatches
-        zeros(D + nn_D)                   # amwg_logscales
+        zeros(D + nn_D),                  # amwg_logscales
+        zeros(nn_D),
+        zeros(nn_D, nn_D)
         )
 end
 

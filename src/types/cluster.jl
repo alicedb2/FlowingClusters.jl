@@ -265,13 +265,16 @@ function project_clusters(clusters::Vector{Cluster}, dims::Vector{Int64})
     return project_clusters(clusters, dims_to_proj(dims, d))
 end
 
-function elements(clusters::Vector{Cluster})
+function elements(::Type{Vector}, clusters::Vector{Cluster})
     return Vector{Float64}[x for cluster in clusters for x in cluster]
 end
 
-function elements(cluster::Cluster)
-    return collect(cluster.elements)
-end
+elements(::Type{Matrix}, clusters::Vector{Cluster}) = reduce(hcat, elements(Vector, clusters))
+elements(clusters::Vector{Cluster}) = elements(Vector, clusters)
+
+elements(::Type{Vector}, cluster::Cluster) = collect(cluster.elements)
+elements(::Type{Matrix}, cluster::Cluster) = reduce(hcat, elements(Vector, cluster), init=zeros(Float64, size(cluster.sum_x, 1), 0))
+elements(cluster::Cluster) = elements(Vector, cluster)
 
 function first(cluster::Cluster)
     return first(cluster.elements)
