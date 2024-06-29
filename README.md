@@ -8,7 +8,7 @@ The generative model in the base space consists of a non-parametric Chinese Rest
 \alpha & & \quad\sim\quad & \sqrt{(\psi(\alpha + N) - \psi(\alpha))/\alpha + \psi'(\alpha +N) - \psi'(\alpha)}, &\qquad N\quad d-\text{dimensional data points},\\
 \mu_0 & & \quad\sim\quad & 1, & \\
 \lambda_0 & & \quad\sim\quad & 1/\lambda_0, & \\
-\Psi_0 & & \quad\sim\quad & \left\vert\Psi_0\right\vert^{-d}
+\Psi_0 & & \quad\sim\quad & \left\vert\Psi_0\right\vert^{-d} & \\
 \nu_0 & & \quad\sim\quad & \sqrt{\sum_{i=1}^d \psi'(nu_0/2 + (1 - i)/2)}, & \\
 \pi~\vert~ & \alpha & \quad\sim\quad & \quad \text{CRP}(\alpha), & \\
 \mu_\omega, \Sigma_\omega~\vert~ & \pi,\mu_0, \lambda_0, \Psi_0, \nu_0 & \quad\sim\quad & \text{NIW}(\mu_0, \lambda_0, \Psi_0, \nu_0), & \qquad \omega\in\pi,\\
