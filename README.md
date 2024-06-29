@@ -1,4 +1,4 @@
-# MultivariateNormalCRP
+# FlowingClusters
 
 ![Example of chain](mvcrp.png)
 Figure. Example of a chain with synthetic data. An approximate MAP state is shown on the top-right.
