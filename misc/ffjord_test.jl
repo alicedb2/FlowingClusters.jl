@@ -21,26 +21,14 @@ end
 include("misc/ebird.jl")
 
 presence_chain_ = MNCRPChain(train_presences, chain_samples=200)
-advance_chain!(presence_chain_, 2000; nb_splitmerge=50, nb_hyperparams=1, attempt_map=true)
+advance_chain!(presence_chain_, 2000; nb_splitmerge=100, nb_hyperparams=2, attempt_map=true, sample_every=:autocov)
 
 nn2d = Chain(
-        # Dense(2, 5, softsign, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(5, 5, softsign, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(5, 2, softsign, init_bias=zeros32, init_weight=identity_init(gain=0.0)),
-        # Dense(5, 2, softsign, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(2, 4, asinh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(4, 4, asinh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(4, 4, asinh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(4, 2, asinh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        Dense(2, 4, sqrttanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        Dense(4, 4, sqrttanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(4, 2, sqrttanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(4, 2, x->abs(x)*sqrttanh(x), init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        Dense(4, 2, celu, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        # Dense(4, 2, x->x + sqrttanh(x), init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
+        Dense(2, 16, tanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
+        Dense(16, 2, tanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
     )
-presence_chain = MNCRPChain(train_presences, ffjord_nn=nn2d)
-advance_chain!(presence_chain, 2500; nb_splitmerge=50, nb_hyperparams=1, ffjord_sampler=:am, attempt_map=true)
+presence_chain = MNCRPChain(train_presences, ffjord_nn=nn2d, chain_samples=200)
+advance_chain!(presence_chain, 5000; nb_splitmerge=100, nb_hyperparams=1, ffjord_sampler=:am, attempt_map=true, sample_every=:autocov)
 
 
 nn3d = Chain(
@@ -61,6 +49,7 @@ advance_chain!(presence_chain3, 1000; nb_splitmerge=100, nb_hyperparams=1,
 
 ffjord_mdl = FFJORD(presence_chain.hyperparams.nn, (0.0f0, 1.0f0), (2,), Tsit5(), ad=AutoForwardDiff())
 ps, st = presence_chain.map_hyperparams.nn_params, presence_chain.map_hyperparams.nn_state
+# ps, st = presence_chain.hyperparams.nn_params, presence_chain.hyperparams.nn_state
 # dims = [1, 2, 3]
 # for z in LinRange(-3, 3, 14)
     probgridys = zeros(2, 0)
