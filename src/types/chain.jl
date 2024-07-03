@@ -5,18 +5,19 @@ mutable struct MNCRPChain
     clusters::Vector{Cluster}
     # Current value of hyperparameters
     hyperparams::MNCRPHyperparams
-    # Map from base data (ffjord) to original data
+    # Map from base data (ffjord) to original unique data
     base2original::Dict{Vector{Float64}, Vector{Float64}}
 
     # Some chains of interests
-    nbclusters_chain::Vector{Int64}
-    largestcluster_chain::Vector{Int64}
     hyperparams_chain::Vector{MNCRPHyperparams}
     logprob_chain::Vector{Float64}
+    nbclusters_chain::Vector{Int64}
+    largestcluster_chain::Vector{Int64}
 
     clusters_samples::CircularBuffer{Vector{Cluster}}
     hyperparams_samples::CircularBuffer{MNCRPHyperparams}
     base2original_samples::CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}
+    samples_idx::CircularBuffer{Int64}
 
     # Maximum a-posteriori state and location
     map_clusters::Vector{Cluster}
@@ -29,16 +30,23 @@ end
 
 function Base.show(io::IO, chain::MNCRPChain)
     println(io, "MNCRPchain")
-    println(io, "         dimensions: $(length(chain.hyperparams.mu))")
-    println(io, "          #elements: $(sum(length.(chain.clusters)))")
-    println(io, "       chain length: $(length(chain))")
-    println(io, "  current #clusters: $(length(chain.clusters))")
-    println(io, "    current logprob: $(round(last(chain.logprob_chain), digits=2)) (best $(round(maximum(chain.logprob_chain), digits=2)))")
-    println(io, "   nb chain samples: $(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer))")
-    println(io)
-    println(io, "        last MAP at: $(chain.map_idx)")
-    println(io, "   #clusters in MAP: $(length(chain.map_clusters))")
-      print(io, "        MAP logprob: $(round(chain.map_logprob, digits=2))")
+    println(io, "                     dimensions: $(dimension(chain.hyperparams))")
+    println(io, "                      #elements: $(sum(length.(chain.clusters)))")
+    println(io, "                   chain length: $(length(chain))")
+    conv = length(chain) > 40 ? ess_rhat(largestcluster_chain(chain)[div(end, 2):end]) : (ess=0.0, rhat=0.0)
+    println(io, " convergence largest (burn 50%): ess=$(round(conv.ess, digits=1)) rhat=$(round(conv.rhat, digits=3))")
+    println(io, "              current #clusters: $(length(chain.clusters))")
+    println(io, "                current logprob: $(round(last(chain.logprob_chain), digits=2)) (best $(round(maximum(chain.logprob_chain), digits=2)))")
+    if length(chain.samples_idx) > 20
+        samples_convergence = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples])
+    else
+        samples_convergence = (ess=NaN, rhat=NaN)
+    end
+    println(io, "nb samples (oldest latest) conv: $(length(chain.clusters_samples))/$(length(chain.clusters_samples.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1) $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1)) ess=$(round(samples_convergence.ess, digits=1)) rhat=$(round(samples_convergence.rhat, digits=3))")
+    println(io, "                    last MAP at: $(chain.map_idx)")
+    println(io, "               #clusters in MAP: $(length(chain.map_clusters))")
+    print(io,   "                    MAP logprob: $(round(chain.map_logprob, digits=2))")
+    chain.hyperparams.nn !== nothing ? println(io, " (minus nn $(round(chain.map_logprob - nn_prior(chain.hyperparams.nn, similar(chain.hyperparams.nn_params) .= 0.0),digits=2)))") : println(io)
 end
 
 function MNCRPChain(filename::AbstractString)
@@ -71,46 +79,45 @@ function MNCRPChain(
     clusters_samples = CircularBuffer{Vector{Cluster}}(chain_samples)
     hyperparams_samples = CircularBuffer{MNCRPHyperparams}(chain_samples)
     base2original_samples = CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}(chain_samples)
-
+    samples_idx = CircularBuffer{Int64}(chain_samples)
     
     # Keep unique observations only
-    data = Set{Vector{Float64}}(deepcopy(data))
-    println("    Loaded $(length(data)) unique data points into chain")
-    original_data = collect(data)
+    unique_data = collect(Set{Vector{Float64}}(deepcopy(data)))
+    println("    Loaded $(length(unique_data)) unique data points into chain (found $(length(data) - length(unique_data)) duplicates)")
 
     if ffjord_nn !== nothing
-        original_matdata = reduce(hcat, original_data)
+        unique_matdata = reduce(hcat, unique_data)
         ffjord_model = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (d,), Tsit5(), ad=AutoForwardDiff())
-        ret, _ = ffjord_model(original_matdata, hyperparams.nn_params, hyperparams.nn_state)
-        data = collect.(eachcol(ret.z))
+        ret, _ = ffjord_model(unique_matdata, hyperparams.nn_params, hyperparams.nn_state)
+        base_data = collect.(eachcol(ret.z))
+    else
+        base_data = deepcopy(unique_data)
     end
 
-    # Data should still be ordered correctly
-    base2original = Dict{Vector{Float64}, Vector{Float64}}(data .=> original_data)
+    # data and original_data are still aligned
+    base2original = Dict{Vector{Float64}, Vector{Float64}}(base_data .=> unique_data)
 
     chain = MNCRPChain(
         [], hyperparams, base2original, # current state of the chain
         [], [], [], [],                 # chains of interest
-        clusters_samples, hyperparams_samples, base2original_samples, # MCMC samples of states
+        clusters_samples, hyperparams_samples, base2original_samples, samples_idx, # MCMC samples of states
         [], deepcopy(hyperparams), deepcopy(base2original), # MAP clusters, MAP hyperparams, MAP base2original
         -Inf, 1 # MAP logprob, MAP index
         )
 
-    # chain.original_data = Dict{Vector{Float64}, Vector{<:Real}}(k => v for (k, v) in zip(data, original_data))
-
     println("    Initializing clusters...")
     if strategy == :hot
         ##### 1st initialization method: fullseq
-        chain.clusters = [Cluster(data)]
+        chain.clusters = [Cluster(base_data)]
         for i in 1:10
             advance_gibbs!(chain.clusters, chain.hyperparams, temperature=1.2)
         end
     elseif strategy == :N
-        chain.clusters = [Cluster([datum]) for datum in data]
+        chain.clusters = [Cluster([datum]) for datum in base_data]
     elseif strategy == :1
-        chain.clusters = [Cluster(data)]
+        chain.clusters = [Cluster(base_data)]
     elseif strategy == :sequential
-        for element in data
+        for element in base_data
             advance_gibbs!(element, chain.clusters, chain.hyperparams)
         end
     end
@@ -175,6 +182,8 @@ function burn!(chain::MNCRPChain, n::Int64=0; burn_map=true)
         @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
     end
 
+    oldlen = length(chain)
+
     if n > 0
 
         chain.logprob_chain = chain.logprob_chain[n+1:end]
@@ -191,6 +200,7 @@ function burn!(chain::MNCRPChain, n::Int64=0; burn_map=true)
         else
             chain.map_idx -= n
         end
+
     end
 
     return chain

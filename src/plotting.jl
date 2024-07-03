@@ -1,11 +1,11 @@
-function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
+function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=true, nb_clusters=nothing, plot_kw...)
     fig = Figure()
     ax = Axis(fig[1, 1])
     plot!(ax, clusters, dims=dims, rev=rev, nb_clusters=nb_clusters, plot_kw...)
     return fig
 end
 
-function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
+function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=true, nb_clusters=nothing, plot_kw...)
 
     @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 

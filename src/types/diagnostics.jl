@@ -28,6 +28,7 @@ mutable struct Diagnostics
     amwg_nbbatches::Int64
     amwg_logscales::Vector{Float64}
 
+    am_L::Int64
     am_N::Vector{Float64}
     am_NN::Matrix{Float64}
 
@@ -83,8 +84,7 @@ function Diagnostics(d; nn_params=nothing)
         zeros(Int64, nn_D), zeros(Int64, nn_D), # ffjord nn 
         0,                                # amwg_nbbatches
         zeros(D + nn_D),                  # amwg_logscales
-        zeros(nn_D),
-        zeros(nn_D, nn_D)
+        0, zeros(nn_D), zeros(nn_D, nn_D) # am sigma
         )
 end
 

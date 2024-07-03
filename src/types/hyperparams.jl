@@ -26,13 +26,13 @@ function Base.show(io::IO, h::MNCRPHyperparams)
     print(io, str)
 end
 
-function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=ffjord_nn)
+function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=nothing)
     d = size(mu, 1)
 
     if ffjord_nn !== nothing
         @assert d == ffjord_nn[1].in_dims == ffjord_nn[end].out_dims
         nn_params, nn_state = Lux.setup(Xoshiro(), ffjord_nn)
-        nn_params = ComponentArray(nn_params)
+        nn_params = ComponentArray(nn_params) 
         nn_state = (model=nn_state, regularize=false, monte_carlo=true)
     else
         nn_params = nothing
@@ -42,7 +42,7 @@ function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=ffjord
     return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d, nn_params=nn_params), ffjord_nn, nn_params, nn_state)
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64; ffjord_nn=ffjord_nn)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64; ffjord_nn=nothing)
     d = size(mu, 1)
     flatL_d = div(d * (d + 1), 2)
     if size(flatL, 1) != flatL_d
