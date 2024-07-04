@@ -3,7 +3,7 @@ using DataFrames: DataFrame, DataFrameRow
 # using CSV
 
 # function GBIFRecord(row::DataFrameRow)
-    
+
 #     row = Dict(names(row) .=> values(row))
 
 #     levels = ["kingdom", "phylum", "class", "order", "family", "genus", "species"]
@@ -17,7 +17,7 @@ using DataFrames: DataFrame, DataFrameRow
 #     push!(row, "issues" => ismissing(issues) ? String[] : split(issues, ";"))
 
 #     return GBIFRecord(row)
-    
+
 # end
 
 # function GBIFRecords(dataframe::DataFrame)
@@ -53,45 +53,44 @@ using DataFrames: DataFrame, DataFrameRow
 # end
 
 
-function performance_scores(scores_at_presences, scores_at_absences; threshold=nothing)
+function performance_statistics(scores_at_presences, scores_at_absences; threshold=nothing)
     if threshold !== nothing
-        @assert 0.0 <= threshold <= 1.0
-
         # Scores of 1 always mean a presence,
         # so an absence with a score of 1 means a false positive
         scores_at_presences = scores_at_presences .>= threshold
         scores_at_absences = scores_at_absences .>= threshold
     end
-    
+
     tp = sum(scores_at_presences)
     fn = sum(1 .- scores_at_presences)
-    
+
     # absence with a score towards 0, therefore 1 - score -> 1
     # is a true negative
     tn = sum(1 .- scores_at_absences)
     fp = sum(scores_at_absences) # absence with score towards 1 is a false positive
-    
+
     sensitivity = tp/(tp + fn)
     specificity = tn/(tn + fp)
-    MCC = (tp * tn - fp * fn)/sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    MCC = (tp * tn - fp * fn) / sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
     J = sensitivity + specificity - 1
     kappa = 2 * (tp * tn - fn * fp)/((tp + fp) * (fp + tn) + (tp + fn) * (fn + tn))
     ppv = tp / (tp + fp)
     npv = tn / (tn + fn)
-    
-    return (; MCC, J, kappa, 
-        sensitivity, specificity, 
-        ppv, npv, 
-        tp, fn, tn, fp,
-        )
-    
+
+    return (;
+            MCC, J, kappa,
+            sensitivity, specificity,
+            ppv, npv,
+            tp, fn, tn, fp,
+            )
+
 end
 
 
 function drawNIW(
-    mu::AbstractVector{Float64}, 
-    lambda::Float64, 
-    psi::AbstractMatrix{Float64}, 
+    mu::AbstractVector{Float64},
+    lambda::Float64,
+    psi::AbstractMatrix{Float64},
     nu::Float64)::Tuple{Vector{Float64}, Matrix{Float64}}
 
     invWish = InverseWishart(nu, psi)
@@ -103,10 +102,31 @@ function drawNIW(
     return mu, sigma
 end
 
+function best_score_threshold(scores_at_presences, scores_at_absences; statistic=:J, nbsteps=1000)
+    
+    thresholds = LinRange(0.0, 1.0, nbsteps)
+    best_score = -Inf
+    best_thresh = 0.0
+
+    statistic in [:J, :MCC, :kappa] || throw(ArgumentError("perfscore must be :J (Youden's J), :MCC (Matthew's correlation coefficient), or :kappa (Cohen's kappa)"))
+    
+    for thresh in thresholds
+        perfstats = performance_statistics(scores_at_presences, scores_at_absences, threshold=thresh)
+        if perfstats[statistic] >= best_score
+            best_score = perfstats[statistic]
+            best_thresh = thresh
+        end
+    end
+
+    return best_thresh
+
+end
+
+
 sqrtsigmoid(x::T; a=1/2) where {T} = T(1/2) + T(a) * x / sqrt(T(1) + T(a)^2 * x^2) / T(2)
 sqrttanh(x::T) where {T} = T(2) * sqrtsigmoid(x, a=1) - T(1)
 sqrttanhgrow(x) = x + sqrttanh(x)
-    
+
 function chunkslices(sizes)
     boundaries = cumsum(vcat(1, sizes))
     return [boundaries[i]:boundaries[i+1]-1 for i in 1:length(sizes)]
