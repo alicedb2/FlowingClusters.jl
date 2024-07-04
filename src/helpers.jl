@@ -116,3 +116,46 @@ function chunk(data::T, sizes) where {T}
     sum(sizes) <= size(data, ndims(data)) || throw(ArgumentError("Sum of sizes ($(sum(sizes))) must be less than or equal to last dimension ($(size(data, ndims(data))))"))
     return [T(selectdim(data, ndims(data), slice)) for slice in chunkslices(sizes)]
 end
+
+# Quick and dirty but faster logdet
+# for (assumed) positive-definite matrix
+function logdetpsd(A::AbstractMatrix{Float64})
+    chol = cholesky(Symmetric(A), check=false)
+    if issuccess(chol)
+        # marginally faster than
+        # 2 * sum(log.(diag(chol.U)))
+        acc = 0.0
+        for i in 1:size(A, 1)
+            acc += log(chol.U[i, i])
+        end
+        return 2 * acc
+    else
+        return -Inf
+    end
+end
+
+function logdetflatLL(flatL::Vector{Float64})
+    acc = 0.0
+    i = 1
+    delta = 2
+    while i <= length(flatL)
+        acc += log(flatL[i])
+        i += delta
+        delta += 1
+    end
+    return 2 * acc
+end
+
+
+function freedmandiaconis(x::AbstractArray)
+    n = length(x)
+    return 2 * iqr(x) / length(n)^(1/3)
+end
+
+function doane(x::AbstractArray)
+    n = length(x)
+    skw = skewness(x)
+    sg1 = sqrt(6 * (n - 2) / (n + 1) / (n + 3))
+    return 1 + log2(n) + log2(1 + abs(skw) / sg1)
+end
+
