@@ -77,7 +77,8 @@ module FlowingClusters
     export bioclim_predictor
 
     include("helpers.jl")
-    export performance_scores, drawNIW
+    export performance_statistics, best_score_threshold
+    export drawNIW
     export sqrtsigmoid, sqrttanh, sqrttanhgrow
     export chunk
     export logdetpsd, logdetflatLL
@@ -463,22 +464,24 @@ module FlowingClusters
             if sample_every !== nothing
                 if sample_every === :autocov
                     if length(chain) > 200
-                        convergence_burnthird = ess_rhat(largestcluster_chain(chain)[div(end, 3):end])
+                        convergence_burnthird = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
                         latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
                         curr_idx = length(chain)
-                        sample_eta = floor(Int64, latest_sample_idx + 2 * div(curr_idx, 3) / convergence_burnthird.ess + 1 - curr_idx)
-                        if curr_idx - latest_sample_idx > 2 * div(curr_idx, 3) / convergence_burnthird.ess
+                        sample_eta = floor(Int64, latest_sample_idx + 2 * div(curr_idx, 2) / convergence_burnthird.ess + 1 - curr_idx)
+                        if curr_idx - latest_sample_idx > 2 * div(curr_idx, 2) / convergence_burnthird.ess
                             push!(chain.clusters_samples, deepcopy(chain.clusters))
                             push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
                             push!(chain.base2original_samples, deepcopy(chain.base2original))
                             push!(chain.samples_idx, curr_idx)
                         end
 
-                        while chain.samples_idx[begin] < div(curr_idx, 3)
-                            popfirst!(chain.clusters_samples)
-                            popfirst!(chain.hyperparams_samples)
-                            popfirst!(chain.base2original_samples)
-                            popfirst!(chain.samples_idx)
+                        sample_ess = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]).ess
+                        while 1.5 * sample_ess < length(chain.samples_idx)
+                                popfirst!(chain.clusters_samples)
+                                popfirst!(chain.hyperparams_samples)
+                                popfirst!(chain.base2original_samples)
+                                popfirst!(chain.samples_idx)
+                                sample_ess = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]).ess
                         end
                     end
                 elseif sample_every >= 1
@@ -503,7 +506,7 @@ module FlowingClusters
 
 
             if length(chain) > 200
-                largestcluster_convergence = ess_rhat(largestcluster_chain(chain)[div(end, 3):end])
+                largestcluster_convergence = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
             else
                 largestcluster_convergence = (ess=0, rhat=0)
             end
@@ -519,8 +522,8 @@ module FlowingClusters
                 showvalues=[
                 (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps === nothing ? Inf : nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
                 (:"chain length", "$(length(chain))"),
-                (:"conv largestcluster chain (burn 33%)", "ess=$(largestcluster_convergence.ess > 0 ? round(largestcluster_convergence.ess, digits=1) : "wait"), rhat=$(largestcluster_convergence.rhat > 0 ? round(largestcluster_convergence.rhat, digits=3) : "wait")"),
-                (:"#chain samples (trim, oldest, latest, eta) convergence", "$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(div(length(chain), 3)), $(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait")"),
+                (:"conv largestcluster chain (burn 50%)", "ess=$(largestcluster_convergence.ess > 0 ? round(largestcluster_convergence.ess, digits=1) : "wait"), rhat=$(largestcluster_convergence.rhat > 0 ? round(largestcluster_convergence.rhat, digits=3) : "wait")"),
+                (:"#chain samples (oldest, latest, eta) convergence", "$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/1.5, digits=1) : "wait"))"),
                 (:"logprob (max, q95, max minus nn)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)), $(round(maximum(chain.logprob_chain) - delta_minusnn, digits=1)))"),
                 (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
                 (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),

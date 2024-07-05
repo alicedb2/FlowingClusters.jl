@@ -34,7 +34,7 @@ function Base.show(io::IO, chain::MNCRPChain)
     println(io, "                      #elements: $(sum(length.(chain.clusters)))")
     println(io, "                   chain length: $(length(chain))")
     conv = length(chain) > 30 ? ess_rhat(largestcluster_chain(chain)[div(end, 3):end]) : (ess=0.0, rhat=0.0)
-    println(io, " convergence largest (burn 33%): ess=$(round(conv.ess, digits=1)) rhat=$(round(conv.rhat, digits=3))")
+    println(io, " convergence largest (burn 50%): ess=$(round(conv.ess, digits=1)) rhat=$(round(conv.rhat, digits=3))")
     println(io, "              current #clusters: $(length(chain.clusters))")
     println(io, "                current logprob: $(round(last(chain.logprob_chain), digits=2)) (best $(round(maximum(chain.logprob_chain), digits=2)))")
     if length(chain.samples_idx) > 20
@@ -53,18 +53,18 @@ function MNCRPChain(filename::AbstractString)
     return JLD2.load(filename)["chain"]
 end
 
-function MNCRPChain(dataset::MNCRPDataset; chain_samples=200, strategy=:hot, ffjord_nn=nothing)
-    chain = MNCRPChain(dataset.data, chain_samples=chain_samples, strategy=strategy, ffjord_nn=ffjord_nn)
+function MNCRPChain(dataset::MNCRPDataset; nb_samples=200, strategy=:hot, ffjord_nn=nothing)
+    chain = MNCRPChain(dataset.data, nb_samples=nb_samples, strategy=strategy, ffjord_nn=ffjord_nn)
     return chain
 end
 
-function MNCRPChain(dataset::Matrix{Float64}; chain_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing)
-    return MNCRPChain(eachrow(dataset), chain_samples=chain_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
+function MNCRPChain(dataset::Matrix{Float64}; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing)
+    return MNCRPChain(eachrow(dataset), nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
 end
 
 function MNCRPChain(
     data::Vector{Vector{Float64}}; 
-    chain_samples=200, 
+    nb_samples=200, 
     strategy=:sequential, 
     optimize=false, 
     ffjord_nn=nothing)
@@ -76,10 +76,10 @@ function MNCRPChain(
     hyperparams = MNCRPHyperparams(d, ffjord_nn=ffjord_nn)
     hyperparams.alpha = 10.0 / log(length(data))
 
-    clusters_samples = CircularBuffer{Vector{Cluster}}(chain_samples)
-    hyperparams_samples = CircularBuffer{MNCRPHyperparams}(chain_samples)
-    base2original_samples = CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}(chain_samples)
-    samples_idx = CircularBuffer{Int64}(chain_samples)
+    clusters_samples = CircularBuffer{Vector{Cluster}}(nb_samples)
+    hyperparams_samples = CircularBuffer{MNCRPHyperparams}(nb_samples)
+    base2original_samples = CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}(nb_samples)
+    samples_idx = CircularBuffer{Int64}(nb_samples)
     
     # Keep unique observations only
     unique_data = collect(Set{Vector{Float64}}(deepcopy(data)))

@@ -1,15 +1,15 @@
-function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=true, nb_clusters=nothing, plot_kw...)
+function plot(clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
     fig = Figure()
     ax = Axis(fig[1, 1])
     plot!(ax, clusters, dims=dims, rev=rev, nb_clusters=nb_clusters, plot_kw...)
     return fig
 end
 
-function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=true, nb_clusters=nothing, plot_kw...)
+function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=false, nb_clusters=nothing, plot_kw...)
 
     @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
-    clusters = project_clusters(sort(clusters, by=length, rev=rev), dims)
+    clusters = project_clusters(sort(clusters, by=length, rev=!rev), dims)
 
     if nb_clusters === nothing || nb_clusters < 0
         nb_clusters = length(clusters)
@@ -25,7 +25,7 @@ function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=tr
     return ax
 end
 
-function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=true, nb_clusters=nothing, plot_kw...)
+function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=false, nb_clusters=nothing, plot_kw...)
     
     @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
@@ -36,7 +36,7 @@ function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=true, n
     return plot(chain, proj, burn=burn, rev=rev, nb_clusters=nb_clusters; plot_kw...)
 end
 
-function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=true, nb_clusters=nothing)
+function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_clusters=nothing)
     
     @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
     
