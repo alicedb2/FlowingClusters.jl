@@ -33,7 +33,7 @@ function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=nothin
         @assert d == ffjord_nn[1].in_dims == ffjord_nn[end].out_dims
         nn_params, nn_state = Lux.setup(Xoshiro(), ffjord_nn)
         nn_params = ComponentArray(nn_params) 
-        nn_state = (model=nn_state, regularize=false, monte_carlo=true)
+        nn_state = (model=nn_state, regularize=false, monte_carlo=false)
     else
         nn_params = nothing
         nn_state = nothing
