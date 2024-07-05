@@ -9,7 +9,7 @@ module FlowingClusters
     using SpecialFunctions: loggamma, polygamma, logbeta
     using Base.Iterators: cycle
     import Base.Iterators: flatten
-    using Makie
+    using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!, hidespines!, hidedecorations!
     import Makie: plot, plot!
     using JLD2, CodecBzip2
     using ProgressMeter: Progress, ProgressUnknown, next!
