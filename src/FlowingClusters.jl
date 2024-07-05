@@ -1,30 +1,37 @@
 module FlowingClusters
 
-    using Distributions: MvNormal, MvTDist, InverseWishart, Normal, Cauchy, Uniform, Exponential, Dirichlet, Multinomial, Beta, MixtureModel, Categorical, Distribution, logpdf, InverseGamma
     using Random: randperm, shuffle, shuffle!, seed!, Xoshiro
-    using StatsFuns: logsumexp, logmvgamma, logit, logistic
     using StatsBase
-    using LinearAlgebra: logdet, det, LowerTriangular, Symmetric, cholesky, diag, tr, diagm, inv, norm, eigen, svd, I, diagind, dot, issuccess
+    using StatsFuns: logsumexp, logmvgamma, logit, logistic
+    
+    using LinearAlgebra: logdet, det, LowerTriangular, Symmetric,
+                         cholesky, diag, tr, diagm, inv, norm, 
+                         eigen, svd, I, diagind, dot, issuccess
+
+    using Distributions: MvNormal, MvTDist, InverseWishart, Normal, 
+                         Cauchy, Uniform, Exponential, Dirichlet, 
+                         Multinomial, Beta, MixtureModel, Categorical, 
+                         Distribution, logpdf, InverseGamma
     using PDMats
     using SpecialFunctions: loggamma, polygamma, logbeta
-    using Base.Iterators: cycle
-    import Base.Iterators: flatten
-    using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!, hidespines!, hidedecorations!
-    import Makie: plot, plot!
+
+    using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!, 
+                 hidespines!, hidedecorations!
+
     using JLD2, CodecBzip2
     using ProgressMeter: Progress, ProgressUnknown, next!
-    using FiniteDiff: finite_difference_hessian
     using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
-    import MCMCDiagnosticTools: ess_rhat
 
     using DiffEqFlux
     using ComponentArrays: ComponentArray, valkeys
     using DifferentialEquations
-    import Optimization, OptimizationOptimisers
-
+        
     import Base: pop!, push!, length, isempty, union, delete!, empty!
     import Base: iterate, deepcopy, copy, sort, in, first
+    import MCMCDiagnosticTools: ess_rhat
+    import Makie: plot, plot!
+    import Base.Iterators: flatten
 
     export updated_niw_hyperparams, updated_mvstudent_params
 
@@ -82,8 +89,6 @@ module FlowingClusters
     export chunk
     export logdetpsd, logdetflatLL
     export freedmandiaconis, doane
-
-    include("MNDPVariational.jl")
 
     function updated_niw_hyperparams(clusters::Cluster, hyperparams::MNCRPHyperparams)::Tuple{Vector{Float64}, Float64, Matrix{Float64}, Float64}
         return updated_niw_hyperparams(clusters, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
