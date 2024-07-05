@@ -53,13 +53,13 @@ function MNCRPChain(filename::AbstractString)
     return JLD2.load(filename)["chain"]
 end
 
-function MNCRPChain(dataset::MNCRPDataset; nb_samples=200, strategy=:hot, ffjord_nn=nothing)
-    chain = MNCRPChain(dataset.data, nb_samples=nb_samples, strategy=strategy, ffjord_nn=ffjord_nn)
-    return chain
-end
+# function MNCRPChain(dataset::MNCRPDataset; nb_samples=200, strategy=:hot, ffjord_nn=nothing)
+#     chain = MNCRPChain(dataset.data, nb_samples=nb_samples, strategy=strategy, ffjord_nn=ffjord_nn)
+#     return chain
+# end
 
 function MNCRPChain(dataset::Matrix{Float64}; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing)
-    return MNCRPChain(eachrow(dataset), nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
+    return MNCRPChain(collect.(eachcol(dataset)), nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
 end
 
 function MNCRPChain(
