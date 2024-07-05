@@ -1,3 +1,9 @@
+function deco!(axis)
+    hidespines!(axis, :t, :r)
+    hidedecorations!(axis, grid=true, minorgrid=true, ticks=false, label=false, ticklabels=false)
+    return axis
+end
+
 nn, ps, st = (presence_chain.hyperparams.nn, 
               presence_chain.map_hyperparams.nn_params, 
               presence_chain.map_hyperparams.nn_state)
