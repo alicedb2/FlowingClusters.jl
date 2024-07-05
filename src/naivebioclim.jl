@@ -1,7 +1,6 @@
 module NaiveBIOCLIM
 
     using DataFrames: DataFrame
-    using SpeciesDistributionToolkit: SimpleSDMLayer
     using StatsBase: quantilerank
 
     export bioclim_predictor
