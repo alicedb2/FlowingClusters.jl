@@ -1,383 +1,97 @@
 module Dataset
-    using DataFrames: AbstractDataFrame, DataFrame, groupby, nrow
-    using CSV: File
-    using SpeciesDistributionToolkit: SimpleSDMLayer
-    import SpeciesDistributionToolkit: longitudes, latitudes
+    using DataFrames
+    using CSV
     using StatsBase: std, mean
-    import StatsBase: standardize
-    using Random: shuffle!, shuffle
-    using FlowingClusters: Cluster
+    import Random
 
-    import Base: show, split
+    export FCDataset
+    export presence, absence
 
-    export MNCRPDataset
-    export load_dataset, dataframe, original, longitudes, latitudes, standardize_with, standardize_with!, split, standardize!
-
-    mutable struct MNCRPDataset
-        dataframe::DataFrame
-        layers::Union{Nothing, Vector{<:SimpleSDMLayer}}
-        layernames::Vector{String}
-        longlatcols::Union{Nothing, Vector{Union{Symbol, String, Int}}}
-        data_zero::Vector{Float64}
-        data_scale::Vector{Float64}
-        unique_map::Union{Dict, Nothing}
-        data::Vector{Vector{Float64}}
+    mutable struct FCDataset
+        df::AbstractDataFrame
+        slices::Union{Nothing, Vector{UnitRange{Int64}}}
+        _zero::AbstractDataFrame
+        _scale::AbstractDataFrame
     end
 
-    function Base.show(io::IO, dataset::MNCRPDataset)
-        println(io, "          records: $(size(dataset.dataframe, 1))")
-        println(io, "   unique records: $(length(dataset.unique_map))")
-        println(io, "       predictors: $(length(dataset.layernames))")
-        println(io, "  predictor names: $(dataset.layernames)")
-    end
-
-
-    # """
-    #     load_dataset(dataframe::Union{DataFrame, AbstractString}, predictors::Vector{<:SimpleSDMLayer}; layernames=nothing, longlatcols=[:decimalLongitude, :decimalLatitude], perturb=false, delim="\\t", eps=1e-5)
-
-    # Load a dataset from a DataFrame `dataframe` (optionally a CSV filename) 
-    
-    # The dataframe only needs a longitude and a latitude column.
-    # Datapoints are generated from values returned by `SimpleSDMLayer` layers contained in `predictors`.
-    # Only points with unique predictor values are kept in the final `data` field. Use `pertub=true` to keep repeated/non-unique values.
-    # Data points with missing longitude and/or latitude or with predictor values containing one or more `nothing` are dropped.
-
-    # The optional keywords are:
-
-    # * `layernames`: list the predictor names that will be added as new columns to the dataframe saved into the dataset. Defaults to ["predictor1", "predictor2", ...].
-
-    # * `longlatcols`: specify longitude/latitude columns names. Can be a mix of symbols, strings, and indices. Defaults to [:decimalLongitude, :decimalLatitude].
-
-    # * `delim`: specify alternative column delimiter if loading from a CSV file. Defaults to "`\\t`".
-
-    # * `perturb`: perturb each predictor value by a small value < `eps`. This is an approximate way to allow repeats (e.g. when loading in MNCRP chain).
-
-    # """
-
-    function MNCRPDataset(dataframe::Union{AbstractDataFrame, AbstractString},
-                          predictorcols::Vector{String};
-                          delim="\t",
-                          standardize=false,
-                          perturb=false,
-                          eps=1e-6)
+    function FCDataset(df::AbstractDataFrame; splits=[1/3, 1/3, 1/3], shuffle=true, subsample=nothing, returncopy=true)
         
-        if typeof(dataframe) <: AbstractString
-            dataframe = DataFrame(File(dataframe, delim=delim))
+        if returncopy
+            df = copy(df)
+        end
+
+        if shuffle
+            df = Random.shuffle!(df)
+        end
+
+        if subsample isa Integer
+            df = df[1:subsample, :]
+        elseif subsample isa Float64
+            df = df[1:round(Int, subsample*nrow(df)), :]
+        end
+        
+        @assert all(splits .> 0)
+        bnds = cumsum(vcat(0, splits / sum(splits)))
+        slices = [round(Int, bnds[i]*nrow(df)+1):round(Int, bnds[i+1]*nrow(df)) for i in 1:length(splits)]
+
+        _zero = mapcols(mean, df)
+        _scale = mapcols(std, df)
+
+        return FCDataset(df, slices, _zero, _scale)
+
+    end
+
+    function FCDataset(csvfile::AbstractString; splits=[1/3, 1/3, 1/3], delim="\t", shuffle=true, subsample=nothing) 
+        return FCDataset(DataFrame(CSV.File(csvfile, delim=delim)), splits=splits, shuffle=shuffle, subsample=subsample, returncopy=false)
+    end
+
+    function Base.getindex(dataset::FCDataset, i::Int)
+        return dataset.df[dataset.slices[i], :]
+    end
+
+    function Base.getproperty(dataset::FCDataset, name::Symbol)
+        if name == :slices
+            return getfield(dataset, :slices)
+        elseif name === :df
+            return getfield(dataset, :df)
+        elseif name in propertynames(dataset.df)
+            return getproperty(dataset.df, name)
+        elseif name === :training
+            return FCDataset(dataset.df[dataset.slices[1], :], nothing, dataset._zero, dataset._scale)
+        elseif name === :validation
+            length(dataset.slices) < 3 && throw(ArgumentError("Dataset has less than 3 splits"))
+            return FCDataset(dataset.df[dataset.slices[2], :], nothing, dataset._zero, dataset._scale)
+        elseif name === :test
+            return FCDataset(dataset.df[dataset.slices[length(dataset.slices)], :], nothing, dataset._zero, dataset._scale)
+        elseif name === :presence
+            return presence(dataset)
+        elseif name === :absence
+            return absence(dataset)
+        elseif name === :standardize
+            return standardize(dataset)
         else
-            dataframe = copy(dataframe)
+            return getfield(dataset, name)
         end
-
-        @assert all(in.(predictorcols, Ref(names(dataframe))))
-        
-        valid_mask = [!any(x -> isnothing(x) || ismissing(x) || !isfinite(x), obs) for obs in eachrow(dataframe[!, predictorcols])]
-        if any(.!valid_mask)
-            println("Dropping $(sum(.!valid_mask)) invalid/incomplete observations")
-        end
-
-        dataframe = dataframe[valid_mask, :]
-        
-        if perturb
-            for i in 1:nrow(dataframe)
-                dataframe[i:i, predictorcols] .+= eps * (rand(1, length(predictorcols)) .- 0.5)
-            end
-        end
-        
-        unique_groups = groupby(dataframe, predictorcols)
-        unique_observations = Vector{Float64}[collect(first(group)[predictorcols]) for group in unique_groups]
-
-        if standardize
-            data_zero = mean(unique_observations)
-            data_scale = std(unique_observations)
-            unique_observations = [(x .- data_zero) ./ data_scale for x in unique_observations]
-        else
-            data_zero = zeros(length(first(unique_observations)))
-            data_scale = ones(length(data_zero))
-        end
-
-        unique_map = Dict(obs => group for (obs, group) in zip(unique_observations, unique_groups))
-
-        return MNCRPDataset(dataframe,
-                            nothing, 
-                            predictorcols[:],
-                            nothing,
-                            data_zero[:, 1], data_scale[:, 1],
-                            unique_map,
-                            unique_observations
-                            )
-
-
     end
 
-    function MNCRPDataset(dataframe::Union{AbstractDataFrame, AbstractString}, 
-                          layers::AbstractVector{<:SimpleSDMLayer};
-                          layernames=nothing,
-                          longlatcols=[:decimalLongitude, :decimalLatitude],
-                          delim="\t",
-                          standardize=false,
-                          perturb=false,
-                          eps=1e-6
-                          )
+    (dataset::FCDataset)(cols::Symbol...) = length(cols) == 1 ? dataset.df[:, cols[1]] : stack([dataset.df[:, col] for col in cols], dims=1)
+
+    presence(col::Symbol) = dataset -> FCDataset(dataset.df[Bool.(dataset.df[:, col]), :], dataset.slices, dataset._zero, dataset._scale)
+    presence(dataset::FCDataset) = col -> FCDataset(dataset.df[Bool.(dataset.df[:, col]), :], dataset.slices, dataset._zero, dataset._scale)
+    presence(dataset::FCDataset, name::Symbol) = presence(dataset)(name)
     
-        @assert length(longlatcols) == 2
-        @assert isnothing(layernames) || length(layers) == length(layernames)
-        
-        if typeof(longlatcols) == Tuple
-            longlatcols = collect(longlatcols)
-        end
+    absence(col::Symbol) = dataset -> FCDataset(dataset.df[.!Bool.(dataset.df[:, col]), :], dataset.slices, dataset._zero, dataset._scale)
+    absence(dataset::FCDataset) = col -> FCDataset(dataset.df[.!Bool.(dataset.df[:, col]), :], dataset.slices, dataset._zero, dataset._scale)
+    absence(dataset::FCDataset, name::Symbol) = absence(dataset)(name)
 
-        if typeof(dataframe) <: AbstractString
-            dataframe = DataFrame(File(dataframe, delim=delim))
-        else
-            dataframe = copy(dataframe)
-        end
+    standarize(col::Symbol) = dataset -> (dataset.df[:, col] .- dataset._zero[1, col]) ./ dataset._scale[1, col]
+    standardize(dataset::FCDataset) = (cols::Symbol...) -> length(cols) == 1 ? (dataset.df[:, cols[1]] .- dataset._zero[1, cols[1]]) ./ dataset._scale[1, cols[1]] : stack([(dataset.df[:, col] .- dataset._zero[1, col]) ./ dataset._scale[1, col] for col in cols], dims=1)
+    standardize(dataset::FCDataset, name::Symbol) = standardize(dataset)(name)
 
-        if isnothing(layernames)
-            layernames = ["predictor$i" for i in 1:length(layers)]
-        end
-
-        longc, latc = longlatcols
-
-        valid_mask = (.!isnothing.(dataframe[!, longc]) 
-                  .&& .!ismissing.(dataframe[!, longc])
-                  .&& .!isnothing.(dataframe[!, latc])
-                  .&& .!ismissing.(dataframe[!, latc]))
-
-        obspredvals = [valid_mask[k] ? [predictor[obs[longc], obs[latc]] for predictor in layers] : [nothing for _ in 1:length(layers)] for (k, obs) in enumerate(eachrow(dataframe))]
-
-        valid_mask = BitVector(valid_mask .&& map(x -> !any(isnothing.(x)), obspredvals))
-
-        predobsvals = Array{Union{Nothing, Float64}}(reduce(hcat, obspredvals))
-
-        dataframe = dataframe[valid_mask, :]
-        predobsvals = predobsvals[:, valid_mask]
-
-        for (predname, vals) in zip(layernames, eachrow(predobsvals))
-            vals = collect(vals)
-            if perturb
-                vals .+= eps * (rand(length(vals)) .- 0.5)
-            end
-            dataframe[!, predname] = vals
-        end
-        
-        unique_predclusters = groupby(dataframe, layernames)
-        unique_predvals = [collect(first(group)[layernames]) for group in unique_predclusters]
-        # standardize #
-        if standardize
-            data_zero = mean(unique_predvals)
-            data_scale = std(unique_predvals)
-            unique_predvals = [(x .- data_zero) ./ data_scale for x in unique_predvals]
-        else
-            data_zero = zeros(length(first(unique_predvals)))
-            data_scale = ones(length(data_zero))
-        end
-
-        ################
-
-        unique_map = Dict(val => group 
-                          for (val, group) in zip(unique_predvals, unique_predclusters))
-
-        # unique_map now contains a map between
-        # points in standardized environmental space to
-        # groups of original observations.
-        # Those points will be loaded onto the chain
-        
-        return MNCRPDataset(dataframe,
-                            layers[:], 
-                            layernames[:],
-                            longlatcols[:],
-                            data_zero[:, 1], data_scale[:, 1],
-                            unique_map,
-                            unique_predvals
-                            )
+    function Base.show(io::IO, dataset::FCDataset)
+        print(io, "FCDataset(")
+        Base.show(io, dataset.df)
+        print(io, ")")
     end
 
-
-    function MNCRPDataset(lonlats::NamedTuple, layers::Vector{<:SimpleSDMLayer})
-        @assert :longitudes in keys(lonlats) && :latitudes in keys(lonlats)
-        
-        dataset = MNCRPDataset(
-            DataFrame(Dict(:longitude => lonlats.longitudes[:], :latitude => lonlats.latitudes[:])),
-            layers[:],
-            longlatcols=[:longitude, :latitude]
-            )
-        
-        return dataset
-
-    end
-
-    """
-    `split(dataset::MNCRPDataset, n::Int=2; rescaletofirst=true)`
-
-    Randomly split a dataset `n`-ways.
-
-    Note: It splits the unique values of the predictors and not those (potentially non-unique) of the full dataframe.
-    
-    * `rescaletofirst=true (default)` insures that the rescaling is redone according to the first split and not simply a copy of the original. This should be `true` when splitting into training/validation/test datasets.
-
-    """
-    function Base.split(dataset::MNCRPDataset, n::Int=3)#; standardize_with_first=true)
-        n <= 1 && return dataset
-
-        datasets = MNCRPDataset[]
-        data = shuffle(dataset.data)
-        uv_splits = [data[i:n:end] for i in 1:n]
-
-        for i in 1:n
-            reduced_unique_map = Dict(x => dataset.unique_map[x] for x in uv_splits[i])
-            reduced_dataframe = reduce(vcat, (dataset.unique_map[x] for x in uv_splits[i]))
-            reduced_dataset = MNCRPDataset(reduced_dataframe,
-                                           isnothing(dataset.layers) ? nothing : copy(dataset.layers),
-                                           dataset.layernames[:],
-                                           isnothing(dataset.longlatcols) ? nothing : copy(dataset.longlatcols),
-                                           copy(dataset.data_zero), copy(dataset.data_scale),
-                                           reduced_unique_map,
-                                           uv_splits[i])
-            # reduced_dataframe = reduce(vcat, (dataset.unique_map[x] for x in uv_splits[i]))
-            # reduced_dataset = MNCRPDataset(reduced_dataframe,
-            #                                dataset.layers[:],
-            #                                dataset.layernames[:],
-            #                                dataset.longlatcols[:],
-                                           
-            #                               )
-                                          
-            # if i > 1 && standardize_with_first
-            #     standardize_with!(reduced_dataset, first(datasets))
-            # end
-            
-            push!(datasets, reduced_dataset)
-        end
-
-        return datasets
-    end
-
-
-    function dataframe(clusters::AbstractVector{Cluster}, dataset::MNCRPDataset; repeats=true)
-        return DataFrame[dataframe(cluster, dataset, repeats=repeats) for cluster in clusters]
-    end
-
-    function dataframe(element::Vector{Float64}, dataset::MNCRPDataset; repeats=true)
-        return first(dataframe(Vector{Float64}[element], dataset, repeats=repeats))
-    end
-
-    function dataframe(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; repeats=true)
-        if !repeats
-            return reduce(vcat, DataFrame.(first(dataset.unique_map[x]) for x in elements))
-        else
-            return reduce(vcat, (dataset.unique_map[x] for x in elements))
-        end
-    end
-
-    function original(element::Vector{Float64}, dataset::MNCRPDataset)
-        return collect(first(dataset.unique_map[element])[dataset.layernames])
-    end
-    
-    function original(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset)
-        return Vector{Float64}[original(element, dataset) for element in elements]
-    end
-
-    function original(clusters::AbstractVector{Cluster}, dataset::MNCRPDataset)
-        return [original(cluster, dataset) for cluster in clusters]
-    end
-
-    function longitudes(element::Vector{Float64}, dataset::MNCRPDataset; unique=false)
-        if unique
-            return first(dataset.unique_map[element])[dataset.longlatcols[1]]
-        else
-            return dataset.unique_map[element][:, dataset.longlatcols[1]]
-        end
-    end
-
-    function longitudes(elements::Union{Cluster, AbstractVector{Vector{Float64}}}, dataset::MNCRPDataset; unique=false, flatten=false)
-        longs = [longitudes(element, dataset, unique=unique) for element in elements]
-        if flatten
-            longs = reduce(vcat, longs)
-        end
-        return longs
-    end
-
-    function longitudes(dataset::MNCRPDataset; unique=false, flatten=false)
-        return longitudes(dataset.data, dataset, unique=unique, flatten=flatten)
-    end
-
-    function latitudes(element::Vector{Float64}, dataset::MNCRPDataset; unique=false)
-        if unique
-            return first(dataset.unique_map[element])[dataset.longlatcols[2]]
-        else
-            return dataset.unique_map[element][:, dataset.longlatcols[2]]
-        end
-    end
-
-    function latitudes(elements::Union{AbstractVector{Vector{Float64}}, Cluster}, dataset::MNCRPDataset; unique=false, flatten=false)
-        lats = [latitudes(element, dataset, unique=unique) for element in elements]
-        if flatten
-            lats = reduce(vcat, lats)
-        end
-
-        return lats
-    end
-
-    function latitudes(dataset::MNCRPDataset; unique=false, flatten=false)
-        return latitudes(dataset.data, dataset, unique=unique, flatten=flatten)
-    end
-
-    
-    function standardize_with(dataset::MNCRPDataset, standardize_with::MNCRPDataset)
-        restandardized_dataset = deepcopy(dataset)
-        return standardize_with!(restandardized_dataset, standardize_with)
-    end
-
-    """
-    `function standardize(element::Vector{Float64}, dataset::MNCRPDataset)`
-
-    Return standard score of `element` against mean and standard deviation already determined for `dataset`.
-    """
-    function standardize_with(element::Vector{Float64}, dataset::MNCRPDataset)
-        return (element .- dataset.data_zero) ./ dataset.data_scale
-    end
-    
-    
-    """
-    `    function standardize(elements::AbstractVector{Vector{Float64}}, dataset::MNCRPDataset)`
-
-    Return standard score of `elements` against mean and standard deviation already determined for `dataset`.
-    """
-    function standardize_with(elements::Vector{Vector{Float64}}, dataset::MNCRPDataset)
-        return standardize_with.(elements, Ref(dataset))
-    end
-
-    function standardize_with!(dataset::MNCRPDataset, standardize_with::MNCRPDataset)
-        
-        new_data_z = standardize_with.data_zero[:]
-        new_data_s = standardize_with.data_scale[:]
-        new_data = [((dataset.data_scale .* old_X + dataset.data_zero) .- new_data_z) ./ new_data_s for old_X in dataset.data]
-        dataset.unique_map = Dict(new_X => dataset.unique_map[old_X] for (old_X, new_X) in zip(dataset.data, new_data)) 
-        dataset.data_zero = new_data_z
-        dataset.data_scale = new_data_s
-        dataset.data = new_data
-        
-        return dataset
-
-    end
-
-    function standardize!(dataset::MNCRPDataset; with=nothing)
-        if with === nothing
-            data_zero = mean(dataset.data)
-            data_scale = std(dataset.data)
-            standardized_data = [(x - data_zero) ./ data_scale for x in dataset.data]
-            standardized_unique_map = Dict(new_X => dataset.unique_map[old_X] for (old_X, new_X) in zip(dataset.data, standardized_data)) 
-            dataset.data = standardized_data
-            dataset.unique_map = standardized_unique_map
-            dataset.data_zero = data_zero
-            dataset.data_scale = data_scale
-        elseif with isa MNCRPDataset
-            new_data_z = with.data_zero[:]
-            new_data_s = with.data_scale[:]
-            new_data = [((dataset.data_scale .* old_X + dataset.data_zero) .- new_data_z) ./ new_data_s for old_X in dataset.data]
-            dataset.unique_map = Dict(new_X => dataset.unique_map[old_X] for (old_X, new_X) in zip(dataset.data, new_data)) 
-            dataset.data_zero = new_data_z
-            dataset.data_scale = new_data_s
-            dataset.data = new_data
-        end
-        return dataset
-    end
 end

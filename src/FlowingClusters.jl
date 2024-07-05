@@ -12,7 +12,7 @@ module FlowingClusters
     using Makie
     import Makie: plot, plot!
     using JLD2, CodecBzip2
-    using ProgressMeter: Progress, ProgressUnknown
+    using ProgressMeter: Progress, ProgressUnknown, next!
     using FiniteDiff: finite_difference_hessian
     using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
@@ -62,8 +62,7 @@ module FlowingClusters
 
     include("types/dataset.jl")
     using .Dataset
-    export MNCRPDataset
-    export load_dataset, dataframe, original, longitudes, latitudes, standardize_with, standardize_with!, split, standardize!
+    export FCDataset
 
     include("types/chain.jl")
     export MNCRPChain
@@ -518,7 +517,7 @@ module FlowingClusters
             end
 
             if pretty_progress
-                ProgressMeter.next!(progbar;
+                next!(progbar;
                 showvalues=[
                 (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps === nothing ? Inf : nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
                 (:"chain length", "$(length(chain))"),
