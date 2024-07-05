@@ -47,13 +47,8 @@ module FlowingClusters
     export project_clusters, project_cluster, project_hyperparams, project_mu, project_psi
     export plot, plot!
 
-    # Geometric quantities
-    # export local_covprec, local_covariance, local_precision, local_covariance_summary
-    # export eigen_mode, importances, local_geometry, map_cluster_assignment_idx
-
     # Predictions
     export predictive_distribution, tail_probability, tail_probability_summary
-
 
     include("types/diagnostics.jl")
     export Diagnostics
