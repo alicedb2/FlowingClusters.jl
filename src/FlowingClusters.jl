@@ -107,22 +107,7 @@ module FlowingClusters
         nu::Float64
         )::Tuple{Vector{Float64}, Float64, Matrix{Float64}, Float64}
 
-        # @assert length(mu) == size(psi, 1) == size(psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
-
         if isempty(cluster)
-
-            # d = length(mu)
-
-            # @inbounds for j in 1:d
-            #     cluster.mu_c_volatile[j] = mu[j]
-            #     for i in 1:j
-            #         cluster.psi_c_volatile[i, j] = psi[i, j]
-            #         cluster.psi_c_volatile[j, i] = psi[i, j]
-            #     end
-            # end
-
-            # return (cluster.mu_c_volatile, lambda, cluster.psi_c_volatile, nu)
-
             return (mu, lambda, psi, nu)
         else
 
@@ -141,6 +126,7 @@ module FlowingClusters
                 # mu_c[i] = (lambda * mu[i] + n * mean_x[i]) / (lambda + n)
                 mu_c[i] = (lambda * mu[i] + cluster.sum_x[i]) / (lambda + n)
             end
+            # mu_c .= (lambda * mu .+ cluster.sum_x) ./ lambda_c
 
             @inbounds for j in 1:d
                 @inbounds for i in 1:j
@@ -151,6 +137,7 @@ module FlowingClusters
                     psi_c[j, i] = psi_c[i, j]
                 end
             end
+            # psi_c .= psi .+ cluster.sum_xx .+ lambda .* mu * mu' .- lambda_c .* mu_c * mu_c'
 
             return (mu_c, lambda_c, psi_c, nu_c)
 
@@ -463,11 +450,11 @@ module FlowingClusters
             if sample_every !== nothing
                 if sample_every === :autocov
                     if length(chain) > 200
-                        convergence_burnthird = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
+                        convergence_burnt = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
                         latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
                         curr_idx = length(chain)
-                        sample_eta = floor(Int64, latest_sample_idx + 2 * div(curr_idx, 2) / convergence_burnthird.ess + 1 - curr_idx)
-                        if curr_idx - latest_sample_idx > 2 * div(curr_idx, 2) / convergence_burnthird.ess
+                        sample_eta = floor(Int64, latest_sample_idx + 2 * div(curr_idx, 2) / convergence_burnt.ess + 1 - curr_idx)
+                        if curr_idx - latest_sample_idx > 2 * div(curr_idx, 2) / convergence_burnt.ess
                             push!(chain.clusters_samples, deepcopy(chain.clusters))
                             push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
                             push!(chain.base2original_samples, deepcopy(chain.base2original))
@@ -569,7 +556,6 @@ module FlowingClusters
         log_weights = zeros(length(clusters))
         for (i, cluster) in enumerate(clusters)
             log_weights[i] = log_cluster_weight(element, cluster, alpha, mu, lambda, psi, nu)
-
         end
 
         if temperature > 0.0

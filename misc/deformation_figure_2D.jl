@@ -8,7 +8,7 @@ nn, ps, st = (presence_chain.hyperparams.nn,
               presence_chain.map_hyperparams.nn_params, 
               presence_chain.map_hyperparams.nn_state)
 
-ffjord_mdl = FFJORD(nn, (0.0f0, 1.0f0), (2,), Tsit5(), ad=AutoForwardDiff())
+ffjord_mdl = FFJORD(nn, (0.0f0, 1.0f0), (dimension(presence_chain.hyperparams),), Tsit5(), ad=AutoForwardDiff())
 
 basexlims = minimum(getindex.(keys(presence_chain.map_base2original), 1)), maximum(getindex.(keys(presence_chain.map_base2original), 1))
 baseylims = minimum(getindex.(keys(presence_chain.map_base2original), 2)), maximum(getindex.(keys(presence_chain.map_base2original), 2))
@@ -16,17 +16,22 @@ realxlims = minimum(getindex.(values(presence_chain.map_base2original), 1)), max
 realylims = minimum(getindex.(values(presence_chain.map_base2original), 2)), maximum(getindex.(values(presence_chain.map_base2original), 2))
 
 _nbpoints = 300
-    
-baseprobgridys = reduce(hcat, [[x, y] for x in LinRange(basexlims..., 10), y in LinRange(baseylims..., _nbpoints)])
+
 baseprobgridxs = reduce(hcat, [[x, y] for y in LinRange(baseylims..., 10), x in LinRange(basexlims..., _nbpoints)])
-baseprobgrid = hcat(baseprobgridys, baseprobgridxs)
+baseprobgridys = reduce(hcat, [[x, y] for x in LinRange(basexlims..., 10), y in LinRange(baseylims..., _nbpoints)])
+baseprobgrid = hcat(baseprobgridxs, baseprobgridys)
 
 realprobgridys = reduce(hcat, [[x, y] for x in LinRange(realxlims..., 10), y in LinRange(realylims..., _nbpoints)])
 realprobgridxs = reduce(hcat, [[x, y] for y in LinRange(realylims..., 10), x in LinRange(realxlims..., _nbpoints)])
-realprobgrid = hcat(realprobgridys, realprobgridxs)
+realprobgrid = hcat(realprobgridxs, realprobgridys)
+
+baseprobgrid = vcat(baseprobgrid, fill(0, 1, size(baseprobgrid, 2)))
+realprobgrid = vcat(realprobgrid, fill(0, 1, size(realprobgrid, 2)))
 
 basespace = ffjord_mdl(realprobgrid, ps, st)[1].z
 realspace = __backward_ffjord(ffjord_mdl, baseprobgrid, ps, st)
+
+
 
 fig = Figure(size=(900, 500));
 ax1 = Axis(fig[1, 1], xlabel="Real axis 1 -> Base axis 1", ylabel="Real axis 2 -> Base axis 2")

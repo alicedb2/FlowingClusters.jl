@@ -53,22 +53,17 @@ function MNCRPChain(filename::AbstractString)
     return JLD2.load(filename)["chain"]
 end
 
-# function MNCRPChain(dataset::MNCRPDataset; nb_samples=200, strategy=:hot, ffjord_nn=nothing)
-#     chain = MNCRPChain(dataset.data, nb_samples=nb_samples, strategy=strategy, ffjord_nn=ffjord_nn)
-#     return chain
-# end
-
 function MNCRPChain(dataset::Matrix{Float64}; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing)
     return MNCRPChain(collect.(eachcol(dataset)), nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
 end
 
 function MNCRPChain(
-    data::Vector{Vector{Float64}}; 
-    nb_samples=200, 
-    strategy=:sequential, 
-    optimize=false, 
+    data::Vector{Vector{Float64}};
+    nb_samples=200,
+    strategy=:sequential,
+    optimize=false,
     ffjord_nn=nothing)
-    
+
     d = length(first(data))
 
     @assert all(length.(data) .== d)
@@ -80,7 +75,7 @@ function MNCRPChain(
     hyperparams_samples = CircularBuffer{MNCRPHyperparams}(nb_samples)
     base2original_samples = CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}(nb_samples)
     samples_idx = CircularBuffer{Int64}(nb_samples)
-    
+
     # Keep unique observations only
     unique_data = collect(Set{Vector{Float64}}(deepcopy(data)))
     println("    Loaded $(length(unique_data)) unique data points into chain (found $(length(data) - length(unique_data)) duplicates)")
@@ -134,7 +129,7 @@ function MNCRPChain(
     lp = logprobgenerative(chain.clusters, chain.hyperparams, chain.base2original, hyperpriors=true, ffjord=true)
     chain.map_logprob = lp
     chain.logprob_chain = [lp]
-    # map_hyperparams=hyperparams and map_idx=1 have already been 
+    # map_hyperparams=hyperparams and map_idx=1 have already been
     # specified when calling MNCRPChain, but let's be explicit
     chain.map_hyperparams = deepcopy(chain.hyperparams)
     chain.map_idx = 1
@@ -182,20 +177,20 @@ function burn!(chain::MNCRPChain, n::Int64=0; burn_map=true)
         @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
     end
 
-    oldlen = length(chain)
-
     if n > 0
 
-        chain.logprob_chain = chain.logprob_chain[n+1:end]
         chain.hyperparams_chain = chain.hyperparams_chain[n+1:end]
+        chain.logprob_chain = chain.logprob_chain[n+1:end]
         chain.nbclusters_chain = chain.nbclusters_chain[n+1:end]
         chain.largestcluster_chain = chain.largestcluster_chain[n+1:end]
 
-        if burn_map && chain.map_idx <= n        
+        chain.samples_idx .-= n
+
+        if burn_map && chain.map_idx <= n
             chain.map_clusters = deepcopy(chain.clusters)
             chain.map_hyperparams = deepcopy(chain.hyperparams)
             chain.map_base2original = deepcopy(chain.base2original)
-            chain.map_logprob = logprobgenerative(map_clusters_attempt, map_hyperparams, chain.base2original, ffjord=true)
+            chain.map_logprob = logprobgenerative(chain.map_clusters, chain.map_hyperparams, chain.map_base2original, ffjord=true)
             chain.map_idx = length(chain.logprob_chain)
         else
             chain.map_idx -= n

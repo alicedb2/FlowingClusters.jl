@@ -171,7 +171,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
         nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network")
         deco!(nn_axis)
         for p in eachrow(nnc)
-            lines!(nn_axis, burn+1:N, collect(p), label=nothing)
+            lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
         end
         if map_idx > 0
             vlines!(nn_axis, [map_idx], label=nothing, color=:black)
