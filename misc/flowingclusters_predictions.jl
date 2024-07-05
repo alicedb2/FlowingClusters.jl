@@ -1,5 +1,8 @@
 ## FlowingClusters without FFJORD
 
+presence_chain_ = MNCRPChain(eb.training.presence(:sp5).standardize(:BIO1, :BIO3, :BIO12), nb_samples=200)
+
+
 _maptpfun = tail_probability(_presence_chain.map_clusters, _presence_chain.map_hyperparams)
 _summfun = tail_probability_summary(_presence_chain.clusters_samples, _presence_chain.hyperparams_samples)
 
@@ -42,6 +45,13 @@ println("#####################")
 
 
 ### FlowingClusters with FFJORD
+
+nn3d = Chain(
+    Dense(3, 24, tanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
+    Dense(24, 3, tanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
+    )
+presence_chain = MNCRPChain(eb.training.presence(:sp5).standardize(:BIO1, :BIO3, :BIO12), ffjord_nn=nn3d, nb_samples=200)
+
 
 maptpfun = tail_probability(presence_chain.map_clusters, presence_chain.map_hyperparams)
 summfun = tail_probability_summary(presence_chain.clusters_samples, presence_chain.hyperparams_samples)
