@@ -328,7 +328,7 @@ module FlowingClusters
         nb_ffjord_am=2,
         sample_every=:autocov,
         checkpoint_every=-1, checkpoint_prefix="chain",
-        attempt_map=true, pretty_progress=true)
+        attempt_map=true, pretty_progress=:repl)
 
         checkpoint_every == -1 || typeof(checkpoint_prefix) == String || throw("Must specify a checkpoint prefix string")
 
@@ -355,13 +355,19 @@ module FlowingClusters
 
         delta_minusnn = hp.nn !== nothing ? nn_prior(hp.nn, similar(hp.nn_params) .= 0.0) : 0.0
 
-        if pretty_progress
+        if pretty_progress === :repl
+            progressio = stderr
+        elseif pretty_progress === :file
+            progressio = open("progress_pid$(getpid()).txt", "w")
+        end
+
+        if pretty_progress === :repl || pretty_progress === :file || pretty_progress
             if nb_steps === nothing || !isfinite(nb_steps) || nb_steps < 0
-                progbar = ProgressUnknown(showspeed=true)
+                progbar = ProgressUnknown(showspeed=true, output=progressio)
                 nb_steps = nothing
                 _nb_steps = typemax(Int64)
             else
-                progbar = Progress(nb_steps; showspeed=true)
+                progbar = Progress(nb_steps; showspeed=true, output=progressio)
                 _nb_steps = nb_steps
             end
         end
@@ -503,7 +509,7 @@ module FlowingClusters
                 samples_convergence = (ess=0, rhat=0)
             end
 
-            if pretty_progress
+            if pretty_progress === :repl || pretty_progress === :file || pretty_progress
                 next!(progbar;
                 showvalues=[
                 (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps === nothing ? Inf : nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
@@ -540,6 +546,10 @@ module FlowingClusters
 
             isfile("stop") && break
 
+        end
+
+        if pretty_progress === :file
+            close(progressio)
         end
 
     end
