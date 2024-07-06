@@ -11,7 +11,7 @@ The generative model in the base space consists of a non-parametric Chinese Rest
 \Psi_0 & & \quad\sim\quad & \left\vert\Psi_0\right\vert^{-d} \\
 \nu_0 & & \quad\sim\quad & \sqrt{{\textstyle\sum}_{i=1}^d \psi'(\nu_0/2 + (1 - i)/2)}, \\
 \pi~\vert~ & \alpha & \quad\sim\quad & \text{CRP}(\alpha), \\
-\mu_\omega, \Sigma_\omega~\vert~ & \pi,\mu_0, \lambda_0, \Psi_0, \nu_0 \quad\sim\quad & \text{NIW}(\mu_0, \lambda_0, \Psi_0, \nu_0), \qquad \omega\in\pi,\\
+\mu_\omega, \Sigma_\omega~\vert~ & \pi,\mu_0, \lambda_0, \Psi_0, \nu_0 & \quad\sim\quad & \text{NIW}(\mu_0, \lambda_0, \Psi_0, \nu_0), \qquad \omega\in\pi,\\
 z_j~\vert~ & \omega, \mu_\omega, \Sigma_\omega & \quad\sim\quad & \text{MvNormal}(\mu_\omega, \Sigma_\omega), \qquad j\in\omega.
 \end{split}
 ```
