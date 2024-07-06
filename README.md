@@ -64,4 +64,47 @@ Here we save a sample of the state of the chain in a buffer of size 200. This is
 - Set the number of split-merge `nb_splitmerge` moves per iteration such that the number of accepted splits and merges per iteration is above 3 to prevent overfitting. This is especially important when using a neural network.
 - The number of Gibbs moves `nb_gibbs` can be set to 1, and the number `nb_hyperparams` of AMWG and AM moves to 1 or 2.
 
+#### Example of chain output
+We can plot the chain which outputs a very approximate MAP state of the clusters (greedy Gibbs plus a partial hyperparameter optimization), the current state of the clusters in the chain, together with the trace of various quantities such as the log-probability, the number of clusters, the size of the largest clusters, and all the hyperparameters.
+```julia
+plot(chain)
+```
 ![Example without FFJORD](figures/fc_example_output_noffjord.png)
+
+
+We can also get the tail probabilities (suitability in SDMs) at a set of test points for a single state of the chain, in this case the approximate MAP state, and statistical summaries of those tail probabilities using the 200 chain samples we've collected.
+```julia
+tp = tail_probability(chain.map_clusters, chain.map_hyperparams);
+
+tp(dataset.test.presence(:sp1).standardize(:BIO1, :BIO12))
+841-element Vector{Float64}:
+ 0.2255
+ 0.0671
+ 0.0004
+ ⋮
+ 0.9112
+ 0.7221
+
+tpsumm = tail_probability_summary(presence_chain_.clusters_samples, presence_chain_.hyperparams_samples);
+summstats = tpsumm(dataset.test.presence(:sp1).standardize(:BIO1, :BIO12))
+(median = [0.1604, 0.1793, 0.0013, ...], mean = ...,
+ std = ...,
+ iqr = ...,
+ CI95 = ...,
+ CI90 = ...,
+ quantile = q -> ...,
+ modefd = ...,
+ modedoane = ...)
+
+ # The quantile field is a function that returns the
+ # q quantile of the tail probabilities at each points
+ # in the dataset
+ summstats.quantile(0.3)
+ 841-element Vector{Float64}:
+  0.13695
+  0.14554
+  0.0009
+  ⋮
+  0.9115
+  0.58434
+ ```
