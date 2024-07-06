@@ -1,6 +1,6 @@
 using Plots
 using Plots: mm
-using StatsBase: Weights
+using StatsBase: Weights, sample
 using Distributions: Normal, Uniform
 using Optim: optimize, minimizer
 
@@ -33,7 +33,7 @@ end
 hline!([gy], w=1, s=:dash, label=nothing);
 
 xs1 = LinRange(xi, x1, 100)
-plot!(xs1, zeros(size(xs1)), fillrange=g.(xs1, params...), fillalpha=0.35, lw=0, c=:green, label="Presence probability");
+plot!(xs1, zeros(size(xs1)), fillrange=g.(xs1, params...), fillalpha=0.35, lw=0, c=:green, label="Tail probability");
 xs2 = LinRange(y, x2, 100)
 plot!(xs2, zeros(size(xs2)), fillrange=g.(xs2, params...), fillalpha=0.35, lw=0, c=:green, label=nothing);
 xs3 = LinRange(x3, xf, 100)
@@ -43,7 +43,7 @@ xlabel!("Environmental space X");
 ylabel!(L"g(x\vert\pi_D)");
 xlims!(xi, xf);
 
-nb_samples = 10000
+nb_samples = 250
 Xs = zeros(nb_samples)
 Ys = zeros(nb_samples)
 for i in 1:nb_samples
@@ -57,11 +57,12 @@ scatter!(Xs[x1 .< Xs .< y], Ys[x1 .< Xs .< y], msw=0, c=9, ma=0.2, label=nothing
 scatter!(Xs[y .< Xs .< x2], Ys[y .< Xs .< x2], msw=0, c=9, label=nothing);
 scatter!(Xs[x2 .< Xs .< x3], Ys[x2 .< Xs .< x3], msw=0, c=9, ma=0.2, label=nothing);
 scatter!(Xs[Xs .> x3], Ys[Xs .> x3], msw=0, c=9, 
-         label=L"g(\hat X\vert\pi_D) < g(y\vert\pi_D)");
+         label=L"g(.\vert\pi_D) < g(y\vert\pi_D)");
 
 annotate!(y+0.5, gy+0.005, "y", :black);
-title!("Presence probability at point y");
-display("image/png", p)
+title!("Suitability at point y");
+
+display(p)
 
 #################
 

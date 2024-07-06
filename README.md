@@ -113,4 +113,4 @@ The tail probability is a generalization of the way the suitability is determine
 ```math
 g(y) = E_X\left[\mathbb{1}_{g(X) \le g(y)}\right] \approx \frac{1}{M}\sum_{i=1}^M \mathbb{1}_{g(X_i) \le g(y)}.
 ```
-![Determination of suitability, aka tail or presence probability](figures/presence_rejection_sampling.png)
+![Determination of suitability, aka tail or presence probability](figures/suitability_figure_1D.png)
