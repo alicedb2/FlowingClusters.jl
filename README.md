@@ -17,5 +17,5 @@ z_j~\vert~ & \omega, \mu_\omega, \Sigma_\omega & \quad\sim\quad & \text{MvNormal
 ```
 If a neural network is provided, the generative model is modified according to FFJORD
 ```math
-\log p_\mathbf{x}(\mathbf{x}) = \log p_\mathbf{z}(\mathbf{z}) - \sum_{i=1}^N \int_0^1 \tr\frac{\partial f(z_j(t))}{z_j(t)}dt
+\log p_\mathbf{x}(\mathbf{x}) = \log p_\mathbf{z}(\mathbf{z}) - \sum_{i=1}^N \int_0^1 \text{tr}\frac{\partial f(z_j(t))}{z_j(t)}dt
 ```
