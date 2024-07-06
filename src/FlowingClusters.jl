@@ -16,9 +16,9 @@ module FlowingClusters
     using SpecialFunctions: loggamma, polygamma, logbeta
 
     using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!, 
-                 hidespines!, hidedecorations!
+                 hidespines!, hidedecorations!, Cycled, scatter!
 
-    using JLD2, CodecBzip2
+    using JLD2
     using ProgressMeter: Progress, ProgressUnknown, next!
     using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
@@ -61,10 +61,6 @@ module FlowingClusters
     export Cluster
     export elements
     export realspace_cluster, realspace_clusters
-
-    include("types/dataset.jl")
-    using .Dataset
-    export FCDataset
 
     include("types/chain.jl")
     export MNCRPChain
@@ -468,7 +464,7 @@ module FlowingClusters
                         end
 
                         sample_ess = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]).ess
-                        while 1.5 * sample_ess < length(chain.samples_idx)
+                        while 2 * sample_ess < length(chain.samples_idx)
                                 popfirst!(chain.clusters_samples)
                                 popfirst!(chain.hyperparams_samples)
                                 popfirst!(chain.base2original_samples)
@@ -515,7 +511,7 @@ module FlowingClusters
                 (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps === nothing ? Inf : nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
                 (:"chain length", "$(length(chain))"),
                 (:"conv largestcluster chain (burn 50%)", "ess=$(largestcluster_convergence.ess > 0 ? round(largestcluster_convergence.ess, digits=1) : "wait"), rhat=$(largestcluster_convergence.rhat > 0 ? round(largestcluster_convergence.rhat, digits=3) : "wait")"),
-                (:"#chain samples (oldest, latest, eta) convergence", "$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/1.5, digits=1) : "wait"))"),
+                (:"#chain samples (oldest, latest, eta) convergence", "$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))"),
                 (:"logprob (max, q95, max minus nn)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)), $(round(maximum(chain.logprob_chain) - delta_minusnn, digits=1)))"),
                 (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
                 (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),

@@ -61,7 +61,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     end
 
     if chain.hyperparams.nn === nothing
-        ysize = 1800
+        ysize = 1600
     else
         ysize = 2300
     end
@@ -78,18 +78,22 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     plot!(p_current_axis, current_marginals; rev=rev, nb_clusters=nb_clusters)
     # axislegend(p_current_axis, framecolor=:white)
 
-    p_basemap_axis = Axis(fig[3:4, 1], title="MAP base state ($(length(chain.map_clusters)) clusters)")
-    deco!(p_basemap_axis)
-    plot!(p_basemap_axis, basemap_marginals; rev=rev, nb_clusters=nb_clusters)
-    # axislegend(p_basemap_axis, framecolor=:white)
+    offset = 0
+    if chain.hyperparams.nn !== nothing
+        offset = 2
+        p_basemap_axis = Axis(fig[3:4, 1], title="MAP base state ($(length(chain.map_clusters)) clusters)")
+        deco!(p_basemap_axis)
+        plot!(p_basemap_axis, basemap_marginals; rev=rev, nb_clusters=nb_clusters)
+        # axislegend(p_basemap_axis, framecolor=:white)
 
-    p_basecurrent_axis = Axis(fig[3:4, 2], title="Current base state ($(length(chain.clusters)) clusters)")
-    deco!(p_basecurrent_axis)
-    plot!(p_basecurrent_axis, basecurrent_marginals; rev=rev, nb_clusters=nb_clusters)
-    # axislegend(p_basecurrent_axis, framecolor=:white)
+        p_basecurrent_axis = Axis(fig[3:4, 2], title="Current base state ($(length(chain.clusters)) clusters)")
+        deco!(p_basecurrent_axis)
+        plot!(p_basecurrent_axis, basecurrent_marginals; rev=rev, nb_clusters=nb_clusters)
+        # axislegend(p_basecurrent_axis, framecolor=:white)
+    end
 
     lpc = logprob_chain(chain, burn)
-    logprob_axis = Axis(fig[5, 1], title="log probability", aspect=3)
+    logprob_axis = Axis(fig[offset + 3, 1], title="log probability", aspect=3)
     deco!(logprob_axis)
     lines!(logprob_axis, burn+1:N, lpc, label=nothing)
     hlines!(logprob_axis, [maximum(chain.logprob_chain)], label=nothing, color=:black)
@@ -100,7 +104,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(logprob_axis, framecolor=:white)
 
     nbc = nbclusters_chain(chain, burn)
-    nbc_axis = Axis(fig[5, 2], title="#cluster", aspect=3)
+    nbc_axis = Axis(fig[offset + 3, 2], title="#cluster", aspect=3)
     deco!(nbc_axis)
     lines!(nbc_axis, burn+1:N, nbc, label=nothing)
     if map_idx > 0
@@ -109,7 +113,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(nbc_axis, framecolor=:white)
     
     lcc = largestcluster_chain(chain, burn)
-    lcc_axis = Axis(fig[6, 1], title="Largest cluster", aspect=3)
+    lcc_axis = Axis(fig[offset + 4, 1], title="Largest cluster", aspect=3)
     deco!(lcc_axis)
     lines!(lcc_axis, burn+1:N, lcc, label=nothing)
     if map_idx > 0
@@ -118,7 +122,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(lcc_axis, framecolor=:white)
     
     ac = alpha_chain(chain, burn)
-    alpha_axis = Axis(fig[6, 2], title="α", aspect=3)
+    alpha_axis = Axis(fig[offset + 4, 2], title="α", aspect=3)
     deco!(alpha_axis)
     lines!(alpha_axis, burn+1:N, ac, label=nothing)
     if map_idx > 0
@@ -127,7 +131,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(alpha_axis, framecolor=:white)
 
     muc = mu_chain(Matrix, chain, burn)
-    mu_axis = Axis(fig[7, 1], title="μ", aspect=3)
+    mu_axis = Axis(fig[offset + 5, 1], title="μ", aspect=3)
     deco!(mu_axis)
     for mucomponent in eachrow(muc)
         lines!(mu_axis, burn+1:N, mucomponent, label=nothing)
@@ -138,7 +142,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(mu_axis, framecolor=:white)
 
     lc = lambda_chain(chain, burn)
-    lambda_axis = Axis(fig[7, 2], title="λ", aspect=3)
+    lambda_axis = Axis(fig[offset + 5, 2], title="λ", aspect=3)
     deco!(lambda_axis)
     lines!(lambda_axis, burn+1:N, lc, label=nothing)
     if map_idx > 0
@@ -147,7 +151,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(lambda_axis, framecolor=:white)
 
     pc = psi_chain(Matrix, chain, burn)
-    psi_axis = Axis(fig[8, 1], title="Ψ", aspect=3)
+    psi_axis = Axis(fig[offset + 6, 1], title="Ψ", aspect=3)
     deco!(psi_axis)
     for psicomponent in eachrow(pc)
         lines!(psi_axis, burn+1:N, psicomponent, label=nothing)
@@ -158,7 +162,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(psi_axis, framecolor=:white)
     
     nc = nu_chain(chain, burn)
-    nu_axis = Axis(fig[8, 2], title="ν", aspect=3)
+    nu_axis = Axis(fig[offset + 6, 2], title="ν", aspect=3)
     deco!(nu_axis)
     lines!(nu_axis, burn+1:N, nc, label=nothing)
     if map_idx > 0
