@@ -17,13 +17,13 @@ z_j~\vert~ & \omega, \mu_\omega, \Sigma_\omega & \quad\sim\quad & \text{MvNormal
 \end{align*}
 ```
 If a neural network $f(z)$ with input and output dimension $d$ is provided, the generative model is modified according to the FFJORD
-$$
+```math
 \log p_\mathbf{x}(\mathbf{x}) = \log p_\mathbf{z}(\mathbf{z}) - \sum_{i=1}^N \int_0^1 \text{tr}\frac{\partial f(z_j(t))}{z_j(t)}dt
-$$
+```
 where $x_j = z_j(1)$ and $z_j = z_j(0)$. The generative model $p(\mathbf{x})$ of the data in real space becomes a deformation of the unsupervised clustering generative model $p(\mathbf{z})$ in the base space. We choose an isotropic location-scale $t$ distribution prior over the weights of the last hidden layer (Neal 1996 _Bayesian Learning for Neural Networks_)
-$$
+```math
 w_{ij}\quad\sim\quad lst(0, W^2, \nu)
-$$
+```
 where $W$ is the number of weights of this last hidden layer and the index $\nu=0.01$ approaching the logarithmic prior.
 
 We use Adaptive-Metropolis-within-Gibbs (AMWG) for the hyperparameters of the clustering part of the model, and Adaptive-Metropolis (AM) for the parameters of the neural network. The Chinese Restaurant Process is sampled using a mix of both traditional Gibbs moves ([Neal 2000 Algorithm 1](https://doi.org/10.2307/1390653)) and sequentially allocated split-merge proposals ([Dahl & Newcomb 2022](https://doi.org/10.1080/00949655.2021.1998502)).
