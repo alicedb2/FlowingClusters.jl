@@ -110,6 +110,7 @@ summstats = tpsumm(dataset.test.presence(:sp1).standardize(:BIO1, :BIO12))
   0.58434
  ```
 The tail probability is a generalization of the way the suitability is determine in BIOCLIM. For a given point $y$ in environmental sapce, it is the mass of probability in regions of that space where the posterior-predictive probability $g(.)$ is equal or less than $g(y)$, i.e. the tail probability below the isocontour at point $y$. Since the posterior-predictive of our generative model is a multivariate $t$-distribution, we can easily calculate it using rejection sampling
-```math(y) = E_X\left[\mathbb{1}_{g(X) \le g(y)}\right] \approx \frac{1}{M}\sum_{i=1}^M \mathbb{1}_{g(X_i) \le g(y)}.
+```math
+g(y) = E_X\left[\mathbb{1}_{g(X) \le g(y)}\right] \approx \frac{1}{M}\sum_{i=1}^M \mathbb{1}_{g(X_i) \le g(y)}.
 ```
 ![Determination of suitability, aka tail or presence probability](figures/presence_rejection_sampling.png)
