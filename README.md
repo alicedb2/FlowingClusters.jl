@@ -113,4 +113,9 @@ The tail probability is a generalization of the way the suitability is determine
 ```math
 g(y) = E_X\left[\mathbb{1}_{g(X) \le g(y)}\right] \approx \frac{1}{M}\sum_{i=1}^M \mathbb{1}_{g(X_i) \le g(y)}.
 ```
-![Determination of suitability, aka tail or presence probability](figures/suitability_figure_1D.png)
+
+![Determination of suitability, aka tail or presence probability](figures/suitability_1D.png)
+
+In higher dimensions the same principle applies, only the isocontours become lines, surfaces, volumes, etc.
+
+![Suitability in 2 dimensions](figures/suitability_2D.png)
