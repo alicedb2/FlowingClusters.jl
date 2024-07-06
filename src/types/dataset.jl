@@ -7,7 +7,7 @@ module Dataset
     export FCDataset
     export presence, absence
 
-    mutable struct FCDataset
+    struct FCDataset
         __df::AbstractDataFrame
         __slices::Union{Nothing, Vector{UnitRange{Int64}}}
         __zero::AbstractDataFrame
@@ -21,9 +21,9 @@ module Dataset
     Create a dataset object from a DataFrame or a CSV file. 
     
     The dataset object is a barebone wrapper over a DataFrame which
-    allows to quickly access training, validation and test splits,
-    extract presence and absence data, and standardize the data. The
-    syntax is inspired by object oriented programming but is not.
+    allows to quickly generate training, validation and test splits,
+    extract presence and absence data, and standardize the data.
+    The syntax is inspired by object oriented programming but is not.
 
     Arguments:
     - `df`: DataFrame object.
@@ -34,8 +34,9 @@ module Dataset
     - `subsample`: Number (integer) or fraction (float) of rows to subsample from the dataset.
     - `returncopy`: Return a copy of the DataFrame object.
 
-    Splits can be specified either as fraction [0.5, 0.2, 0.3], or
-    as numbers [2, 1, 2] which are normalized to fractions.
+    Splits can be specified either as a vector of any numbers
+    which are normalized to fractions.
+    For example [2, 1, 2] will result in [0.4, 0.2, 0.4] splits.
 
     When 3 splits are specified, the dataset is split into
     training, validation, and test sets.
@@ -43,8 +44,8 @@ module Dataset
     When 2 splits are specified the dataset is split into
     training and test sets.
 
-    When an arbitrary number of splits are specified, the last
-    split is considered as the test set.
+    When an arbitrary number of splits are specified, the first 
+    and last split is considered as the training and test sets.
     
     Properties/fields of the underlying DataFrames are exposed that are not
     "presence", "absence", "standardize", "training", "validation", "test",
@@ -56,6 +57,8 @@ module Dataset
     training = dataset.training
     validation = dataset.validation
     test = dataset.test
+
+    dataset(:col1, :col2) # Return a 2xN matrix of predictors from the underlying DataFrame
 
     dataset.presence(:column) # :column must contain true/false/1/0 values
                               # true/1 are considered as presence
