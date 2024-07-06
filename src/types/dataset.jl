@@ -5,7 +5,6 @@ module Dataset
     import Random
 
     export FCDataset
-    export presence, absence
 
     struct FCDataset
         __df::AbstractDataFrame
@@ -25,7 +24,7 @@ module Dataset
     extract presence and absence data, and standardize the data.
     The syntax is inspired by object oriented programming but is not.
 
-    Arguments:
+    # Arguments:
     - `df`: DataFrame object.
     - `csvfile`: Path to a CSV file.
     - `splits`: Fractions (will be normalized) of the dataset to split into training, validation, and test sets
@@ -51,31 +50,59 @@ module Dataset
     "presence", "absence", "standardize", "training", "validation", "test",
     "__df", "__slices", "__zero", "__scale".
 
-    Examples:
-    ```julia
+    # Examples:
+    ```julia-repl
     dataset = FCDataset("data.csv")
     training = dataset.training
     validation = dataset.validation
     test = dataset.test
 
-    dataset(:col1, :col2) # Return a 2xN matrix of predictors from the underlying DataFrame
+    julia> dataset(:col)             # Return a column from the underlying DataFrame as a vector
+    39024-element Vector{Float64}:
+     25.518239974975586
+     10.868968963623047
+      ⋮
+      2.759552240371704
 
-    dataset.presence(:column) # :column must contain true/false/1/0 values
-                              # true/1 are considered as presence
+    julia> dataset(:col1, :col2)
+    2×39024 Matrix{Float64}:
+     25.5182  10.869   …   2.75955
+     11.3294  11.3649     12.8618
+
+
+    julia> dataset.presence(:column) # :column must contain true/false/1/0 values
+                                     # true/1 are considered as a presence
+    FCDataset(33129×81 DataFrame
+       Row │ lon        lat      sp1      sp2      sp10     sp11     sp12     sp13  ⋯
+           │ Float64    Float64  Float64  Float64  Float64  Float64  Float64  Int64 ⋯
+    ───────┼─────────────────────────────────────────────────────────────────────────
+         1 │  -86.4167  39.75        1.0      1.0      1.0      1.0      1.0      1 ⋯
+         2 │  -76.5833  37.4167      1.0      1.0      1.0      1.0      0.0      1
+       ⋮   │     ⋮         ⋮        ⋮        ⋮        ⋮        ⋮        ⋮        ⋮  ⋱
+     33129 │ -112.417   38.4167      1.0      0.0      0.0      0.0      0.0      0
+                                                   67 columns and 33126 rows omitted)
     
+
+    ########################
+    # Examples of chaining #
+    ########################
+
     dataset.absence(:column)   # :column must contain true/false/1/0 values
-                               # false/0 are considered as absence
+                               # false/0 are considered as an absence
 
-    dataset.standardize(:column1, :column2, :column3) # Return a 3xN matrix of predictors standardized
-                                                      # against the training set mean and standard deviation
-    
-    dataset.validation.presence(:species).standardize(:BIO1, :BIO2) # Return 2xN matrix of predictors associated
-    dataset.validation.absence(:species).standardize(:BIO1, :BIO2)  # with presences/absences of :species
-                                                                    # standardized against the training set
-    
-    dataset.presence(:species1).presence(:species2) # Return dataset containing simultaneous presences of both species
+    dataset.absence(:species)(:col1, :col2, :col3, :col4)   # return a 4xN matrix of predictors associated
+                                                            # with absences of :species
 
-    dataset.presence(:species1).absence(:species1) # Return empty dataset
+    dataset.standardize(:col1, :col2, :col3)   # Return a 3xN matrix of predictors standardized
+                                               # against the training set mean and standard deviation
+    
+    dataset.validation.presence(:species).standardize(:col1, :col2)   # Return 2xN matrix of predictors associated
+    dataset.validation.absence(:species).standardize(:col1, :col2)    # with presences or absences of :species
+                                                                      # standardized against the training set
+    
+    dataset.presence(:species1).presence(:species2)     # Return dataset containing simultaneous presences of both species
+
+    dataset.presence(:species1).absence(:species1)      # Return empty dataset
 
     ```
     """
@@ -83,7 +110,16 @@ module Dataset
         
         sum(splits) > 0 || throw(ArgumentError("At least one split must be greater than 0"))
 
-        (subsample !== nothing && subsample > 0 && (subsample isa Integer || (subsample isa Float64 && 0 < subsample <= 1))) || throw(ArgumentError("Subsample must be nothing, an integer, or a float between 0 and 1"))
+        if subsample !== nothing 
+            if subsample isa Integer
+                nrow(df) >= subsample || throw(ArgumentError("Subsample is greater than the number of rows in the DataFrame"))
+                subsample <= 0 || throw(ArgumentError("Subsample must be greater than 0"))
+            elseif subsample isa Float64 && !(0 < subsample <= 1)
+                throw(ArgumentError("Subsample must be a fraction between 0 and 1"))
+            else
+                throw(ArgumentError("Subsample must be an integer or a fraction"))
+            end
+        end
 
         conflicts = intersect(propertynames(df), [:training, :validation, :test, :presence, :absence, :standardize, :df, :__slices, :__zero, :__scale])
         if !isempty(conflicts)
