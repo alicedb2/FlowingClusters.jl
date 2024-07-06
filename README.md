@@ -64,7 +64,7 @@ Here we save a sample of the state of the chain in a buffer of size 200. This is
 - Set the number of split-merge `nb_splitmerge` moves per iteration such that the number of accepted splits and merges per iteration is above 3 to prevent overfitting. This is especially important when using a neural network.
 - The number of Gibbs moves `nb_gibbs` can be set to 1, and the number `nb_hyperparams` of AMWG and AM moves to 1 or 2.
 
-#### Example of chain output
+### Chain output
 We can plot the chain which outputs a very approximate MAP state of the clusters (greedy Gibbs plus a partial hyperparameter optimization), the current state of the clusters in the chain, together with the trace of various quantities such as the log-probability, the number of clusters, the size of the largest clusters, and all the hyperparameters.
 ```julia
 plot(chain)
@@ -72,7 +72,7 @@ plot(chain)
 ![Example without FFJORD](figures/fc_example_output_noffjord.png)
 
 
-We can also get the tail probabilities (suitability in SDMs) at a set of test points for a single state of the chain, in this case the approximate MAP state, and statistical summaries of those tail probabilities using the 200 chain samples we've collected.
+We can also get the predictions of tail probabilities (suitability in SDMs, or probability of presence) at a set of test points for a single state of the chain, in this case the approximate MAP state, and statistical summaries of those tail probabilities using the 200 chain samples we've collected.
 ```julia
 tp = tail_probability(chain.map_clusters, chain.map_hyperparams);
 
@@ -87,14 +87,15 @@ tp(dataset.test.presence(:sp1).standardize(:BIO1, :BIO12))
 
 tpsumm = tail_probability_summary(presence_chain_.clusters_samples, presence_chain_.hyperparams_samples);
 summstats = tpsumm(dataset.test.presence(:sp1).standardize(:BIO1, :BIO12))
-(median = [0.1604, 0.1793, 0.0013, ...], mean = ...,
- std = ...,
- iqr = ...,
- CI95 = ...,
- CI90 = ...,
- quantile = q -> ...,
- modefd = ...,
- modedoane = ...)
+(median = [0.1604, 0.1793, 0.0013, ⋯], 
+ mean = [ ⋯ ],
+ std = [ ⋯ ],
+ iqr = [ ⋯ ],
+ CI95 = [ ⋯ ],
+ CI90 = [ ⋯ ],
+ quantile = q -> ⋯,
+ modefd = [ ⋯ ],
+ modedoane = [ ⋯ ])
 
  # The quantile field is a function that returns the
  # q quantile of the tail probabilities at each points
@@ -108,3 +109,6 @@ summstats = tpsumm(dataset.test.presence(:sp1).standardize(:BIO1, :BIO12))
   0.9115
   0.58434
  ```
+The tail probability is a generalization of the way the suitability is determine in BIOCLIM. For a given point $y$ in environmental sapce, it is the mass of probability in regions of that space where the posterior-predictive probability $g(.)$ is equal or less than $g(y)$, i.e. the tail probability below the isocontour at point $y$. Since the posterior-predictive of our generative model is a multivariate $t$-distribution, we can easily calculate it using rejection sampling
+$$s(y) = E_X\left[\mathbb{1}_{g(X) \le g(y)}\right] \approx \frac{1}{M}\sum_{i=1}^M \mathbb{1}_{g(X_i) \le g(y)}.$$
+![Determination of suitability, aka tail or presence probability](figures/presence_rejection_sampling.png)
