@@ -97,12 +97,12 @@ module Dataset
                                                # against the training set mean and standard deviation
     
     dataset.validation.presence(:species).standardize(:col1, :col2)   # Return 2xN matrix of predictors associated
-    dataset.validation.absence(:species).standardize(:col1, :col2)    # with presences or absences of :species
-                                                                      # standardized against the training set
+    dataset.validation.absence(:species).standardize(:col1, :col2)    # with presences or absences of :species in the
+                                                                      # validation set standardized against the training set
     
-    dataset.presence(:species1).presence(:species2)     # Return dataset containing simultaneous presences of both species
+    dataset.training.presence(:species1).presence(:species2)   # Return simultaneous presences of both species in training set
 
-    dataset.presence(:species1).absence(:species1)      # Return empty dataset
+    dataset.test.presence(:species1).absence(:species1)        # Return empty dataset
 
     ```
     """
