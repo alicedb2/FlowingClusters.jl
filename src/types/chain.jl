@@ -171,7 +171,7 @@ nn_chain(::Type{Matrix}, chain::Union{MNCRPChain, Vector{MNCRPHyperparams}}, bur
 elements(::Type{T}, chain::MNCRPChain) where {T} = elements(T, chain.clusters)
 elements(chain::MNCRPChain) = elements(chain.clusters)
 
-function burn!(chain::MNCRPChain, n::Int64=0; burn_map=true)
+function burn!(chain::MNCRPChain, n::Int64=0; burn_map=false)
 
     if n >= length(chain.logprob_chain)
         @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
