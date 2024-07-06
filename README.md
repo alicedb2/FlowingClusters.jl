@@ -26,8 +26,11 @@ w_{ij}\quad\sim\quad lst(0, W^2, \nu)
 $$
 where $W$ is the number of weights of this last hidden layer and the index $\nu=0.01$ approaching the logarithmic prior.
 
+We use Adaptive-Metropolis-within-Gibbs (AMWG) for the hyperparameters of the clustering part of the model, and Adaptive-Metropolis (AM) for the parameters of the neural network. The Chinese Restaurant Process is sampled using a mix of both traditional Gibbs moves ([Neal 2000 Algorithm 1](https://doi.org/10.2307/1390653)) and sequentially allocated split-merge proposals ([Dahl & Newcomb 2022](https://doi.org/10.1080/00949655.2021.1998502)).
+
 
 ## Usage
+#### Without FFJORD
 ```julia
 using FlowingClusters
 using SplitMaskStandardize
@@ -56,8 +59,9 @@ Progress:  64    Time: 0:00:17 ( 0.27  s/it)
 
 Here we save a sample of the state of the chain in a buffer of size 200. This is done each time the number of iterations since the last sample crosses over twice the autocorrelation time of the last 50% of the chain of the size of the largest cluster, a typical proxy of mixing used in non-parametric clustering. Once the buffer is full and the ess of the samples is approximately equal to the size of the buffer we stop the chain by invoking `touch stop` in the same working directory. The oldest chain samples are automatically dropped when the ess goes below 50% of the number of samples in the buffer.
 
-We use Adaptive-Metropolis-within-Gibbs for the hyperparameters of the clustering part of the model, and Adaptive-Metropolis (AM) for the parameters of the neural network. The Chinese Restaurant Process is sampled using a mix of both traditional Gibbs moves ([Neal 2000 Algorithm 1](https://doi.org/10.2307/1390653)) and sequentially allocated split-merge proposals ([Dahl & Newcomb 2022](https://doi.org/10.1080/00949655.2021.1998502)).
-
 ### Rules of thumb
 - It's ok the stop the chain once the sample buffer is full and its ess is roughly equal to the buffer size.
-- Set the number of split-merge moves per iteration such that the number of accepted splits and merges per iteration is above 3 to prevent overfitting. This is especially important when using a neural network.
+- Set the number of split-merge `nb_splitmerge` moves per iteration such that the number of accepted splits and merges per iteration is above 3 to prevent overfitting. This is especially important when using a neural network.
+- The number of Gibbs moves `nb_gibbs` can be set to 1, and the number `nb_hyperparams` of AMWG and AM moves to 1 or 2.
+
+![Example without FFJORD](figures/fc_example_output_noffjord.png)
