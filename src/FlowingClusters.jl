@@ -451,7 +451,7 @@ module FlowingClusters
 
             if sample_every !== nothing
                 if sample_every === :autocov
-                    if length(chain) >= 200
+                    if length(chain) >= 200 + 2 * param_dimension(chain.hyperparams)
                         convergence_burnt = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
                         latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
                         curr_idx = length(chain)
