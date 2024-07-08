@@ -6,26 +6,15 @@ function evaluate_bioclim(dataset::SMSDataset, species, predictors, perfstat=:MC
     validation = dataset.validation.standardize(predictors...)(predictors...)
     test = dataset.test.standardize(predictors...)(predictors...)
 
-    validation_pres_mask = dataset.validation(species) .== 1
-    validation_abs_mask = dataset.validation(species) .== 0
-    test_pres_mask = dataset.test(species) .== 1
-    test_abs_mask = dataset.test(species) .== 0
-
-    # validation_pres = dataset.validation.presence(species).standardize(predictors...)(predictors...)
-    # validation_abs = dataset.validation.absence(species).standardize(predictors...)(predictors...)
-    # test_pres = dataset.test.presence(species).standardize(predictors...)(predictors...)
-    # test_abs = dataset.test.absence(species).standardize(predictors...)(predictors...)
+    validation_pres_mask = dataset.validation.presmask(species)
+    validation_abs_mask = dataset.validation.absmask(species)
+    test_pres_mask = dataset.test.presmask(species)
+    test_abs_mask = dataset.test.absmask(species)
 
     bioclim = bioclim_predictor(training)
 
     bioclim_validation_predictions = bioclim(validation)
     best_thresh = best_score_threshold(bioclim_validation_predictions[validation_pres_mask], bioclim_validation_predictions[validation_abs_mask], statistic=perfstat)
-    # bioclim_validation_presence_scores = bioclim(validation_pres)
-    # bioclim_validation_absence_scores = bioclim(validation_abs)
-    # bioclim_test_presence_scores = bioclim(test_pres)
-    # bioclim_test_absence_scores = bioclim(test_abs)
-
-    # best_thresh = best_score_threshold(bioclim_validation_presence_scores, bioclim_validation_absence_scores, statistic=perfstat)
 
     bioclim_test_performances = map(x -> round(x, digits=5), performance_statistics(test[test_pres_mask], test[test_abs_mask]))
     bioclim_test_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(test[test_pres_mask], test[test_abs_mask], threshold=best_thresh))
@@ -44,13 +33,12 @@ function evaluate_brt(dataset::SMSDataset, species, predictors, perfstat=:MCC)
     validation_presabs = dataset.validation(species)
 
     test_predictors = dataset.test.standardize(predictors...)(predictors...)'
-    test_presabs = dataset.test(species)
 
     # Presence/absence masks
-    validation_pres_mask = validation_presabs .== 1
-    validation_abs_mask = validation_presabs .== 0
-    test_pres_mask = test_presabs .== 1
-    test_abs_mask = test_presabs .== 0
+    validation_pres_mask = dataset.validation.presmask(species)
+    validation_abs_mask = dataset.validation.absmask(species)
+    test_pres_mask = dataset.test.presmask(species)
+    test_abs_mask = dataset.test.absmask(species)
 
 
     gaussian_tree_parameters = EvoTreeGaussian(; loss=:gaussian, metric=:gaussian, nrounds=100, nbins=100, λ=0.0, γ=0.0, η=0.1, max_depth=7, min_weight=1.0, rowsample=0.5, colsample=1.0)
@@ -68,7 +56,7 @@ function evaluate_brt(dataset::SMSDataset, species, predictors, perfstat=:MCC)
     println("BRT stats:\n$brt_test_performances")
     println("BRT stats at best tresh:\n$brt_test_performances_atthresh")
 
-    return (;brt_test_performances, brt_test_performances_atthresh, best_thresh)
+    return (; brt_test_performances, brt_test_performances_atthresh, best_thresh)
 end
 
 function evaluate_flowingclusters(chain::MNCRPChain, dataset::SMSDataset, species, predictors; perfstat=:MCC, nb_rejection_samples=50_000)
