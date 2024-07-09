@@ -322,7 +322,7 @@ module FlowingClusters
         nb_splitmerge=30, splitmerge_t=3,
         amwg_batch_size=50,
         nb_ffjord_am=2,
-        sample_every=:autocov,
+        sample_every=:autocov, stop_chain=nothing,
         checkpoint_every=-1, checkpoint_prefix="chain",
         attempt_map=true, pretty_progress=:repl)
 
@@ -449,9 +449,11 @@ module FlowingClusters
 
             sample_eta = -1
 
+            start_sampling_at = 200 + 2 * param_dimension(chain.hyperparams)
+
             if sample_every !== nothing
                 if sample_every === :autocov
-                    if length(chain) >= 200 + 2 * param_dimension(chain.hyperparams)
+                    if length(chain) >= start_sampling_at
                         convergence_burnt = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
                         latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
                         curr_idx = length(chain)
@@ -495,7 +497,7 @@ module FlowingClusters
             end
 
 
-            if length(chain) >= 200
+            if length(chain) >= start_sampling_at
                 largestcluster_convergence = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
             else
                 largestcluster_convergence = (ess=0, rhat=0)
@@ -512,8 +514,8 @@ module FlowingClusters
                 showvalues=[
                 (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps === nothing ? Inf : nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
                 (:"chain length", "$(length(chain))"),
-                (:"conv largestcluster chain (burn 50%)", "ess=$(largestcluster_convergence.ess > 0 ? round(largestcluster_convergence.ess, digits=1) : "wait"), rhat=$(largestcluster_convergence.rhat > 0 ? round(largestcluster_convergence.rhat, digits=3) : "wait")"),
-                (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
+                (:"conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
+                (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
                 (:"logprob (max, q95, max minus nn)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)), $(round(maximum(chain.logprob_chain) - delta_minusnn, digits=1)))"),
                 (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
                 (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
@@ -540,6 +542,12 @@ module FlowingClusters
                     println("   $(round(chain.map_logprob, digits=1))")
                 end
                 flush(stdout)
+            end
+
+            if stop_chain === :sample_ess
+                if samples_convergence.ess >= length(chain.samples_idx.buffer)
+                    break
+                end
             end
 
             isfile("stop") && break
