@@ -449,7 +449,7 @@ module FlowingClusters
 
             sample_eta = -1
 
-            start_sampling_at = 200 + 2 * param_dimension(chain.hyperparams)
+            start_sampling_at = 3 * param_dimension(chain.hyperparams)
 
             if sample_every !== nothing
                 if sample_every === :autocov
@@ -1163,25 +1163,6 @@ module FlowingClusters
         else
             return false
         end
-    end
-
-    function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
-
-        N = sum(length.(clusters))
-        include_up_to = N * (1 - proportion)
-
-        sorted_sizes = sort(length.(clusters), rev=true)
-        cumul_sizes = cumsum(sorted_sizes)
-
-        last_idx = findlast(x -> x <= include_up_to, cumul_sizes)
-
-        # min_cumul_idx = findfirst(x -> x > propN, cumul_sizes)
-        # min_size_idx = findfirst(x -> x > sorted_sizes[min_cumul_idx], sorted_sizes)
-
-        minsize = sorted_sizes[last_idx]
-
-        return max(minsize, 0)
-
     end
 
     function optimize_hyperparams(

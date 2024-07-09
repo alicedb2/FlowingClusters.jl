@@ -268,23 +268,6 @@ function unpack(hyperparams::MNCRPHyperparams; transform=true)::Vector{Float64}
 
 end
 
-function add_one_dimension!(hyperparams::MNCRPHyperparams)
-
-    d = dimension(hyperparams)
-    hyperparams.mu = vcat(hyperparams.mu, 0.0)
-    hyperparams.nu += 1
-    psi = hcat(hyperparams.psi, zeros(d))
-    psi = vcat(psi, zeros(1, d + 1))
-    psi[d+1, d+1] = 0.01
-    L = cholesky(psi).L
-    flatL = flatten(L)
-    hyperparams.flatL, hyperparams.L, hyperparams.psi = flatL, L, psi
-    
-    add_one_dimension!(hyperparams.diagnostics)
-
-    return hyperparams
-end
-
 # We gotta go fast!
 # Propagate what theta[i] locally affects
 # This is mostly to avoid an explicit matrix multiplication
