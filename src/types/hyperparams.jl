@@ -12,6 +12,8 @@ mutable struct MNCRPHyperparams
     nn::Union{Nothing, Chain}
     nn_params::Union{Nothing, ComponentArray}
     nn_state::Union{Nothing, NamedTuple}
+
+    nn_nu::Float64
     
 end
 
@@ -20,13 +22,13 @@ function Base.show(io::IO, h::MNCRPHyperparams)
     D = 3 + d + div(d * (d + 1), 2)
     if h.nn !== nothing
         nn_dim = size(h.nn_params, 1)
-        D += nn_dim
+        D += nn_dim + 1
     end
-    str = "MNCRPHyperparams(d=$d, D=$D from sum(1, $d, 1, $(div(d * (d + 1), 2)), 1" * (h.nn !== nothing ? ", $nn_dim" : "") * "))"
+    str = "MNCRPHyperparams(d=$d, D=$D from sum(1, $d, 1, $(div(d * (d + 1), 2)), 1" * (h.nn !== nothing ? ", $nn_dim, 1" : "") * "))"
     print(io, str)
 end
 
-function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=nothing)
+function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=nothing, ffjord_nn_nu=nothing)
     d = size(mu, 1)
 
     if ffjord_nn !== nothing
@@ -34,15 +36,17 @@ function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=nothin
         nn_params, nn_state = Lux.setup(Xoshiro(), ffjord_nn)
         nn_params = ComponentArray(nn_params) 
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
+        nn_nu = ffjord_nn_nu
     else
         nn_params = nothing
         nn_state = nothing
+        nn_nu = 0.01
     end
 
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d, nn_params=nn_params), ffjord_nn, nn_params, nn_state)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d, nn_params=nn_params), ffjord_nn, nn_params, nn_state, nn_nu)
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64; ffjord_nn=nothing)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64; ffjord_nn=nothing, ffjord_nn_nu=0.01)
     d = size(mu, 1)
     flatL_d = div(d * (d + 1), 2)
     if size(flatL, 1) != flatL_d
@@ -52,10 +56,10 @@ function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
     L = foldflat(flatL)
     psi = L * L'
 
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn, ffjord_nn_nu=ffjord_nn_nu)
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64; ffjord_nn=nothing)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64; ffjord_nn=nothing, ffjord_nn_nu=0.01)
     d = size(mu, 1)
     if !(d == size(L, 1))
         error("Dimension mismatch, L should have dimension $d x $d")
@@ -64,10 +68,10 @@ function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
     psi = L * L'
     flatL = flatten(L)
 
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn, ffjord_nn_nu=ffjord_nn_nu)
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; ffjord_nn=nothing)
+function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; ffjord_nn=nothing, ffjord_nn_nu=0.01)
     d = size(mu, 1)
     if !(d == size(psi, 1) == size(psi, 2))
         error("Dimension mismatch, L should have dimension $d x $d")
@@ -76,7 +80,7 @@ function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, 
     L = cholesky(psi).L
     flatL = flatten(L)
 
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn)
+    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn, ffjord_nn_nu=ffjord_nn_nu)
 end
 
 function MNCRPHyperparams(d::Int64; ffjord_nn=nothing)
@@ -86,13 +90,12 @@ function MNCRPHyperparams(d::Int64; ffjord_nn=nothing)
         0.01, 
         LowerTriangular(diagm(fill(0.1, d))), 
         d + 1.0,
-        ffjord_nn=ffjord_nn)
+        ffjord_nn=ffjord_nn, ffjord_nn_nu=0.01)
 end
 
-function clear_diagnostics!(hyperparams::MNCRPHyperparams)
-    d = dimension(hyperparams)
-
-    hyperparams.diagnostics = Diagnostics(d)
+function clear_diagnostics!(hyperparams::MNCRPHyperparams; clearhyperparams=true, clearsplitmerge=true, keepstepscale=true)
+    
+    clear_diagnostics!(hyperparams.diagnostics, clearhyperparams=clearhyperparams, clearsplitmerge=clearsplitmerge, keepstepscale=keepstepscale)
 
     return hyperparams    
 end
@@ -166,7 +169,7 @@ function param_dimension(hyperparams::MNCRPHyperparams; include_nn=true)
     d = dimension(hyperparams)
     D = 3 + d + div(d * (d + 1), 2)
     if hyperparams.nn_params !== nothing && include_nn
-        D += size(hyperparams.nn_params, 1)
+        D += size(hyperparams.nn_params, 1) + 1
     end
     return D
 end
@@ -266,23 +269,6 @@ function unpack(hyperparams::MNCRPHyperparams; transform=true)::Vector{Float64}
 
     return vcat(alpha, hyperparams.mu, lambda, hyperparams.flatL, nu)
 
-end
-
-function add_one_dimension!(hyperparams::MNCRPHyperparams)
-
-    d = dimension(hyperparams)
-    hyperparams.mu = vcat(hyperparams.mu, 0.0)
-    hyperparams.nu += 1
-    psi = hcat(hyperparams.psi, zeros(d))
-    psi = vcat(psi, zeros(1, d + 1))
-    psi[d+1, d+1] = 0.01
-    L = cholesky(psi).L
-    flatL = flatten(L)
-    hyperparams.flatL, hyperparams.L, hyperparams.psi = flatL, L, psi
-    
-    add_one_dimension!(hyperparams.diagnostics)
-
-    return hyperparams
 end
 
 # We gotta go fast!

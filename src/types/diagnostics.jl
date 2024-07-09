@@ -25,6 +25,9 @@ mutable struct Diagnostics
     accepted_nn::Vector{Int64}
     rejected_nn::Vector{Int64}
 
+    accepted_nn_nu::Int64
+    rejected_nn_nu::Int64
+
     amwg_nbbatches::Int64
     amwg_logscales::Vector{Float64}
 
@@ -43,7 +46,8 @@ function acceptance_rates(d::Diagnostics)
         nu = d.accepted_nu / (d.accepted_nu + d.rejected_nu),
         split = d.accepted_split / (d.accepted_split + d.rejected_split),
         merge = d.accepted_merge / (d.accepted_merge + d.rejected_merge),
-        nn = d.accepted_nn ./ (d.accepted_nn .+ d.rejected_nn)
+        nn = d.accepted_nn ./ (d.accepted_nn .+ d.rejected_nn),
+        nn_nu = d.accepted_nn_nu / (d.accepted_nn_nu + d.rejected_nn_nu)
     )
 end
 
@@ -59,7 +63,8 @@ function Base.show(io::IO, d::Diagnostics)
     println(io, "                split : $(round(ar.split, digits=4))")
     println(io, "                merge : $(round(ar.merge, digits=4))")
     println(io)
-    println(io, "    (mean,min,max) nn : $(round(mean(ar.nn), digits=2)), $(round(minimum(ar.nn, init=0), digits=2)), $(round(maximum(ar.nn, init=0), digits=2))")
+    println(io, "    (mean,min,max) nn : $(round(mean(ar.nn), digits=2)), $(round(minimum(ar.nn, init=Inf), digits=2)), $(round(maximum(ar.nn, init=0), digits=2))")
+    println(io, "                nn_nu : $(round(ar.nn_nu, digits=2))")
     println(io)
     print(io, "        nb parameters : $(d.D)")
 end
@@ -70,9 +75,11 @@ function Diagnostics(d; nn_params=nothing)
     sizeflatL = div(d * (d + 1), 2)
 
     D = 3 + d + sizeflatL
+    
     nn_D = nn_params === nothing ? 0 : size(nn_params, 1)
 
     return Diagnostics(
+        # accept/reject counts
         D + nn_D,                         # D
         0, 0,                             # alpha
         zeros(Int64, d), zeros(Int64, d), # mu
@@ -81,14 +88,16 @@ function Diagnostics(d; nn_params=nothing)
         0, 0,                             # nu
         0, 0,                             # split
         0, 0,                             # merge
-        zeros(Int64, nn_D), zeros(Int64, nn_D), # ffjord nn 
+        zeros(Int64, nn_D), zeros(Int64, nn_D), 0, 0, # ffjord nn 
+        
+        # AMWG and AM parameters
         0,                                # amwg_nbbatches
-        zeros(D + nn_D),                  # amwg_logscales
-        0, zeros(nn_D), zeros(nn_D, nn_D) # am sigma
+        zeros(D + 1),                     # amwg_logscales
+        0, zeros(nn_D), zeros(nn_D, nn_D) # am sigma (L, x, xx)
         )
 end
 
-function clear_diagnostics!(diagnostics::Diagnostics; clearhyperparams=true, clearsplitmerge=true, keepstepscale=true)
+function clear_diagnostics!(diagnostics::Diagnostics; clearhyperparams=true, clearsplitmerge=true, clear_nn=true, keepstepscale=true)
     
     if clearhyperparams
         diagnostics.accepted_alpha = 0
@@ -105,6 +114,15 @@ function clear_diagnostics!(diagnostics::Diagnostics; clearhyperparams=true, cle
 
         diagnostics.accepted_nu = 0
         diagnostics.rejected_nu = 0
+
+        if clear_nn
+            diagnostics.accepted_nn = zeros(length(diagnostics.accepted_nn))
+            diagnostics.rejected_nn = zeros(length(diagnostics.rejected_nn))
+        end
+
+        diagnostics.accepted_nn_nu = 0
+        diagnostics.rejected_nn_nu = 0
+
     end
 
     if clearsplitmerge
@@ -121,17 +139,5 @@ function clear_diagnostics!(diagnostics::Diagnostics; clearhyperparams=true, cle
         diagnostics.amwg_logscales = zeros(size(diagnostics.amwg_logscales, 1))
     end
 
-    return diagnostics
-end
-
-function add_one_dimension!(diagnostics::Diagnostics)
-    
-    d = length(diagnostics.accepted_mu)
-    
-    diagnostics.accepted_mu = vcat(diagnostics.accepted_mu, 0)
-    diagnostics.rejected_mu = vcat(diagnostics.rejected_mu, 0)
-    diagnostics.accepted_flatL = vcat(diagnostics.accepted_flatL, zeros(Int64, d + 1))
-    diagnostics.rejected_flatL = vcat(diagnostics.rejected_flatL, zeros(Int64, d + 1))
-    
     return diagnostics
 end

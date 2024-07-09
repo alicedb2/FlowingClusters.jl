@@ -101,7 +101,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(logprob_axis, [map_idx], label=nothing, color=:green)
     end
-    # axislegend(logprob_axis, framecolor=:white)
 
     nbc = nbclusters_chain(chain, burn)
     nbc_axis = Axis(fig[offset + 3, 2], title="#cluster", aspect=3)
@@ -110,7 +109,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(nbc_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(nbc_axis, framecolor=:white)
     
     lcc = largestcluster_chain(chain, burn)
     lcc_axis = Axis(fig[offset + 4, 1], title="Largest cluster", aspect=3)
@@ -119,7 +117,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(lcc_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(lcc_axis, framecolor=:white)
     
     ac = alpha_chain(chain, burn)
     alpha_axis = Axis(fig[offset + 4, 2], title="α", aspect=3)
@@ -128,7 +125,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(alpha_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(alpha_axis, framecolor=:white)
 
     muc = mu_chain(Matrix, chain, burn)
     mu_axis = Axis(fig[offset + 5, 1], title="μ", aspect=3)
@@ -139,7 +135,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(mu_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(mu_axis, framecolor=:white)
 
     lc = lambda_chain(chain, burn)
     lambda_axis = Axis(fig[offset + 5, 2], title="λ", aspect=3)
@@ -148,7 +143,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(lambda_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(lambda_axis, framecolor=:white)
 
     pc = psi_chain(Matrix, chain, burn)
     psi_axis = Axis(fig[offset + 6, 1], title="Ψ", aspect=3)
@@ -159,7 +153,6 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(psi_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(psi_axis, framecolor=:white)
     
     nc = nu_chain(chain, burn)
     nu_axis = Axis(fig[offset + 6, 2], title="ν", aspect=3)
@@ -168,11 +161,10 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(nu_axis, [map_idx], label=nothing, color=:black)
     end
-    # axislegend(nu_axis, framecolor=:white)
 
     if chain.hyperparams.nn !== nothing
         nnc = nn_chain(Matrix, chain, burn)
-        nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network")
+        nn_axis = Axis(fig[9, 1], title="FFJORD neural network prior")
         deco!(nn_axis)
         for p in eachrow(nnc)
             lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
@@ -180,7 +172,14 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
         if map_idx > 0
             vlines!(nn_axis, [map_idx], label=nothing, color=:black)
         end
-        # axislegend(nn_axis, framecolor=:white)
+    
+        nnnuc = nn_nu_chain(chain, burn)
+        nnnu_axis = Axis(fig[9, 2], title="FFJORD hyperprior ν")
+        deco!(nnnu_axis)
+        lines!(nnnu_axis, burn+1:N, log.(nnnuc), label=nothing)
+        if map_idx > 0
+            vlines!(nnnu_axis, [map_idx], label=nothing, color=:black)
+        end
     end
 
     return fig

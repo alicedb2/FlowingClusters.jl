@@ -64,7 +64,7 @@ module FlowingClusters
 
     include("types/chain.jl")
     export MNCRPChain
-    export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain, logprob_chain, nbclusters_chain, largestcluster_chain, nn_chain
+    export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain, logprob_chain, nbclusters_chain, largestcluster_chain, nn_chain, nn_nu_chain
     export ess_rhat, stats
 
     include("plotting.jl")
@@ -85,7 +85,8 @@ module FlowingClusters
         return updated_niw_hyperparams(clusters, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu)
     end
 
-    function updated_niw_hyperparams(cluster::Nothing,
+    function updated_niw_hyperparams(
+        ::Nothing,
         mu::AbstractVector{Float64},
         lambda::Float64,
         psi::AbstractMatrix{Float64},
@@ -142,7 +143,7 @@ module FlowingClusters
     end
 
     function log_Zniw(
-        cluster::Nothing,
+        ::Nothing,
         mu::Vector{Float64},
         lambda::Float64,
         psi::Matrix{Float64},
@@ -156,7 +157,7 @@ module FlowingClusters
     end
 
     function log_Zniw(
-        cluster::Nothing,
+        ::Nothing,
         mu::Vector{Float64},
         lambda::Float64,
         L::LowerTriangular{Float64},
@@ -206,28 +207,35 @@ module FlowingClusters
 
     end
 
-    function nn_prior(nn::Chain, nn_params::AbstractArray; gamma=1.0, alpha=0.01)
-        # Cauchy prior on weights and biases of last hidden layer.
-        # return sum(-log.(1 .+ abs.(nn_params[keys(nn_params)[end]] ./ gamma).^2).^-(1 + alpha) .- log(2pi) .+ log(1 + alpha) .- log(abs(gamma)) .- log(csc(pi/(1 + alpha))))
+    function nn_prior(nn::Chain, nn_params::AbstractArray, nn_nu::Float64=1.0; gamma=1.0)
 
-        # Stable t-distribution of index alpha on weights of last hidden layer.
+        # Stable t-distribution of index nn_nu on weights of last hidden layer.
         # (Neal - 1996 - Bayesian Learning for Neural Networks)
         gamma *= nn.layers[end].in_dims
-        return sum(-(1 + alpha)/2 * log.(1 .+ abs.(nn_params[keys(nn_params)[end]].weight ./ gamma).^2 ./ alpha) .- 1/2 * log(pi * alpha * gamma^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
+        last_weights = nn_params[keys(nn_params)[end]].weight
+
+        return sum(-(1 + nn_nu)/2 * log.(1 .+ abs.(last_weights ./ gamma).^2 ./ nn_nu) .- 1/2 * log(pi * nn_nu * gamma^2) .- loggamma(nn_nu/2) .+ loggamma((1 + nn_nu)/2))
+
+    end
+
+    function jeffreys_nn_nu(nn_nu::Float64)
+
+        try
+            ret = 1/2 * sqrt(polygamma(1, nn_nu / 2) - polygamma(1, (1 + nn_nu) / 2) - (5 + nn_nu) / 2 / nn_nu * exp(loggamma((1 + nn_nu) / 2) - loggamma((5 + nn_nu) / 2)))
+            return ret
+        catch e
+            return 0.0
+        end
+    
     end
 
     function logprobgenerative(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing; hyperpriors=true, temperature=1.0, ffjord=false)
+        
         alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
-        logp = logprobgenerative(clusters, alpha, mu, lambda, psi, nu; hyperpriors=hyperpriors, temperature=temperature)
-        if ffjord && hyperparams.nn !== nothing
-            ffjord_model = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (dimension(hyperparams),), Tsit5(), ad=AutoForwardDiff())
-            origmat = reduce(hcat, [base2original[el] for el in elements(clusters)], init=zeros(Float64, dimension(hyperparams), 0))
-            ret, _ = ffjord_model(origmat, hyperparams.nn_params, hyperparams.nn_state)
-            logp -= sum(ret.delta_logp)
+        nn, nn_params, nn_state, nn_nu = hyperparams.nn, hyperparams.nn_params, hyperparams.nn_state, hyperparams.nn_nu
 
-            logp += nn_prior(hyperparams.nn, hyperparams.nn_params)
-        end
-
+        logp = logprobgenerative(clusters, alpha, mu, lambda, psi, nu, base2original, nn, nn_params, nn_state, nn_nu; hyperpriors=hyperpriors, temperature=temperature, ffjord=ffjord)
+        
         return logp
     end
 
@@ -247,7 +255,16 @@ module FlowingClusters
     end
 
     # Return the log-likelihood of the model
-    function logprobgenerative(clusters::Vector{Cluster}, alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; hyperpriors=true, temperature=1.0)
+    function logprobgenerative(
+        clusters::Vector{Cluster}, 
+        alpha::Float64, 
+        mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64, 
+        base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing,
+        nn::Union{Nothing, Chain}=nothing, 
+        nn_params::Union{Nothing, ComponentArray}=nothing, 
+        nn_state::Union{Nothing, NamedTuple}=nothing, 
+        nn_nu::Float64=1.0;
+        hyperpriors=true, temperature=1.0, ffjord=false)
 
         @assert all(length(c) > 0 for c in clusters)
 
@@ -255,7 +272,7 @@ module FlowingClusters
         K = length(clusters)
         d = length(mu)
 
-        if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi))
+        if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi)) || nn_nu <= 0.0
             return -Inf
         end
 
@@ -269,6 +286,16 @@ module FlowingClusters
             log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
         end
         log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
+
+        log_nn = 0.0
+        if ffjord && nn !== nothing
+            ffjord_model = FFJORD(nn, (0.0f0, 1.0f0), (d,), Tsit5(), ad=AutoForwardDiff())
+            origmat = reduce(hcat, values(base2original), init=zeros(Float64, d, 0))
+            ret, _ = ffjord_model(origmat, nn_params, nn_state)
+            log_nn -= sum(ret.delta_logp)
+
+            log_nn += nn_prior(nn, nn_params, nn_nu)
+        end
 
         log_hyperpriors = 0.0
 
@@ -284,9 +311,14 @@ module FlowingClusters
             # log_hyperpriors += -d * log(det(psi))
             # nu hyperprior
             log_hyperpriors += log(jeffreys_nu(nu, d))
+
+            if ffjord && nn !== nothing
+                log_hyperpriors += log(jeffreys_nn_nu(nn_nu))
+            end
         end
 
-        log_p = log_crp + log_niw + log_hyperpriors
+        log_p = log_crp + log_niw + log_nn + log_hyperpriors
+
         return isfinite(log_p) ? log_p / temperature : -Inf
 
     end
@@ -349,7 +381,7 @@ module FlowingClusters
 
         ###########################
 
-        delta_minusnn = hp.nn !== nothing ? nn_prior(hp.nn, similar(hp.nn_params) .= 0.0) : 0.0
+        delta_minusnn = hp.nn !== nothing ? nn_prior(hp.nn, similar(hp.nn_params) .= 0.0, hp.nn_nu) : 0.0
 
         if pretty_progress === :repl
             progressio = stderr
@@ -438,7 +470,7 @@ module FlowingClusters
             if logprob > logp_quantile95 && attempt_map
                     nb_map_attemps += 1
                     try
-                        map_success = attempt_map!(chain, max_nb_pushes=15, verbose=false)
+                        map_success = attempt_map!(chain, max_nb_pushes=15, verbose=false, optimize_hyperparams=false)
                     catch e
                         map_success = false
                     end
@@ -449,7 +481,7 @@ module FlowingClusters
 
             sample_eta = -1
 
-            start_sampling_at = 200 + 2 * param_dimension(chain.hyperparams)
+            start_sampling_at = 3 * param_dimension(chain.hyperparams)
 
             if sample_every !== nothing
                 if sample_every === :autocov
@@ -468,11 +500,11 @@ module FlowingClusters
                         if length(chain.samples_idx) >= 20
                             sample_ess = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]).ess
                             while 2 * sample_ess < length(chain.samples_idx)
-                                    popfirst!(chain.clusters_samples)
-                                    popfirst!(chain.hyperparams_samples)
-                                    popfirst!(chain.base2original_samples)
-                                    popfirst!(chain.samples_idx)
-                                    sample_ess = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]).ess
+                                popfirst!(chain.clusters_samples)
+                                popfirst!(chain.hyperparams_samples)
+                                popfirst!(chain.base2original_samples)
+                                popfirst!(chain.samples_idx)
+                                sample_ess = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples]).ess
                             end
                         end
                     end
@@ -880,8 +912,8 @@ module FlowingClusters
             proposed_psi = proposed_L * proposed_L'
 
             log_acceptance = sum(log_Zniw(cluster, mu, lambda, proposed_psi, nu) - log_Zniw(nothing, mu, lambda, proposed_psi, nu)
-                        - log_Zniw(cluster, mu, lambda, hyperparams.psi, nu) + log_Zniw(nothing, mu, lambda, hyperparams.psi, nu)
-                        for cluster in clusters)
+                               - log_Zniw(cluster, mu, lambda, hyperparams.psi, nu) + log_Zniw(nothing, mu, lambda, hyperparams.psi, nu)
+                            for cluster in clusters)
 
             # Go from symmetric and uniform in L to uniform in psi
             # det(del psi/del L) = 2^d |L_11|^d * |L_22|^(d-1) ... |L_nn|
@@ -940,6 +972,34 @@ module FlowingClusters
 
     end
 
+    function advance_nn_nu!(hyperparams::MNCRPHyperparams; step_size=1.0)
+
+        step_distrib = Normal(0.0, step_size)
+
+        nn_nu = hyperparams.nn !== nothing ? hyperparams.nn_nu : 1.0
+    
+        current_log_nn_nu = log(nn_nu)
+        proposed_log_nn_nu = current_log_nn_nu + rand(step_distrib)
+        proposed_nn_nu = exp(proposed_log_nn_nu)
+
+        log_acceptance = nn_prior(hyperparams.nn, hyperparams.nn_params, proposed_nn_nu) - nn_prior(hyperparams.nn, hyperparams.nn_params, nn_nu)
+
+        log_hastings = proposed_log_nn_nu - current_log_nn_nu
+        log_acceptance += log_hastings
+
+        log_acceptance += log(jeffreys_nn_nu(proposed_nn_nu)) - log(jeffreys_nn_nu(nn_nu))
+
+        log_acceptance = min(0.0, log_acceptance)
+
+        if log(rand()) < log_acceptance
+            hyperparams.nn_nu = proposed_nn_nu
+            hyperparams.diagnostics.accepted_nn_nu += 1
+        else
+            hyperparams.diagnostics.rejected_nn_nu += 1
+        end
+
+    end
+
     function advance_hyperparams_adaptive!(
         clusters::Vector{Cluster},
         hyperparams::MNCRPHyperparams,
@@ -955,10 +1015,12 @@ module FlowingClusters
         slice_psi = (2 + d + 1):(2 + d + div(d * (d + 1), 2))
 
         idx_nu = 3 + d + div(d * (d + 1), 2)
-
+        
+        idx_nn_nu = idx_nu + 1
+        
         nn_D = hyperparams.nn_params === nothing ? 0 : size(hyperparams.nn_params, 1)
 
-        clear_diagnostics!(di, clearhyperparams=true, clearsplitmerge=false, keepstepscale=true)
+        clear_diagnostics!(di, clearhyperparams=true, clearsplitmerge=false, clear_nn=false, keepstepscale=true)
 
         for i in 1:amwg_batch_size
                 advance_alpha!(clusters, hyperparams, step_size=exp(di.amwg_logscales[1]))
@@ -966,17 +1028,20 @@ module FlowingClusters
                 advance_lambda!(clusters, hyperparams, step_size=exp(di.amwg_logscales[2+d]))
                 advance_psi!(clusters, hyperparams,step_size=exp.(di.amwg_logscales[slice_psi]))
                 advance_nu!(clusters, hyperparams, step_size=exp(di.amwg_logscales[idx_nu]))
+                if hyperparams.nn !== nothing && length(hyperparams_chain) > 2 * nn_D
+                    advance_nn_nu!(hyperparams, step_size=exp(di.amwg_logscales[idx_nn_nu]))
+                end
         end
         di.amwg_nbbatches += 1
         adjust_amwg_logscales!(di, acceptance_target=acceptance_target)
 
-        if hyperparams.nn_params !== nothing && nb_ffjord_am > 0
+        if hyperparams.nn !== nothing && nb_ffjord_am > 0
 
-            nbskip = 0 * param_dimension(hyperparams, include_nn=false)
+            if length(hyperparams_chain) <= 2 * nn_D
 
-            if nbskip < length(hyperparams_chain) <= nbskip + 2 * nn_D
                 step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-            elseif length(hyperparams_chain) > nbskip + 2 * nn_D
+
+            elseif length(hyperparams_chain) > 2 * nn_D
 
                 am_L, am_N, am_NN = hyperparams.diagnostics.am_L, hyperparams.diagnostics.am_N, hyperparams.diagnostics.am_NN
                 nn_sigma = (am_NN - am_N * am_N' / am_L) / (am_L - 1)
@@ -989,11 +1054,9 @@ module FlowingClusters
                 step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
             end
 
-            if length(hyperparams_chain) > nbskip
-                for i in 1:nb_ffjord_am
-                    advance_ffjord!(clusters, hyperparams, base2original,
-                                    step_distrib=step_distrib, temperature=temperature)
-                end
+            for i in 1:nb_ffjord_am
+                advance_ffjord!(clusters, hyperparams, base2original,
+                                step_distrib=step_distrib, temperature=temperature)
             end
 
             hyperparams.diagnostics.am_L += 1
@@ -1014,6 +1077,7 @@ module FlowingClusters
 
         d = size(di.accepted_mu, 1)
         idx_nu = 3 + d + div(d * (d + 1), 2)
+        idx_nn_nu = idx_nu + 1
 
         if di.accepted_alpha / (di.accepted_alpha + di.rejected_alpha) < acceptance_target
             di.amwg_logscales[1] -= delta_n
@@ -1049,6 +1113,18 @@ module FlowingClusters
             di.amwg_logscales[idx_nu] += delta_n
         end
 
+        # Bit of a hack to determine if
+        # a neural network is present but ok
+        # It relies on advance_hyperparams_adaptive!
+        # skipping nn_nu if the neural network is not present
+        if di.accepted_nn_nu + di.rejected_nn_nu > 0
+            if di.accepted_nn_nu / (di.accepted_nn_nu + di.rejected_nn_nu) < acceptance_target
+                di.amwg_logscales[idx_nn_nu] -= delta_n
+            else
+                di.amwg_logscales[idx_nn_nu] += delta_n
+            end
+        end
+
         di.amwg_logscales[di.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
         di.amwg_logscales[di.amwg_logscales .> minmax_logscale] .= minmax_logscale
 
@@ -1066,8 +1142,6 @@ module FlowingClusters
         if hyperparams.nn === nothing
             return hyperparams
         end
-
-        nn_D = size(hyperparams.nn_params, 1)
 
         # step_distrib = MvNormal(diagm(step.^2))
         steps = rand(step_distrib)
@@ -1089,25 +1163,26 @@ module FlowingClusters
         proposed_baseclusters = chunk(proposed_elements, size.(original_clusters, 2))
         proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}(eachcol(proposed_elements) .=> eachcol(original_elements))
 
-        log_acceptance = -sum(proposed_base.delta_logp)
+        # log_acceptance = -sum(proposed_base.delta_logp)
+        log_acceptance = 0.0
 
         # We already accounted for the ffjord deltalogps above
         # so call logprobgenerative with ffjord=false on the
         # proposed state.
         log_acceptance += (
-            logprobgenerative(Cluster.(proposed_baseclusters), hyperparams, hyperpriors=false, ffjord=false)
+              logprobgenerative(Cluster.(proposed_baseclusters), hyperparams, proposed_base2original, hyperpriors=false, ffjord=true)
             - logprobgenerative(clusters, hyperparams, base2original, hyperpriors=false, ffjord=true)
         )
 
         # We called logprobgenerative with ffjord=true on the current state
         # but not on the proposed state, so we need to account for the
         # prior on the neural network for the proposed state
-        log_acceptance += nn_prior(hyperparams.nn, proposed_nn_params)
+        # log_acceptance += nn_prior(hyperparams.nn, proposed_nn_params, hyperparams.nn_nu)
 
         log_acceptance /= temperature
 
         log_acceptance = min(0.0, log_acceptance)
-        if  log(rand()) < log_acceptance
+        if log(rand()) < log_acceptance
             hyperparams.nn_params = proposed_nn_params
             empty!(clusters)
             append!(clusters, Cluster.(proposed_baseclusters))
@@ -1152,7 +1227,7 @@ module FlowingClusters
             optimize_hyperparams!(map_clusters_attempt, map_hyperparams, verbose=verbose)
         end
 
-        attempt_logprob = logprobgenerative(map_clusters_attempt, map_hyperparams, chain.base2original, ffjord=true)
+        attempt_logprob = logprobgenerative(map_clusters_attempt, map_hyperparams, chain.base2original, hyperpriors=true, ffjord=true)
         if attempt_logprob > chain.map_logprob || force
             chain.map_logprob = attempt_logprob
             chain.map_clusters = map_clusters_attempt
@@ -1163,25 +1238,6 @@ module FlowingClusters
         else
             return false
         end
-    end
-
-    function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
-
-        N = sum(length.(clusters))
-        include_up_to = N * (1 - proportion)
-
-        sorted_sizes = sort(length.(clusters), rev=true)
-        cumul_sizes = cumsum(sorted_sizes)
-
-        last_idx = findlast(x -> x <= include_up_to, cumul_sizes)
-
-        # min_cumul_idx = findfirst(x -> x > propN, cumul_sizes)
-        # min_size_idx = findfirst(x -> x > sorted_sizes[min_cumul_idx], sorted_sizes)
-
-        minsize = sorted_sizes[last_idx]
-
-        return max(minsize, 0)
-
     end
 
     function optimize_hyperparams(
@@ -1237,7 +1293,7 @@ module FlowingClusters
     end
 
     function updated_mvstudent_params(
-        cluster::Nothing,
+        ::Nothing,
         mu::AbstractVector{Float64},
         lambda::Float64,
         psi::AbstractMatrix{Float64},
@@ -1274,7 +1330,6 @@ module FlowingClusters
         add_empty=true
         )::Vector{Tuple{Float64, Vector{Float64}, Matrix{Float64}}}
 
-        d = length(mu)
         updated_mvstudent_degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
         if add_empty
             push!(updated_mvstudent_degs_mus_sigs, updated_mvstudent_params(nothing, mu, lambda, psi, nu))
@@ -1294,7 +1349,6 @@ module FlowingClusters
         )
 
         alpha, mu, lambda, psi, nu = collect(hyperparams)
-        d = length(mu)
 
         if ignore_weights
             weights = ones(length(clusters) + 1)
@@ -1330,7 +1384,7 @@ module FlowingClusters
         component_weights::AbstractVector{Float64},
         mvstudent_degs_mus_sigs::AbstractVector{Tuple{Float64, Vector{Float64}, Matrix{Float64}}};
         nb_rejection_samples=10000
-        )::Function
+        )
 
         @assert isapprox(sum(component_weights), 1.0) "sum(component_weights) = $(sum(component_weights)) !~= 1"
 

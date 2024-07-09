@@ -126,3 +126,25 @@ function drawNIW(
 
     return mu, sigma
 end
+
+
+# Used by plot() when nb_clusters given as a float 0 < p < 1.0
+# Find the minimum size of clusters to include at least a proportion of the data
+function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
+
+    N = sum(length.(clusters))
+    include_up_to = N * (1 - proportion)
+
+    sorted_sizes = sort(length.(clusters), rev=true)
+    cumul_sizes = cumsum(sorted_sizes)
+
+    last_idx = findlast(x -> x <= include_up_to, cumul_sizes)
+
+    # min_cumul_idx = findfirst(x -> x > propN, cumul_sizes)
+    # min_size_idx = findfirst(x -> x > sorted_sizes[min_cumul_idx], sorted_sizes)
+
+    minsize = sorted_sizes[last_idx]
+
+    return max(minsize, 0)
+
+end
