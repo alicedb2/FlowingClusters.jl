@@ -168,7 +168,8 @@ nn_chain(chain::Vector{MNCRPHyperparams}, burn=0) = [p.nn_params for p in chain[
 nn_chain(chain::MNCRPChain, burn=0) = [p.nn_params for p in chain.hyperparams_chain[burn+1:end]]
 nn_chain(::Type{Matrix}, chain::Union{MNCRPChain, Vector{MNCRPHyperparams}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
 
-nn_nu_chain(chain::MNCRPChain, burn=0) = chain.hyperparams.nn !== nothing ? [p.nn_nu for p in chain.hyperparams_chain[burn+1:end]] : nothing
+nn_alpha_chain(chain::MNCRPChain, burn=0) = chain.hyperparams.nn !== nothing ? [p.nn_alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
+nn_scale_chain(chain::MNCRPChain, burn=0) = chain.hyperparams.nn !== nothing ? [p.nn_scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
 
 elements(::Type{T}, chain::MNCRPChain) where {T} = elements(T, chain.clusters)
 elements(chain::MNCRPChain) = elements(chain.clusters)
@@ -228,7 +229,7 @@ function ess_rhat(chain::MNCRPChain, burn=0)
     flatL = ess_rhat(reshape(flatL_chain(Matrix, chain, burn)', N, 1, flatL_d)),
     nu = ess_rhat(nu_chain(chain, burn)),
     nn = chain.hyperparams.nn_params !== nothing ? ess_rhat(reshape(nn_chain(Matrix, chain, burn)', N, 1, nn_D)) : nothing,
-    nn_nu = chain.hyperparams.nn_params !== nothing ? ess_rhat(nn_nu_chain(chain, burn)) : nothing,
+    nn_alpha = chain.hyperparams.nn_params !== nothing ? ess_rhat(nn_alpha_chain(chain, burn)) : nothing,
     logprob = ess_rhat(logprob_chain(chain, burn)),
     nbclusters = ess_rhat(nbclusters_chain(chain, burn)),
     largestcluster = ess_rhat(largestcluster_chain(chain, burn))

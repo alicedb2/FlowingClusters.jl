@@ -1,5 +1,5 @@
 function performance_statistics(scores_at_presences, scores_at_absences; threshold=nothing)
-    
+
     if threshold !== nothing
         scores_at_presences = scores_at_presences .>= threshold
         scores_at_absences = scores_at_absences .>= threshold
@@ -9,12 +9,12 @@ function performance_statistics(scores_at_presences, scores_at_absences; thresho
     tp = sum(scores_at_presences)
     # absence with score towards 1 is a false positive
     fp = sum(scores_at_absences)
-    
+
     # absence with a score towards 0 is a true negative
     tn = sum(1 .- scores_at_absences)
     # presence with score towards 0 is a false negative
     fn = sum(1 .- scores_at_presences)
-    
+
 
     sensitivity = tp/(tp + fn)
     specificity = tn/(tn + fp)
@@ -35,13 +35,13 @@ end
 
 
 function best_score_threshold(scores_at_presences, scores_at_absences; statistic=:MCC, nbsteps=1000)
-    
+
     thresholds = LinRange(0.0, 1.0, nbsteps)
     best_score = -Inf
     best_thresh = 0.0
 
     statistic in [:J, :MCC, :kappa] || throw(ArgumentError("perfscore must be :J (Youden's J), :MCC (Matthew's correlation coefficient), or :kappa (Cohen's kappa)"))
-    
+
     for thresh in thresholds
         perfstats = performance_statistics(scores_at_presences, scores_at_absences, threshold=thresh)
         if perfstats[statistic] >= best_score

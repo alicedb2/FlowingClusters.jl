@@ -26,20 +26,20 @@ function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=fa
 end
 
 function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=false, nb_clusters=nothing, plot_kw...)
-    
+
     @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
     d = length(chain.hyperparams.mu)
-    
+
     proj = dims_to_proj(dims, d)
 
     return plot(chain, proj, burn=burn, rev=rev, nb_clusters=nb_clusters; plot_kw...)
 end
 
 function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_clusters=nothing)
-    
+
     @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
-    
+
     N = length(chain)
 
     if burn >= N
@@ -109,7 +109,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(nbc_axis, [map_idx], label=nothing, color=:black)
     end
-    
+
     lcc = largestcluster_chain(chain, burn)
     lcc_axis = Axis(fig[offset + 4, 1], title="Largest cluster", aspect=3)
     deco!(lcc_axis)
@@ -117,7 +117,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(lcc_axis, [map_idx], label=nothing, color=:black)
     end
-    
+
     ac = alpha_chain(chain, burn)
     alpha_axis = Axis(fig[offset + 4, 2], title="α", aspect=3)
     deco!(alpha_axis)
@@ -153,7 +153,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     if map_idx > 0
         vlines!(psi_axis, [map_idx], label=nothing, color=:black)
     end
-    
+
     nc = nu_chain(chain, burn)
     nu_axis = Axis(fig[offset + 6, 2], title="ν", aspect=3)
     deco!(nu_axis)
@@ -164,7 +164,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
 
     if chain.hyperparams.nn !== nothing
         nnc = nn_chain(Matrix, chain, burn)
-        nn_axis = Axis(fig[9, 1], title="FFJORD neural network prior")
+        nn_axis = Axis(fig[9, 1:2], title="FFJORD neural network prior")
         deco!(nn_axis)
         for p in eachrow(nnc)
             lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
@@ -172,13 +172,21 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
         if map_idx > 0
             vlines!(nn_axis, [map_idx], label=nothing, color=:black)
         end
-    
-        nnnuc = nn_nu_chain(chain, burn)
-        nnnu_axis = Axis(fig[9, 2], title="FFJORD hyperprior ν")
-        deco!(nnnu_axis)
-        lines!(nnnu_axis, burn+1:N, log.(nnnuc), label=nothing)
+
+        nnscalec = nn_alpha_chain(chain, burn)
+        nnscale_axis = Axis(fig[10, 1], title="FFJORD hyperprior log α")
+        deco!(nnscale_axis)
+        lines!(nnscale_axis, burn+1:N, log.(nnscalec), label=nothing)
         if map_idx > 0
-            vlines!(nnnu_axis, [map_idx], label=nothing, color=:black)
+            vlines!(nnscale_axis, [map_idx], label=nothing, color=:black)
+        end
+
+        nnscalec = nn_scale_chain(chain, burn)
+        nnscale_axis = Axis(fig[10, 2], title="FFJORD hyperprior scale")
+        deco!(nnscale_axis)
+        lines!(nnscale_axis, burn+1:N, nnscalec, label=nothing)
+        if map_idx > 0
+            vlines!(nnscale_axis, [map_idx], label=nothing, color=:black)
         end
     end
 
