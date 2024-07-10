@@ -1,0 +1,172 @@
+# function logprobgenerative(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams, base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing; hyperpriors=true, ffjord=false, temperature=1.0)
+
+#     alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
+#     nn, nn_params, nn_state, nn_alpha, nn_scale = hyperparams.nn, hyperparams.nn_params, hyperparams.nn_state, hyperparams.nn_alpha, hyperparams.nn_scale
+
+#     logp = logprobgenerative(clusters, alpha, mu, lambda, psi, nu, base2original, nn, nn_params, nn_state, nn_alpha, nn_scale; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
+
+#     return logp
+# end
+
+# # Theta is assumed to be a concatenated vector of coordinates
+# # i.e. vcat(log(alpha), mu, log(lambda), flatL, log(nu -d + 1))
+# function logprobgenerative(clusters::Vector{Cluster}, theta::Vector{Float64}; hyperpriors=true, backtransform=true, jacobian=false, temperature=1.0)
+#     alpha, mu, lambda, _flatL, L, psi, nu = pack(theta, backtransform=backtransform)
+#     log_p = logprobgenerative(clusters, alpha, mu, lambda, psi, nu; hyperpriors=hyperpriors, temperature=temperature)
+#     if jacobian
+#         d = length(mu)
+#         log_p += log(alpha)
+#         log_p += log(lambda)
+#         log_p += sum((d:-1:1) .* log.(abs.(diag(L))))
+#         log_p += log(nu - d + 1)
+#     end
+#     return log_p
+# end
+
+# # Return the log-likelihood of the model
+# function logprobgenerative(
+#     clusters::Vector{Cluster},
+#     alpha::Float64,
+#     mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64,
+#     base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing,
+#     nn::Union{Nothing, Chain}=nothing,
+#     nn_params::Union{Nothing, ComponentArray}=nothing,
+#     nn_state::Union{Nothing, NamedTuple}=nothing,
+#     nn_alpha::Float64=1.0, nn_scale::Float64=1.0;
+#     hyperpriors=true, ffjord=false, temperature=1.0)
+
+#     @assert all(length(c) > 0 for c in clusters)
+
+#     N = sum([length(c) for c in clusters])
+#     K = length(clusters)
+#     d = length(mu)
+
+#     if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi)) || nn_alpha <= 0.0
+#         return -Inf
+#     end
+
+#     # Log-probability associated with the Chinese Restaurant Process
+#     log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum([loggamma(length(c)) for c in clusters])
+
+#     # Log-probability associated with the data likelihood
+#     # and Normal-Inverse-Wishart base distribution of the CRP
+#     log_niw = 0.0
+#     for cluster in clusters
+#         log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
+#     end
+#     log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
+
+#     log_nn = 0.0
+#     if ffjord && nn !== nothing
+#         ffjord_model = FFJORD(nn, (0.0f0, 1.0f0), (d,), Tsit5(), ad=AutoForwardDiff())
+#         origmat = reduce(hcat, values(base2original), init=zeros(Float64, d, 0))
+#         ret, _ = ffjord_model(origmat, nn_params, nn_state)
+#         log_nn -= sum(ret.delta_logp)
+
+#         log_nn += nn_prior(nn, nn_params, nn_alpha, nn_scale)
+#     end
+
+#     log_hyperpriors = 0.0
+
+#     if hyperpriors
+#         # mu0 has a flat hyperpriors
+#         # alpha hyperprior
+#         log_hyperpriors += log(jeffreys_alpha(alpha, N))
+#         # lambda hyperprior
+#         log_hyperpriors += -log(lambda)
+#         # psi hyperprior
+#         log_hyperpriors += -d * logdetpsd(psi)
+#         # log_hyperpriors += -d * logdet(psi)
+#         # log_hyperpriors += -d * log(det(psi))
+#         # nu hyperprior
+#         log_hyperpriors += log(jeffreys_nu(nu, d))
+
+#         if ffjord && nn !== nothing
+#             # log_hyperpriors += log(jeffreys_t_alpha(nn_alpha))
+#             # log_hyperpriors -= log(nn_scale)
+#             log_hyperpriors += log_jeffreys_t(nn_alpha, nn_scale)
+#         end
+#     end
+
+#     log_p = log_crp + log_niw + log_nn + log_hyperpriors
+
+#     return isfinite(log_p) ? log_p / temperature : -Inf
+
+# end
+
+function logprobgenerative(
+    clusters::Vector{Cluster},
+    hyperparams::FCHyperparams,
+    base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing;
+    hyperpriors=true, ffjord=false, temperature=1.0)
+    return logprobgenerative(clusters, hyperparams._, base2original, hyperparams.nn, hyperparams.nns; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
+end
+
+function logprobgenerative(
+    clusters::Vector{Cluster},
+    hyperparamsarray::ComponentArray{Float64},
+    base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing,
+    nn::Union{Nothing, Chain}=nothing,
+    nn_state::Union{Nothing, NamedTuple}=nothing;
+    hyperpriors=true, ffjord=false, temperature=1.0)
+
+    @assert all(length(c) > 0 for c in clusters)
+
+    alpha, mu, lambda, psi, nu = hyperparamsarray.pyp.alpha, hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, foldpsi(hyperparamsarray.niw.flatL), hyperparamsarray.niw.nu
+    nn_params, nn_alpha, nn_scale = hyperparamsarray.nn.params, hyperparamsarray.nn.t.alpha, hyperparamsarray.nn.t.scale
+
+    N = sum([length(c) for c in clusters])
+    K = length(clusters)
+    d = size(hyperparamsarray.niw.mu, 1)
+
+    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi)) || nn_alpha <= 0.0
+        return -Inf
+    end
+
+    # Log-probability associated with the Chinese Restaurant Process
+    log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum([loggamma(length(c)) for c in clusters])
+
+    # Log-probability associated with the data likelihood
+    # and Normal-Inverse-Wishart base distribution of the CRP
+    log_niw = 0.0
+    for cluster in clusters
+        log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
+    end
+    log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
+
+    log_nn = 0.0
+
+    if ffjord && !isnothing(nn)
+        ffjord_model = FFJORD(nn, (0.0, 1.0), (d,), Tsit5(), ad=AutoForwardDiff())
+        origmat = reduce(hcat, values(base2original), init=zeros(Float64, d, 0))
+        ret, _ = ffjord_model(origmat, nn_params, nn_state)
+        log_nn -= sum(ret.delta_logp)
+
+        log_nn += nn_prior(nn, nn_params, nn_alpha, nn_scale)
+    end
+
+    log_hyperpriors = 0.0
+
+    if hyperpriors
+        # mu0 has a flat hyperpriors
+        # alpha hyperprior
+        log_hyperpriors += log(jeffreys_alpha(alpha, N))
+
+        # NIW hyperpriors
+        log_hyperpriors += -log(lambda)
+        log_hyperpriors += -d * logdetpsd(psi)
+        log_hyperpriors += log(jeffreys_nu(nu, d))
+
+        if ffjord && !isnothing(nn)
+            # log_hyperpriors += log(jeffreys_t_alpha(nn_alpha))
+            # log_hyperpriors -= log(nn_scale)
+            log_hyperpriors += log_jeffreys_t(nn_alpha, nn_scale)
+        end
+    end
+
+    log_p = log_crp + log_niw + log_nn + log_hyperpriors
+
+    return isfinite(log_p) ? log_p / temperature : -Inf
+
+end
+

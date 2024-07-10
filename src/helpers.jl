@@ -33,7 +33,6 @@ function performance_statistics(scores_at_presences, scores_at_absences; thresho
 
 end
 
-
 function best_score_threshold(scores_at_presences, scores_at_absences; statistic=:MCC, nbsteps=1000)
 
     thresholds = LinRange(0.0, 1.0, nbsteps)
@@ -74,13 +73,7 @@ end
 function logdetpsd(A::AbstractMatrix{Float64})
     chol = cholesky(Symmetric(A), check=false)
     if issuccess(chol)
-        # marginally faster than
-        # 2 * sum(log.(diag(chol.U)))
-        acc = 0.0
-        for i in 1:size(A, 1)
-            acc += log(chol.U[i, i])
-        end
-        return 2 * acc
+        return logdet(chol)
     else
         return -Inf
     end

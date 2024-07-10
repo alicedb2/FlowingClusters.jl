@@ -25,18 +25,18 @@ function plot!(ax, clusters::Vector{Cluster}; dims::Vector{Int64}=[1, 2], rev=fa
     return ax
 end
 
-function plot(chain::MNCRPChain; dims::Vector{Int64}=[1, 2], burn=0, rev=false, nb_clusters=nothing, plot_kw...)
+function plot(chain::FCChain; dims::Vector{Int64}=[1, 2], burn=0, rev=false, nb_clusters=nothing, plot_kw...)
 
     @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 
-    d = length(chain.hyperparams.mu)
+    d = dimension(chain.hyperparams)
 
     proj = dims_to_proj(dims, d)
 
     return plot(chain, proj, burn=burn, rev=rev, nb_clusters=nb_clusters; plot_kw...)
 end
 
-function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_clusters=nothing)
+function plot(chain::FCChain, proj::Matrix{Float64}; burn=0, rev=false, nb_clusters=nothing)
 
     @assert size(proj, 1) == 2 "The projection matrix should have 2 rows"
 
@@ -60,10 +60,10 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
         return axis
     end
 
-    if chain.hyperparams.nn === nothing
-        ysize = 1600
+    if hasnn(chain.hyperparams)
+        ysize = 2400
     else
-        ysize = 2300
+        ysize = 1500
     end
 
     fig = Figure(size=(1200, ysize))
@@ -79,7 +79,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
     # axislegend(p_current_axis, framecolor=:white)
 
     offset = 0
-    if chain.hyperparams.nn !== nothing
+    if hasnn(chain.hyperparams)
         offset = 2
         p_basemap_axis = Axis(fig[3:4, 1], title="MAP base state ($(length(chain.map_clusters)) clusters)")
         deco!(p_basemap_axis)
@@ -162,7 +162,7 @@ function plot(chain::MNCRPChain, proj::Matrix{Float64}; burn=0, rev=false, nb_cl
         vlines!(nu_axis, [map_idx], label=nothing, color=:black)
     end
 
-    if chain.hyperparams.nn !== nothing
+    if hasnn(chain.hyperparams)
         nnc = nn_chain(Matrix, chain, burn)
         nn_axis = Axis(fig[9, 1:2], title="FFJORD neural network prior")
         deco!(nn_axis)
