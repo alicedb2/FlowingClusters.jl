@@ -78,6 +78,7 @@ iscomplete(clusters::Vector{BitCluster}) = iscomplete([bc.mask for bc in cluster
 iscomplete(bitvectors::Vector{BitVector}) = all(reduce((ov, x) -> ov .| x, bitvectors))
 
 Base.show(io::IO, cluster::AbstractCluster) = print(io, "$(typeof(cluster).name.wrapper){$(typeof(cluster).parameters[1]), $(typeof(cluster).parameters[2])}($(length(cluster)))")
+
 # function realspace_cluster(::Type{Cluster}, cluster::Cluster, base2original::Dict{Vector{Float64}, Vector{Float64}})
 #     return Cluster([base2original[el] for el in cluster])
 # end
@@ -216,7 +217,7 @@ function Base.empty!(cluster::SetCluster{D, T}) where {D, T}
     cluster.sum_xx .= zero(T)
     return cluster
 end
-function Base.empty!(cluster.BitCluster{D, T}) where {D, T}
+function Base.empty!(cluster::BitCluster{D, T}) where {D, T}
     cluster.mask .= false
     cluster.sum_x .= zero(T)
     cluster.xum_xx .= zero(T)
