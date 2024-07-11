@@ -305,3 +305,300 @@ function advance_nn_scale!(hyperparams::FCHyperparams; step_size=1.0)
     end
 
 end
+
+
+# Sequential splitmerge from Dahl & Newcomb
+function advance_splitmerge_seq!(clusters::Vector{Cluster}, hyperparams::FCHyperparams; t=3, temperature=1.0)
+
+    @assert t >= 0
+
+    alpha, mu, lambda, psi, nu = hyperparams._.pyp.alpha, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    d = dimension(hyperparams)
+
+    cluster_indices = Tuple{Int64, Vector{Float64}}[(ce, e) for (ce, cluster) in enumerate(clusters) for e in cluster]
+
+    (ci, ei), (cj, ej) = sample(cluster_indices, 2, replace=false)
+
+    if ci == cj
+
+        scheduled_elements = [e for e in clusters[ci] if !(e === ei) && !(e === ej)]
+        initial_state = Cluster[clusters[ci]]
+        deleteat!(clusters, ci)
+
+    elseif ci != cj
+
+        scheduled_elements = [e for e in flatten((clusters[ci], clusters[cj])) if !(e === ei) && !(e === ej)]
+        initial_state = Cluster[clusters[ci], clusters[cj]]
+        deleteat!(clusters, sort([ci, cj]))
+
+    end
+
+    shuffle!(scheduled_elements)
+
+    proposed_state = Cluster[Cluster([ei]), Cluster([ej])]
+    launch_state = Cluster[]
+
+    log_q = 0.0
+
+    for step in flatten((0:t, [:create_proposed_state]))
+
+
+        # Keep copy of launch state
+        #
+        if step == :create_proposed_state
+            if ci == cj
+                # Do a last past to the proposed
+                # split state to accumulate
+                # q(proposed|launch)
+                # remember that
+                # q(launch|proposed)
+                # = q(merged|some split launch state) = 1
+                launch_state = copy(proposed_state)
+            elseif ci != cj
+                # Don't perform last step in a merge,
+                # keep log_q as the transition probability
+                # to the launch state, i.e.
+                # q(launch|proposed) = q(launch|launch-1)
+                launch_state = proposed_state
+                break
+            end
+        end
+
+        log_q = 0.0
+
+        for e in shuffle!(scheduled_elements)
+
+            delete!(proposed_state, e)
+
+            # Should be true by construction, just
+            # making sure the construction is valid
+            @assert all([!isempty(c) for c in proposed_state])
+            @assert length(proposed_state) == 2
+
+            #############
+
+            log_weights = zeros(length(proposed_state))
+            for (i, cluster) in enumerate(proposed_state)
+                log_weights[i] = log_cluster_weight(e, cluster, alpha, mu, lambda, psi, nu)
+            end
+
+            if temperature > 0.0
+                unnorm_logp = log_weights / temperature
+                norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+                probs = Weights(exp.(norm_logp))
+                new_assignment, log_transition = sample(collect(zip(proposed_state, norm_logp)), probs)
+                log_q += log_transition
+            elseif temperature <= 0.0
+                _, max_idx = findmax(log_weights)
+                new_assignment = proposed_state[max_idx]
+                log_q += 0.0 # symbolic, transition is certain
+            end
+
+            push!(new_assignment, e)
+
+        end
+
+    end
+
+    # At this point if we are doing a split state
+    # then log_q = q(split*|launch)
+    # and if we are doing a merge state
+    # then log_q = q(launch|merge)=  q(launch|launch-1)
+
+    if ci != cj
+        # Create proposed merge state
+        # The previous loop was only to get
+        # q(launch|proposed) = q(launch|launch-1)
+        # and at this point launch_state = proposed_state
+        proposed_state = Cluster[Cluster(Vector{Float64}[e for cluster in initial_state for e in cluster])]
+    elseif ci == cj
+        # do nothing, we already have the proposed state
+    end
+
+    log_acceptance = (logprobgenerative(proposed_state, hyperparams, hyperpriors=false)
+                    - logprobgenerative(initial_state, hyperparams, hyperpriors=false))
+
+    log_acceptance /= temperature
+
+    # log_q is plus-minus the log-Hastings factor.
+    # log_q already includes the tempering.
+    if ci != cj
+        log_acceptance += log_q
+    elseif ci == cj
+        log_acceptance -= log_q
+    end
+
+    log_acceptance = min(0.0, log_acceptance)
+
+    if log(rand()) < log_acceptance
+        append!(clusters, proposed_state)
+        if ci != cj
+            return [-1, 1]
+        elseif ci == cj
+            return [1, -1]
+        end
+    else
+        append!(clusters, initial_state)
+        if ci != cj
+            return [-1, 0]
+        elseif ci == cj
+            return [0, -1]
+        end
+    end
+
+end
+
+
+function advance_ffjord!(
+    clusters::Vector{Cluster},
+    hyperparams::FCHyperparams,
+    base2original::Dict{Vector{Float64}, Vector{Float64}};
+    step_distrib=nothing,
+    temperature=1.0)
+
+    hasnn(hyperparams) || return 0
+
+    ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (dimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
+    
+    original_clusters = realspace_clusters(Matrix, clusters, base2original)
+
+    proposed_nn_params = hyperparams._.nn.params .+ rand(step_distrib)
+
+    # We could have left the calculation of deltalogps
+    # to logprobgenerative below, but we a proposal comes
+    # a new base2original so we do both at once here and
+    # call logprobgenerative with ffjord=false
+
+    original_elements = reduce(hcat, original_clusters)
+    proposed_base, _ = ffjord_model(original_elements, proposed_nn_params, hyperparams.nns)
+    proposed_elements = Matrix{Float64}(proposed_base.z)
+    proposed_baseclusters = chunk(proposed_elements, size.(original_clusters, 2))
+    proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}(eachcol(proposed_elements) .=> eachcol(original_elements))
+
+    log_acceptance = -sum(proposed_base.delta_logp)
+
+    # We already accounted for the ffjord deltalogps above
+    # so call logprobgenerative with ffjord=false on the
+    # proposed state.
+    log_acceptance += (
+            logprobgenerative(Cluster.(proposed_baseclusters), hyperparams, proposed_base2original, hyperpriors=false, ffjord=false)
+          - logprobgenerative(clusters, hyperparams, base2original, hyperpriors=false, ffjord=true)
+    )
+
+    # We called logprobgenerative with ffjord=true on the current state
+    # but not on the proposed state, so we need to account for the
+    # prior on the neural network for the proposed state
+    log_acceptance += nn_prior(proposed_nn_params, hyperparams._.nn.t.alpha, hyperparams._.nn.t.scale)
+
+    log_acceptance /= temperature
+
+    log_acceptance = min(0.0, log_acceptance)
+    if log(rand()) < log_acceptance
+        hyperparams._.nn.params = proposed_nn_params
+        empty!(clusters)
+        append!(clusters, Cluster.(proposed_baseclusters))
+        empty!(base2original)
+        merge!(base2original, proposed_base2original)
+        return 1
+    else
+        return 0
+    end
+
+end
+
+
+
+function advance_hyperparams_adaptive!(
+    clusters::Vector{Cluster},
+    hyperparams::FCHyperparams,
+    base2original::Dict{Vector{Float64}, Vector{Float64}},
+    diagnostics::Diagnostics;
+    amwg_batch_size=40, acceptance_target=0.44,
+    nb_ffjord_am=1, am_safety_probability=0.05, am_safety_sigma=0.1,
+    hyperparams_chain=nothing, temperature=1.0)
+
+    di = diagnostics
+    d = dimension(hyperparams)
+
+    # by default only resets hyperparams acceptance rates
+    clear_diagnostics!(di)
+
+    nn_D = hasnn(hyperparams) ? size(hyperparams._.nn.params, 1) : 0
+
+    for i in 1:amwg_batch_size
+            advance_alpha!(clusters, hyperparams, step_size=exp(di.amwg_logscales.pyp.alpha))
+            advance_mu!(clusters, hyperparams, step_size=exp.(di.amwg_logscales.niw.mu))
+            advance_lambda!(clusters, hyperparams, step_size=exp(di.amwg_logscales.niw.lambda))
+            advance_psi!(clusters, hyperparams,step_size=exp.(di.amwg_logscales.niw.flatL))
+            advance_nu!(clusters, hyperparams, step_size=exp(di.amwg_logscales.niw.nu))
+            if hasnn(hyperparams)
+                advance_nn_alpha!(hyperparams, step_size=exp(di.amwg_logscales.nn.t.alpha))
+                advance_nn_scale!(hyperparams, step_size=exp(di.amwg_logscales.nn.t.scale))
+            end
+    end
+
+    di.amwg_nbbatches += 1
+
+    adjust_amwg_logscales!(di, acceptance_target=acceptance_target)
+
+    if hasnn(hyperparams) && nb_ffjord_am > 0
+
+        if length(hyperparams_chain) <= 4 * nn_D
+
+            step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
+
+        elseif length(hyperparams_chain) > 4 * nn_D
+
+            nn_sigma = am_sigma(diagnostics)
+
+            safety_component = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
+            empirical_estimate_component = MvNormal(2.38^2 / nn_D * nn_sigma)
+
+            step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
+        end
+
+        if hasnn(hyperparams)
+            for i in 1:nb_ffjord_am
+                advance_ffjord!(clusters, hyperparams, base2original,
+                                step_distrib=step_distrib, temperature=temperature)
+            end
+
+            diagnostics.am.L += 1
+            diagnostics.am.x .+= hyperparams._.nn.params
+            diagnostics.am.xx .+= hyperparams._.nn.params * hyperparams._.nn.params'
+        end
+    end
+
+    return hyperparams
+
+end
+
+
+
+
+function adjust_amwg_logscales!(diagnostics::Diagnostics; acceptance_target=0.44, minmax_logscale=Inf, min_delta=0.01)
+
+    di = diagnostics
+
+    delta_n = min(min_delta, 1/sqrt(di.amwg_nbbatches))
+
+    if di.accepted.pyp.alpha / (di.accepted.pyp.alpha + di.rejected.pyp.alpha) < acceptance_target
+        di.amwg.logscales.pyp.alpha -= delta_n
+    else
+        di.amwg.logscales.pyp.alpha += delta_n
+    end
+
+    niw_accrates = di.accepted.niw ./ (di.accepted.niw .+ di.rejected.niw)
+    di.amwg.logscales.niw .+= delta_n .* (niw_accrates .< acceptance_target) .- delta_n .* (niw_accrates .>= acceptance_target)
+
+    if !isnothing(di.am)
+        nnt_accrates = di.accepted.nn.t ./ (di.accepted.nn.t .+ di.rejected.nn.t)
+        di.amwg.logscales.nn.t .+= delta_n .* (nnt_accrates .< acceptance_target) .- delta_n .* (nnt_accrates .>= acceptance_target)
+    end
+
+    di.amwg_logscales[di.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
+    di.amwg_logscales[di.amwg_logscales .> minmax_logscale] .= minmax_logscale
+
+    return di
+
+end

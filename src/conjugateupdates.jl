@@ -1,4 +1,4 @@
-function updated_niw_hyperparams(clusters::Cluster, hyperparams::FCHyperparams)::Tuple{AbstractVector{Float64}, Float64, AbstractMatrix{Float64}, Float64}
+function updated_niw_hyperparams(clusters::Cluster, hyperparams::AbstractFCHyperparams)::Tuple{AbstractVector{Float64}, Float64, AbstractMatrix{Float64}, Float64}
     return updated_niw_hyperparams(clusters, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu)
 end
 

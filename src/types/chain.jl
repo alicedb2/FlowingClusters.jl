@@ -94,7 +94,7 @@ function FCChain(
     # data and original_data are still aligned
     base2original = Dict{Vector{Float64}, Vector{Float64}}(base_data .=> unique_data)
 
-    diagnostics = Diagnostics(d, hyperparams._.nn.params)
+    diagnostics = Diagnostics(d, hasnn(hyperparams) ? hyperparams._.nn.params : nothing)
 
     chain = FCChain(
         [], hyperparams, base2original, # current state of the chain

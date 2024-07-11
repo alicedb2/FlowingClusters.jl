@@ -96,11 +96,12 @@
 
 function logprobgenerative(
     clusters::Vector{Cluster},
-    hyperparams::FCHyperparams,
+    hyperparams::AbstractFCHyperparams,
     base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing;
     hyperpriors=true, ffjord=false, temperature=1.0)
     return logprobgenerative(clusters, hyperparams._, base2original, hyperparams.nn, hyperparams.nns; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
 end
+
 
 function logprobgenerative(
     clusters::Vector{Cluster},
@@ -112,14 +113,15 @@ function logprobgenerative(
 
     @assert all(length(c) > 0 for c in clusters)
 
-    alpha, mu, lambda, psi, nu = hyperparamsarray.pyp.alpha, hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, foldpsi(hyperparamsarray.niw.flatL), hyperparamsarray.niw.nu
-    nn_params, nn_alpha, nn_scale = hyperparamsarray.nn.params, hyperparamsarray.nn.t.alpha, hyperparamsarray.nn.t.scale
+    hpa = hyperparamsarray
+
+    alpha, mu, lambda, psi, nu = hpa.pyp.alpha, hpa.niw.mu, hpa.niw.lambda, foldpsi(hpa.niw.flatL), hpa.niw.nu
 
     N = sum([length(c) for c in clusters])
     K = length(clusters)
-    d = size(hyperparamsarray.niw.mu, 1)
+    d = size(hpa.niw.mu, 1)
 
-    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi)) || nn_alpha <= 0.0
+    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi)) || (!isnothing(nn) && hpa.nn.t.alpha <= 0.0 && hpa.nn.t.scale <= 0.0)
         return -Inf
     end
 
@@ -137,12 +139,13 @@ function logprobgenerative(
     log_nn = 0.0
 
     if ffjord && !isnothing(nn)
+
         ffjord_model = FFJORD(nn, (0.0, 1.0), (d,), Tsit5(), ad=AutoForwardDiff())
         origmat = reduce(hcat, values(base2original), init=zeros(Float64, d, 0))
-        ret, _ = ffjord_model(origmat, nn_params, nn_state)
+        ret, _ = ffjord_model(origmat, hpa.nn.params, nn_state)
         log_nn -= sum(ret.delta_logp)
 
-        log_nn += nn_prior(nn, nn_params, nn_alpha, nn_scale)
+        log_nn += nn_prior(hpa.nn.params, hpa.nn.t.alpha, hpa.nn.t.scale)
     end
 
     log_hyperpriors = 0.0
@@ -160,7 +163,7 @@ function logprobgenerative(
         if ffjord && !isnothing(nn)
             # log_hyperpriors += log(jeffreys_t_alpha(nn_alpha))
             # log_hyperpriors -= log(nn_scale)
-            log_hyperpriors += log_jeffreys_t(nn_alpha, nn_scale)
+            log_hyperpriors += log_jeffreys_t(hpa.nn.t.alpha, hpa.nn.t.scale)
         end
     end
 
@@ -170,3 +173,59 @@ function logprobgenerative(
 
 end
 
+function logprobgenerative(
+    clusters::Vector{Cluster},
+    hyperparamsarray::ComponentArray{Float64},
+    base2original::Dict{Vector{Float64}, Vector{Float64}},
+    hyperpriors=true, ffjord=false, temperature=1.0)
+    return logprobgenerative(clusters, hyperparamsarray, base2original, nothing, nothing; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
+end
+
+
+function logprobgenerative(clusters::Vector{Cluster},
+    hyperparamsarray::ComponentArray{Float64},
+    hyperpriors=true, temperature=1.0)
+
+    hpa = hyperparamsarray
+
+    alpha, mu, lambda, psi, nu = hpa.pyp.alpha, hpa.niw.mu, hpa.niw.lambda, foldpsi(hpa.niw.flatL), hpa.niw.nu
+
+    N = sum([length(c) for c in clusters])
+    K = length(clusters)
+    d = size(hpa.niw.mu, 1)
+
+    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi))
+        return -Inf
+    end
+
+    # Log-probability associated with the Chinese Restaurant Process
+    log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum([loggamma(length(c)) for c in clusters])
+
+    # Log-probability associated with the data likelihood
+    # and Normal-Inverse-Wishart base distribution of the CRP
+    log_niw = 0.0
+    for cluster in clusters
+        log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
+    end
+    log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
+
+    log_nn = 0.0
+
+    log_hyperpriors = 0.0
+
+    if hyperpriors
+        # mu0 has a flat hyperpriors
+        # alpha hyperprior
+        log_hyperpriors += log(jeffreys_alpha(alpha, N))
+
+        # NIW hyperpriors
+        log_hyperpriors += -log(lambda)
+        log_hyperpriors += -d * logdetpsd(psi)
+        log_hyperpriors += log(jeffreys_nu(nu, d))
+
+    end
+
+    log_p = log_crp + log_niw + log_hyperpriors
+
+    return isfinite(log_p) ? log_p / temperature : -Inf
+end
