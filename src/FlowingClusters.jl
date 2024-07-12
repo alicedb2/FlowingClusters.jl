@@ -1,9 +1,8 @@
 module FlowingClusters
 
-    using Random: randperm, shuffle, shuffle!, seed!, Xoshiro
+    using Random: randperm, shuffle, shuffle!, seed!, Xoshiro, AbstractRNG
     using StatsBase
     using StatsFuns: logsumexp, logmvgamma, logit, logistic
-
     using LinearAlgebra
 
     using Distributions: MvNormal, MvTDist, InverseWishart, Normal,
@@ -23,15 +22,12 @@ module FlowingClusters
 
     using DifferentialEquations
     using DiffEqFlux
-    import DiffEqFlux: FFJORD, __forward_ffjord, __backward_ffjord
+    using DiffEqFlux: __forward_ffjord, __backward_ffjord
 
-    using ComponentArrays: ComponentArray, valkeys
+    using ComponentArrays: ComponentArray
 
-    import Base: pop!, push!, length, isempty, union, delete!, empty!
-    import Base: iterate, deepcopy, copy, sort, in, first
     import MCMCDiagnosticTools: ess_rhat
     import Makie: plot, plot!
-    import Base.Iterators: flatten
 
     export advance_chain!
     export advance_hyperparams_adaptive!
@@ -49,25 +45,29 @@ module FlowingClusters
     export predictive_distribution, tail_probability, tail_probability_summary
 
     include("types/diagnostics.jl")
-    export Diagnostics, clear_diagnostics!, am_sigma
+    export Diagnostics, DiagnosticsFFJORD
+    export clear_diagnostics!, am_sigma
 
     include("types/hyperparams.jl")
-    export FCHyperparams, dimension, modeldimension, ij, flatk, foldL, foldpsi, flatten
+    export FCHyperparams, FCHyperparamsFFJORD
+    export dimension, modeldimension, ij, flatk, foldL, foldpsi, flatten
     export forwardffjord, backwardffjord
 
     include("types/cluster.jl")
-    export Cluster, elements
-    export realspace_cluster, realspace_clusters
-    
+    export AbstractCluster, BitCluster, SetCluster
+    export project_cluster, project_clusters, elements
+    export isvalidpartition, iscompletepartition
+    export pop!, push!, find
+
     include("types/chain.jl")
     export FCChain
     
     include("conjugateupdates.jl")
     export log_Zniw, updated_niw_hyperparams, updated_mvstudent_params
 
-    include("hyperpriors.jl")
-    include("modelprobabilities.jl")
-    export logprobgenerative
+    # include("hyperpriors.jl")
+    # include("modelprobabilities.jl")
+    # export logprobgenerative
 
     include("chainsteps.jl")
 
@@ -84,12 +84,14 @@ module FlowingClusters
     export bioclim_predictor
 
     include("helpers.jl")
+    export generate_data
     export performance_statistics, best_score_threshold
     export drawNIW
     export sqrtsigmoid, sqrttanh, sqrttanhgrow
     export chunk
     export logdetpsd, logdetflatLL
     export freedmandiaconis, doane
+    export project_vec, project_mat
 
 
     # function advance_chain!(chain::MNCRPChain, nb_steps=100;
@@ -661,12 +663,12 @@ module FlowingClusters
     #         else
     #             return (median=dropdims(mapslices(median, tps, dims=ndims(tps)), dims=ndims(tps)),
     #                     mean=dropdims(mapslices(mean, tps, dims=ndims(tps)), dims=ndims(tps)),
-    #                     std=dropdims(mapslices(std, tps, dims=ndims(tps)), dims=ndims(tps)),
+    #                     std=dropdims(mapslices(stT, Dps, dims=ndims(tps)), dims=ndims(tps)),
     #                     iqr=dropdims(mapslices(iqr, tps, dims=ndims(tps)), dims=ndims(tps)),
     #                     CI95=dropdims(mapslices(_CI95, tps, dims=ndims(tps)), dims=ndims(tps)),
     #                     CI90=dropdims(mapslices(_CI90, tps, dims=ndims(tps)), dims=ndims(tps)),
     #                     quantile=q -> dropdims(mapslices(sl -> quantile(sl, q), tps, dims=ndims(tps)), dims=ndims(tps)),
-    #                     modefd=dropdims(mapslices(_modefd, tps, dims=ndims(tps)), dims=ndims(tps)),
+    #                     modefd=dropdims(mapslices(_modefT, Dps, dims=ndims(tps)), dims=ndims(tps)),
     #                     modedoane=dropdims(mapslices(_modedoane, tps, dims=ndims(tps)), dims=ndims(tps))
     #                     )
     #         end

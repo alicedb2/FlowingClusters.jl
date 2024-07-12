@@ -70,7 +70,7 @@ end
 
 # Quick and dirty but faster logdet
 # for (assumed) positive-definite matrix
-function logdetpsd(A::AbstractMatrix{Float64})
+function logdetpsd(A::AbstractMatrix{T}) where T
     chol = cholesky(Symmetric(A), check=false)
     if issuccess(chol)
         return logdet(chol)
@@ -79,17 +79,17 @@ function logdetpsd(A::AbstractMatrix{Float64})
     end
 end
 
-function logdetflatLL(flatL::Vector{Float64})
-    acc = 0.0
-    i = 1
-    delta = 2
-    while i <= length(flatL)
-        acc += log(flatL[i])
-        i += delta
-        delta += 1
-    end
-    return 2 * acc
-end
+# function logdetflatLL(flatL::Vector{Float64})
+#     acc = 0.0
+#     i = 1
+#     delta = 2
+#     while i <= length(flatL)
+#         acc += log(flatL[i])
+#         i += delta
+#         delta += 1
+#     end
+#     return 2 * acc
+# end
 
 
 function freedmandiaconis(x::AbstractArray)
@@ -123,7 +123,7 @@ end
 
 # Used by plot() when nb_clusters given as a float 0 < p < 1.0
 # Find the minimum size of clusters to include at least a proportion of the data
-function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
+function minimum_size(clusters::AbstractVector{<:AbstractCluster}, proportion=0.05)
 
     N = sum(length.(clusters))
     include_up_to = N * (1 - proportion)
@@ -140,4 +140,44 @@ function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
 
     return max(minsize, 0)
 
+end
+
+dims_to_proj(dims::AbstractVector{Int}, d::Int) = I(d)[dims, :]
+
+project_vec(vec::AbstractVector, proj::AbstractMatrix) = proj * vec
+project_vec(vec::AbstractVector, dims::AbstractVector{Int}) = dims_to_proj(dims, size(vec, 1)) * vec
+
+project_mat(mat::AbstractMatrix, proj::AbstractMatrix) = proj * mat * proj'
+
+function project_mat(mat::AbstractMatrix, dims::AbstractVector{Int})
+    d = size(mat, 1)
+    proj = dims_to_proj(dims, d)
+    return proj * mat * proj'
+end
+
+
+function generate_data(;D=6, T=Float64, K=10, N=100, seed=70, test=false)
+    if seed isa Int
+        rng = Xoshiro(seed)
+    elseif seed isa AbstractRNG
+        rng = seed
+    else
+        rng = Xoshiro()
+    end
+
+    base_matclusters = [rand(rng, MvNormal(10*randn(rng, T, D), Diagonal(T(1) .+ rand(rng, T, D))), N) for _ in 1:K]
+    orig_matclusters = [rand(rng, MvNormal(10*randn(rng, T, D), Diagonal(T(1) .+ rand(rng, T, D))), N) for _ in 1:K]
+
+    b2oset = Dict{Vector{T}, Vector{T}}(vb => vo for (clb, clo) in zip(base_matclusters, orig_matclusters) for (vb, vo) in zip(eachcol(clb), eachcol(clo)))    
+    setclusters = [SetCluster(cl, b2oset, check=test) for cl in base_matclusters]
+    
+    b2obit = cat(reduce(hcat, base_matclusters), reduce(hcat, orig_matclusters), dims=3)
+    idxclusters = [N*(i-1)+1:N*i for i in 1:K]
+    bitclusters = [BitCluster(idx, b2obit, check=test) for idx in idxclusters]
+
+    if test
+        return true
+    else
+        return bitclusters, setclusters
+    end
 end

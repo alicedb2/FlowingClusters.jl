@@ -1,32 +1,29 @@
-mutable struct FCChain
+mutable struct FCChain{
+    D, 
+    T<:AbstractFloat, 
+    C<:AbstractCluster, 
+    H<:AbstractFCHyperparams, 
+    DG<:AbstractDiagnostics}
 
-    # Current state of the partition over samples
-    # from the Chinese Restaurant Process
-    clusters::Vector{Cluster}
-    # Current value of hyperparameters
-    hyperparams::FCHyperparams
-    # Map from base data (ffjord) to original unique data
-    base2original::Dict{Vector{Float64}, Vector{Float64}}
-
-    diagnostics::Diagnostics
+    clusters::Vector{C}
+    hyperparams::H
+    diagnostics::DG
 
     # Some chains of interests
-    hyperparams_chain::Vector{FCHyperparams}
-    logprob_chain::Vector{Float64}
-    nbclusters_chain::Vector{Int64}
-    largestcluster_chain::Vector{Int64}
+    hyperparams_chain::Vector{H}
+    logprob_chain::Vector{T}
+    nbclusters_chain::Vector{Int}
+    largestcluster_chain::Vector{Int}
 
-    clusters_samples::CircularBuffer{Vector{Cluster}}
-    hyperparams_samples::CircularBuffer{FCHyperparams}
-    base2original_samples::CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}
-    samples_idx::CircularBuffer{Int64}
+    clusters_samples::CircularBuffer{Vector{C}}
+    hyperparams_samples::CircularBuffer{H}
+    samples_idx::CircularBuffer{Int}
 
     # Maximum a-posteriori state and location
-    map_clusters::Vector{Cluster}
-    map_hyperparams::FCHyperparams
-    map_base2original::Dict{Vector{Float64}, Vector{Float64}}
-    map_logprob::Float64
-    map_idx::Int64
+    map_clusters::Vector{C}
+    map_hyperparams::H
+    map_logprob::T
+    map_idx::Int
 
 end
 
@@ -51,95 +48,100 @@ function Base.show(io::IO, chain::FCChain)
     # chain.hyperparams.nn !== nothing ? println(io, " (minus nn $(round(chain.map_logprob - nn_prior(chain.hyperparams.nn, similar(chain.hyperparams.nn_params) .= 0.0),digits=2)))") : println(io)
 end
 
-function FCChain(filename::AbstractString)
-    return JLD2.load(filename)["chain"]
-end
+# load_chain(filename::AbstractString) = JLD2.load(filename)["chain"]
 
-function FCChain(dataset::Matrix{Float64}; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing)
-    return FCChain(collect.(eachcol(dataset)), nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
+function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing) where T
+    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
 end
 
 function FCChain(
-    data::Vector{Vector{Float64}};
+    data::AbstractVector{<:AbstractVector{T}},
+    cluster_type::Type{<:AbstractCluster}=SetCluster;
     nb_samples=200,
     strategy=:sequential,
     optimize=false,
-    ffjord_nn=nothing)
+    ffjord_nn=nothing,
+    ) where T
 
-    d = length(first(data))
+    D = length(first(data))
+    @assert all(length.(data) .== D)
 
-    @assert all(length.(data) .== d)
-
-    hyperparams = ffjord_nn === nothing ? FCHyperparams(d) : FCHyperparams(d, ffjord_nn)
+    hyperparams = FCHyperparams(T, D, ffjord_nn)
     hyperparams._.pyp.alpha = 10.0 / log(length(data))
 
-    clusters_samples = CircularBuffer{Vector{Cluster}}(nb_samples)
-    hyperparams_samples = CircularBuffer{FCHyperparams}(nb_samples)
-    base2original_samples = CircularBuffer{Dict{Vector{Float64}, Vector{Float64}}}(nb_samples)
-    samples_idx = CircularBuffer{Int64}(nb_samples)
+    clusters_samples = CircularBuffer{Vector{cluster_type}}(nb_samples)
+    hyperparams_samples = CircularBuffer{typeof(hyperparams)}(nb_samples)
+    samples_idx = CircularBuffer{Int}(nb_samples)
 
     # Keep unique observations only
-    unique_data = collect(Set{Vector{Float64}}(deepcopy(data)))
+    unique_data = collect(Set{Vector{T}}(deepcopy(data)))
     println("    Loaded $(length(unique_data)) unique data points into chain (found $(length(data) - length(unique_data)) duplicates)")
 
-    if ffjord_nn !== nothing
+    if ffjord_nn isa Chain
         unique_matdata = reduce(hcat, unique_data)
-        ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (d,), Tsit5(), ad=AutoForwardDiff())
-        ret, _ = ffjord_model(unique_matdata, hyperparams._.nn.params, hyperparams.nns)
+        ffjord_model = FFJORD(hyperparams.nn.nn, (0.0, 1.0), (D,), Tsit5(), ad=AutoForwardDiff())
+        ret, _ = ffjord_model(unique_matdata, hyperparams._.nn.params, hyperparams.nn.nns)
         base_data = collect.(eachcol(ret.z))
     else
         base_data = deepcopy(unique_data)
     end
 
     # data and original_data are still aligned
-    base2original = Dict{Vector{Float64}, Vector{Float64}}(base_data .=> unique_data)
+    if cluster_type === SetCluster
+        base2original = Dict{Vector{T}, Vector{T}}(base_data .=> unique_data)
+        initial_elements = base_data
+    elseif cluster_type === BitCluster
+        base2original = cat(reduce(hcat, base_data), reduce(hcat, unique_data), dims=3)
+        initial_elements = trues(size(base_data, 1))
+    else
+        throw(ArgumentError("Cluster must be of type SetCluster or BitCluster"))
+    end
 
-    diagnostics = Diagnostics(d, hasnn(hyperparams) ? hyperparams._.nn.params : nothing)
+    diagnostics = Diagnostics(T, D, hasnn(hyperparams) ? hyperparams._.nn.params : nothing)
 
-    chain = FCChain(
-        [], hyperparams, base2original, # current state of the chain
-        diagnostics,
-        [], [], [], [],                 # chains of interest
-        clusters_samples, hyperparams_samples, base2original_samples, samples_idx, # MCMC samples of states
-        [], deepcopy(hyperparams), deepcopy(base2original), # MAP clusters, MAP hyperparams, MAP base2original
-        -Inf, 1 # MAP logprob, MAP index
+    chain = FCChain{T, D, cluster_type, typeof(hyperparams), typeof(diagnostics)}(
+        [], hyperparams, diagnostics,
+        [], [], [], [], # chains of interest
+        clusters_samples, hyperparams_samples, samples_idx, # MCMC samples of states
+        [], deepcopy(hyperparams), # MAP state
+        -Inf, 1 # MAP logprob and location in the chain
         )
 
     println("    Initializing clusters...")
     if strategy == :hot
-        ##### 1st initialization method: fullseq
-        chain.clusters = [Cluster(base_data)]
+        push!(chain.clusters, cluster_type(base_data, base2original))
         for i in 1:10
             advance_gibbs!(chain.clusters, chain.hyperparams, temperature=1.2)
         end
     elseif strategy == :N
-        chain.clusters = [Cluster([datum]) for datum in base_data]
+        append!(chain.clusters, [cluster_type(datum, base2original) for datum in base_data])
     elseif strategy == :1
-        chain.clusters = [Cluster(base_data)]
+        push!(chain.clusters, cluster_type(base_data))
     elseif strategy == :sequential
-        for element in base_data
+        push!(chain.clusters, cluster_type(first(base_data), base2original))
+        for element in base_data[2:end]
             advance_gibbs!(element, chain.clusters, chain.hyperparams)
         end
     end
+
     if optimize
         println("    Initializing hyperparameters...")
         optimize_hyperparams!(chain.clusters, chain.hyperparams, verbose=true)
     end
 
-    chain.nbclusters_chain = [length(chain.clusters)]
-    chain.largestcluster_chain = [maximum(length.(chain.clusters))]
-    chain.hyperparams_chain = [deepcopy(hyperparams)]
+    push!(chain.hyperparams_chain, deepcopy(hyperparams))
+    # lp = logprobgenerative(chain.clusters, chain.hyperparams, chain.base2original, hyperpriors=true, ffjord=true)
+    lp = zero(T)
+    push!(chain.logprob_chain, lp)
+    push!(chain.nbclusters_chain, length(chain.clusters))
+    push!(chain.largestcluster_chain, maximum(length.(chain.clusters)))
 
     chain.map_clusters = deepcopy(chain.clusters)
-    lp = logprobgenerative(chain.clusters, chain.hyperparams, chain.base2original, hyperpriors=true, ffjord=true)
     chain.map_logprob = lp
-    chain.logprob_chain = [lp]
     # map_hyperparams=hyperparams and map_idx=1 have already been
     # specified when calling FCChain, but let's be explicit
     chain.map_hyperparams = deepcopy(chain.hyperparams)
     chain.map_idx = 1
-
-    chain.logprob_chain = [chain.map_logprob]
 
     return chain
 
@@ -214,43 +216,43 @@ function Base.length(chain::FCChain)
     return length(chain.logprob_chain)
 end
 
-function ess_rhat(chain::FCChain, burn=0)
+# function ess_rhat(chain::FCChain, burn=0)
 
-    N = length(chain.hyperparams_chain)
-    if burn >= N
-        @error("Can't burn the whole chain, n must be smaller than $N")
-    end
-    N -= burn
+#     N = length(chain.hyperparams_chain)
+#     if burn >= N
+#         @error("Can't burn the whole chain, n must be smaller than $N")
+#     end
+#     N -= burn
 
-    d = dimension(chain.hyperparams)
-    flatL_d = size(chain.hyperparams.flatL, 1)
-    nn_D = chain.hyperparams.nn_params !== nothing ? size(chain.hyperparams.nn_params, 1) : 0
+#     d = dimension(chain.hyperparams)
+#     flatL_d = size(chain.hyperparams.flatL, 1)
+#     nn_D = chain.hyperparams.nn_params !== nothing ? size(chain.hyperparams.nn_params, 1) : 0
 
-    return (;
-    alpha = ess_rhat(alpha_chain(chain, burn)),
-    mu = ess_rhat(reshape(mu_chain(Matrix, chain, burn)', N, 1, d)),
-    lambda = ess_rhat(lambda_chain(chain, burn)),
-    psi = ess_rhat(reshape(psi_chain(Matrix, chain, burn)', N, 1, flatL_d)),
-    flatL = ess_rhat(reshape(flatL_chain(Matrix, chain, burn)', N, 1, flatL_d)),
-    nu = ess_rhat(nu_chain(chain, burn)),
-    nn = chain.hyperparams.nn_params !== nothing ? ess_rhat(reshape(nn_chain(Matrix, chain, burn)', N, 1, nn_D)) : nothing,
-    nn_alpha = chain.hyperparams.nn_params !== nothing ? ess_rhat(nn_alpha_chain(chain, burn)) : nothing,
-    logprob = ess_rhat(logprob_chain(chain, burn)),
-    nbclusters = ess_rhat(nbclusters_chain(chain, burn)),
-    largestcluster = ess_rhat(largestcluster_chain(chain, burn))
-    )
-end
+#     return (;
+#     alpha = ess_rhat(alpha_chain(chain, burn)),
+#     mu = ess_rhat(reshape(mu_chain(Matrix, chain, burn)', N, 1, d)),
+#     lambda = ess_rhat(lambda_chain(chain, burn)),
+#     psi = ess_rhat(reshape(psi_chain(Matrix, chain, burn)', N, 1, flatL_d)),
+#     flatL = ess_rhat(reshape(flatL_chain(Matrix, chain, burn)', N, 1, flatL_d)),
+#     nu = ess_rhat(nu_chain(chain, burn)),
+#     nn = chain.hyperparams.nn_params !== nothing ? ess_rhat(reshape(nn_chain(Matrix, chain, burn)', N, 1, nn_D)) : nothing,
+#     nn_alpha = chain.hyperparams.nn_params !== nothing ? ess_rhat(nn_alpha_chain(chain, burn)) : nothing,
+#     logprob = ess_rhat(logprob_chain(chain, burn)),
+#     nbclusters = ess_rhat(nbclusters_chain(chain, burn)),
+#     largestcluster = ess_rhat(largestcluster_chain(chain, burn))
+#     )
+# end
 
 function stats(chain::FCChain; burn=0)
     println("MAP state")
     println(" log prob: $(chain.map_logprob)")
     println(" #cluster: $(length(chain.map_clusters))")
-    println("    alpha: $(chain.map_hyperparams.alpha)")
-    println("       mu: $(chain.map_hyperparams.mu)")
-    println("   lambda: $(chain.map_hyperparams.lambda)")
+    println("    alpha: $(chain.map_hyperparams._.pyp.alpha)")
+    println("       mu: $(chain.map_hyperparams._.niw.mu)")
+    println("   lambda: $(chain.map_hyperparams._.niw.lambda)")
     println("      psi:")
-    display(chain.map_hyperparams.psi)
-    println("       nu: $(chain.map_hyperparams.nu)")
+    display(chain.map_hyperparams._.niw.psi)
+    println("       nu: $(chain.map_hyperparams._.niw.nu)")
     println()
 
 

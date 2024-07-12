@@ -3,7 +3,7 @@
 #     alpha, mu, lambda, psi, nu = hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu
 #     nn, nn_params, nn_state, nn_alpha, nn_scale = hyperparams.nn, hyperparams.nn_params, hyperparams.nn_state, hyperparams.nn_alpha, hyperparams.nn_scale
 
-#     logp = logprobgenerative(clusters, alpha, mu, lambda, psi, nu, base2original, nn, nn_params, nn_state, nn_alpha, nn_scale; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
+#     logp = logprobgenerative(clusters, alpha, mu, lambda, psi, nu, base2original, nn, nn_params, nn_state, nn_alpha, nn_scale; hyperpriors=hyperpriors, ffjord=ffjorT, Demperature=temperature)
 
 #     return logp
 # end
@@ -95,21 +95,17 @@
 # end
 
 function logprobgenerative(
-    clusters::Vector{Cluster},
-    hyperparams::AbstractFCHyperparams,
-    base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing;
-    hyperpriors=true, ffjord=false, temperature=1.0)
-    return logprobgenerative(clusters, hyperparams._, base2original, hyperparams.nn, hyperparams.nns; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
+    clusters::AbstractVector{<:AbstractCluster},
+    hyperparams::AbstractFCHyperparams;
+    ignorehyperpriors=false, ignoreffjord=false, temperature=1.0)
+    return logprobgenerative(clusters, hyperparams._, hyperpriors=hyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
 end
 
 
 function logprobgenerative(
-    clusters::Vector{Cluster},
-    hyperparamsarray::ComponentArray{Float64},
-    base2original::Union{Nothing, Dict{Vector{Float64}, Vector{Float64}}}=nothing,
-    nn::Union{Nothing, Chain}=nothing,
-    nn_state::Union{Nothing, NamedTuple}=nothing;
-    hyperpriors=true, ffjord=false, temperature=1.0)
+    clusters::Vector{C},
+    hyperparamsarray::ComponentArray{T};
+    ignorehyperpriors=false, ignoreffjord=false, temperature=1.0) where {T, D, C <: AbstractCluster}
 
     @assert all(length(c) > 0 for c in clusters)
 
@@ -121,7 +117,8 @@ function logprobgenerative(
     K = length(clusters)
     d = size(hpa.niw.mu, 1)
 
-    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi)) || (!isnothing(nn) && hpa.nn.t.alpha <= 0.0 && hpa.nn.t.scale <= 0.0)
+    # psi is always finite by construction
+    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || (!isnothing(nn) && hpa.nn.t.alpha <= 0.0 && hpa.nn.t.scale <= 0.0)
         return -Inf
     end
 
@@ -138,19 +135,27 @@ function logprobgenerative(
 
     log_nn = 0.0
 
-    if ffjord && !isnothing(nn)
+    if !ignoreffjord && hasnn(hpa)
 
-        ffjord_model = FFJORD(nn, (0.0, 1.0), (d,), Tsit5(), ad=AutoForwardDiff())
-        origmat = reduce(hcat, values(base2original), init=zeros(Float64, d, 0))
-        ret, _ = ffjord_model(origmat, hpa.nn.params, nn_state)
-        log_nn -= sum(ret.delta_logp)
+        # ffjord_model = FFJORD(nn, (0.0, 1.0), (d,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
+        # origmat = reduce(hcat, values(base2original), init=zeros(Float64, d, 0))
+        # ret, _ = ffjord_model(origmat, hpa.nn.params, nn_state)
+        
+        # test later now that ffjord assumes a
+        # flat improper base distribution when basedist=nothing
+        # log_nn = sum(ret.logpx) 
+        
+        # if C isa SetCluster
+            # origmat = Matrix(
+
+        log_nn -= sum(forwardffjord(origmat, hpa).delta_logps)
 
         log_nn += nn_prior(hpa.nn.params, hpa.nn.t.alpha, hpa.nn.t.scale)
     end
 
     log_hyperpriors = 0.0
 
-    if hyperpriors
+    if !ignorehyperpriors
         # mu0 has a flat hyperpriors
         # alpha hyperprior
         log_hyperpriors += log(jeffreys_alpha(alpha, N))
@@ -160,7 +165,7 @@ function logprobgenerative(
         log_hyperpriors += -d * logdetpsd(psi)
         log_hyperpriors += log(jeffreys_nu(nu, d))
 
-        if ffjord && !isnothing(nn)
+        if !ignoreffjord && hasnn(hpa)
             # log_hyperpriors += log(jeffreys_t_alpha(nn_alpha))
             # log_hyperpriors -= log(nn_scale)
             log_hyperpriors += log_jeffreys_t(hpa.nn.t.alpha, hpa.nn.t.scale)
@@ -178,7 +183,7 @@ function logprobgenerative(
     hyperparamsarray::ComponentArray{Float64},
     base2original::Dict{Vector{Float64}, Vector{Float64}},
     hyperpriors=true, ffjord=false, temperature=1.0)
-    return logprobgenerative(clusters, hyperparamsarray, base2original, nothing, nothing; hyperpriors=hyperpriors, ffjord=ffjord, temperature=temperature)
+    return logprobgenerative(clusters, hyperparamsarray, base2original, nothing, nothing; hyperpriors=hyperpriors, ffjord=ffjorT, Demperature=temperature)
 end
 
 
