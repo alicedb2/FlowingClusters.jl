@@ -1,25 +1,12 @@
-function updated_niw_hyperparams(cluster::AbstractCluster{T, D}, hyperparams::AbstractFCHyperparams) where {T, D}
+function updated_niw_hyperparams(cluster::AbstractCluster{T, D}, hyperparams::AbstractFCHyperparams{T, D}) where {T, D}
     return updated_niw_hyperparams(cluster, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu)
 end
 
-function updated_niw_hyperparams(
-    ::EmptyCluster{T, D},
-    mu::AbstractVector{T},
-    lambda::T,
-    psi::AbstractMatrix{T},
-    nu::T
-    ) where {T, D}
-
-    return mu, lambda, psi, nu
+function updated_niw_hyperparams(::EmptyCluster{T, D}, mu::Vector{T}, lambda::T, psi::Matrix{T}, nu::T) where {T, D}
+    return (;mu_c=mu, lambda_c=lambda, psi_c=psi, nu_c=nu)
 end
 
-
-function updated_niw_hyperparams(cluster::AbstractCluster{T, D},
-    mu::AbstractVector{T},
-    lambda::T,
-    psi::AbstractMatrix{T},
-    nu::T
-    ) where {T, D}
+function updated_niw_hyperparams(cluster::AbstractCluster{T, D}, mu::Vector{T}, lambda::T, psi::Matrix{T}, nu::T)::@NamedTuple{mu_c::Vector{T}, lambda_c::T, psi_c::Matrix{T}, nu_c::T} where {T, D}
 
     if isempty(cluster)
         return mu, lambda, psi, nu
@@ -49,7 +36,7 @@ function updated_niw_hyperparams(cluster::AbstractCluster{T, D},
             end
         end
 
-        return mu_c, lambda_c, psi_c, nu_c
+        return (;mu_c, lambda_c, psi_c, nu_c)
 
     end
 
@@ -58,12 +45,7 @@ end
 # Return the normalization constant
 # of the normal-inverse-Wishart distribution,
 # possibly in the presence of data if cluster isn't empty
-function log_Zniw(
-    cluster::AbstractCluster{T, D},
-    mu::AbstractVector{T},
-    lambda::T,
-    psi::AbstractMatrix{T},
-    nu::T)::T where {T, D}
+function log_Zniw(cluster::AbstractCluster{T, D}, mu::Vector{T}, lambda::T, psi::Matrix{T}, nu::T)::T where {T, D}
 
     mu, lambda, psi, nu = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
 
@@ -75,7 +57,7 @@ function log_Zniw(
 
 end
 
-function log_cluster_weight(element::AbstractVector{T}, cluster::AbstractCluster{T, D}, alpha::T, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T, N::Int=-1)::T where {T, D}
+function log_cluster_weight(element::AbstractVector{T}, cluster::AbstractCluster{T, D}, alpha::T, mu::Vector{T}, lambda::T, psi::Matrix{T}, nu::T, N::Int=-1)::T where {T, D}
 
     !(element in cluster) || error(KeyError("Duplicate $(element)"))
 
