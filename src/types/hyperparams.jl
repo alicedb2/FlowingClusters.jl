@@ -12,13 +12,13 @@ struct FCHyperparamsFFJORD{T, D} <: AbstractFCHyperparams{T, D}
 end
 
 function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) where {T <: AbstractFloat}
-    
+
     if isnothing(nn)
         return FCHyperparams{T, D}(
             ComponentArray{T}(
                         pyp=(alpha=T(7.77),),# sigma=0.0),
-                        niw=(mu=zeros(T, D), 
-                             lambda=one(T), 
+                        niw=(mu=zeros(T, D),
+                             lambda=one(T),
                              flatL=unfold(LowerTriangular{T}(I(D))),
                              nu=T(D + 1))
                 )
@@ -30,14 +30,14 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) whe
         nn_params, nn_state = Lux.setup(Xoshiro(), nn)
         nn_params = ComponentArray{T}(nn_params)
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
-        
+
         return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
                         pyp=(alpha=T(7.77),),# sigma=0.0),
-                        niw=(mu=zeros(T, D), 
-                            lambda=one(T), 
+                        niw=(mu=zeros(T, D),
+                            lambda=one(T),
                             flatL=unfold(LowerTriangular{T}(I(D))),
-                            nu=T(D + 1)), 
-                        nn=(params=nn_params, 
+                            nu=T(D + 1)),
+                        nn=(params=nn_params,
                             t=(alpha=T(1), scale=T(1))
                             )
                         ),
@@ -48,7 +48,7 @@ end
 
 dimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
 
-function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true) 
+function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
     dim = size(hyperparams._, 1)
     dim -= !include_nn ? 0 : size(hyperparams._.nn, 1)
     return dim
@@ -121,7 +121,7 @@ end
 function LinearAlgebra.LowerTriangular(flatL::AbstractVector{T}) where T
     d = squaredim(flatL)
     L = LowerTriangular{T}(Array{T}(undef, d, d))
-    
+
     # The order is row major. This is important because
     # it allows the conversion k -> (i, j)
     # and (i, j) -> k without neither a for-loop
