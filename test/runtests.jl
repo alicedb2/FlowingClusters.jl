@@ -5,4 +5,6 @@ using Random, Distributions
 # using DiffEqFlux, DifferentialEquations
 using FlowingClusters
 
+# include("diagnostics.jl")
 include("cluster.jl")
+include("conjugateupdates.jl")

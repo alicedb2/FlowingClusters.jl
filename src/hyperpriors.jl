@@ -1,18 +1,18 @@
 # Very cute!
-function jeffreys_alpha(alpha::Float64, n::Int64)
+function jeffreys_alpha(alpha::T, n::Int) where T
 
     return sqrt((polygamma(0, alpha + n) - polygamma(0, alpha))/alpha + polygamma(1, alpha + n) - polygamma(1, alpha))
 
 end
 
 # Very cute as well!
-function jeffreys_nu(nu::Float64, d::Int64)
+function jeffreys_nu(nu::T, d::Int) where T
 
     return 1/2 * sqrt(sum(polygamma(1, nu/2 + (1 - i)/2) for i in 1:d))
 
 end
 
-function nn_prior(nn_params::AbstractArray{Float64}, alpha::Float64=1.0, scale::Float64=1.0)
+function nn_prior(nn_params::ComponentArray{T}, alpha::T=one(T), scale::T=one(T)) where T
 
     # Stable t-distribution of index alpha on weights of last hidden layer.
     # (Neal - 1996 - Bayesian Learning for Neural Networks)
@@ -24,26 +24,26 @@ function nn_prior(nn_params::AbstractArray{Float64}, alpha::Float64=1.0, scale::
 
 end
 
-function jeffreys_t_alpha(alpha::Float64)
+function jeffreys_t_alpha(alpha::T) where T
     # Otherwise weird stuff happens in nn_prior
-    if alpha < 10000.0
+    if alpha < 10000
         # return 1/2 * sqrt(polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2) - (5 + alpha) / 2 / alpha * exp(loggamma((1 + alpha) / 2) - loggamma((5 + alpha) / 2)))
         return 1/2 * sqrt(polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2) - 2 * (5 + alpha) / alpha / (alpha^2 + 4 * alpha  + 3))
     else
-        return 0.0
+        return zero(T)
     end
 end
 
-function log_jeffreys_t_scale(scale::Float64)
+function log_jeffreys_t_scale(scale::T) where T
     return -log(abs(scale))
 end
 
 # Bivariate Jeffreys prior of scaled t-distribution
-function log_jeffreys_t(alpha::Float64, scale::Float64)
+function log_jeffreys_t(alpha::T, scale::T) where T
     # Otherwise weird stuff happens in nn_prior
-    if alpha < 10000.0
+    if alpha < 10000
         return -log(abs(scale)) + 1/2 * log(alpha / 2 / (3 + alpha) * (polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2)) - 1 / (1 + alpha)^2)
     else
-        return 0.0
+        return zero(T)
     end
 end

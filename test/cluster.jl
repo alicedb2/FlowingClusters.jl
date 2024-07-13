@@ -1,49 +1,83 @@
-
-# eb = SMSDataset("data/ebird_data/ebird_bioclim_landcover.csv", subsample=3500, splits=[1, 1, 1], seed=4242); t = eb.training.presence(:sp4).standardize(:BIO1, :BIO12)(:BIO1, :BIO12)
-# dataset = eb.training.presence(:sp4).standardize(:BIO1, :BIO12)(:BIO1, :BIO12)
-
-# Generate some data for tests
-
 rng = Xoshiro(80)
-
-@testset "Cluster creation" begin
-    for N in rand(rng, 300:100:3000, 3)
-        for K in rand(rng, 1:20, 3)
-            @test generate_data(N=N, K=K, seed=rng, test=true)
+for T in [Float32, Float64], D in [1, 5, 20]
+    @testset "Cluster creation with {$T, $D}" begin
+        for N in rand(rng, 10:300, 7)
+            for K in rand(rng, 1:20, 7)
+                @test generate_data(T=T, D=D, N=N, K=K, seed=rng, test=true)
+            end
         end
     end
-end
 
-@testset "Cluster validity" begin
-    for N in rand(rng, 300:100:1000, 5)
-        for K in rand(rng, 1:1:20, 5)
-            bitclusters, setclusters = generate_data(N=N, K=K, seed=rng, test=false)
-            
-            @test isvalidpartition(bitclusters)
-            @test !isvalidpartition(vcat(bitclusters, rand(rng, bitclusters)))
-
-            @test isvalidpartition(setclusters)
-            @test !isvalidpartition(vcat(setclusters, rand(rng, setclusters)))
+    @testset "BitCluster validity with {$T, $D}" begin
+        for N in rand(rng, 300:100:1000, 5)
+            for K in rand(rng, 1:20, 5)
+                bitclusters, _ = generate_data(T=T, D=D, N=N, K=K, seed=rng, test=false)                
+                @test isvalidpartition(bitclusters)
+                @test !isvalidpartition(vcat(bitclusters, rand(rng, bitclusters)))
+            end
         end
     end
-end
 
-@testset "Cluster math" begin
-    for N in rand(rng, 300:100:1000, 5)
-        for K in rand(rng, 1:1:20, 5)
-            bitclusters, setclusters = generate_data(N=N, K=K, seed=rng, test=false)
-            @test all(isapprox.(getfield.(setclusters, :sum_x), getfield.(bitclusters, :sum_x)))
-            @test all(isapprox.(getfield.(setclusters, :sum_xx), getfield.(bitclusters, :sum_xx)))
+    @testset "SetCluster validity with {$T, $D}" begin
+        for N in rand(rng, 300:100:1000, 5)
+            for K in rand(rng, 1:1:20, 5)
+                _, setclusters = generate_data(T=T, D=D, N=N, K=K, seed=rng, test=false)
+                @test isvalidpartition(bitclusters)
+                @test !isvalidpartition(vcat(bitclusters, rand(rng, bitclusters)))
+            end
         end
     end
-end
 
-@testset "Cluster operations" begin
-    for N in rand(rng, 300:100:1000, 5)
-        for K in rand(rng, 1:1:20, 5)
-            bitclusters, setclusters = generate_data(N=N, K=K, seed=rng, test=false)
-            
+    if !(T === Float16 && D === 1)
+        @testset "Cluster sums with {$T, $D}" begin
+            for N in rand(rng, 10:100, 5)
+                for K in rand(rng, 1:1:20, 5)
+                    bitclusters, setclusters = generate_data(T=T, D=D, N=N, K=K, seed=rng, test=false)
+                    
+                    tx = all(isapprox.(getfield.(setclusters, :sum_x), getfield.(bitclusters, :sum_x)))
+                    if !tx
+                        println("N=$N K=$K")
+                        println("     ", getfield.(setclusters, :sum_x) .- getfield.(bitclusters, :sum_x))
+                    end
+                    @test all(isapprox.(getfield.(setclusters, :sum_x), getfield.(bitclusters, :sum_x)))
+                    
+                    txx = all(isapprox.(getfield.(setclusters, :sum_xx), getfield.(bitclusters, :sum_xx)))
+                    if !txx
+                        println("N=$N K=$K")
+                        println(getfield.(setclusters, :sum_xx) .- getfield.(bitclusters, :sum_xx))
+                    end
+                    @test all(isapprox.(getfield.(setclusters, :sum_xx), getfield.(bitclusters, :sum_xx)))
+                end
+            end
+        end
+    end
 
+    @testset "Cluster operations with {$T, $D}" begin
+        for N in rand(rng, 10:200, 5)
+            for K in rand(rng, 1:1:20, 5)
+                bitclusters, setclusters = generate_data(T=T, D=D, N=N, K=K, seed=rng, test=false)
+                # eli = rand(Int(rand(rng, bitclusters)))
+                # elx = Vector(bitclusters, eli)
+                # @test find(elx, setclusters)[2] === find(eli, bitclusters)[2]
+
+                # Move a random element to a random cluster
+                for _ in 1:20
+                    oldc = rand(rng, 1:length(bitclusters))
+                    eli = rand(elements(bitclusters[oldc]))
+                    elx = Vector(bitclusters, eli)
+                    newc = rand(rng, 1:length(bitclusters))
+
+                    push!(bitclusters[newc], pop!(bitclusters, eli))
+                    push!(setclusters[newc], pop!(setclusters, elx))
+                    @test find(elx, setclusters)[2] === find(eli, bitclusters)[2]
+                    if !(T === Float16 && D === 1)
+                        @test isapprox(bitclusters[oldc].sum_x, setclusters[oldc].sum_x)
+                        @test isapprox(bitclusters[newc].sum_x, setclusters[newc].sum_x)
+                        @test isapprox(bitclusters[oldc].sum_xx, setclusters[oldc].sum_xx)
+                        @test isapprox(bitclusters[newc].sum_xx, setclusters[newc].sum_xx)
+                    end
+                end
+            end
         end
     end
 end

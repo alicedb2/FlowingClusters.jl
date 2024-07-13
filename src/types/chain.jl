@@ -1,3 +1,4 @@
+# Must be mutable because of MAP state :(
 mutable struct FCChain{
     D, 
     T<:AbstractFloat, 

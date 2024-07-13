@@ -15,7 +15,7 @@ end
 
 hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
 
-function Diagnostics(D, ::Type{T}, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
+function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
 
     sizeflatL = div(D * (D + 1), 2)
 
@@ -137,7 +137,7 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics;
     return diagnostics
 end
 
-function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=1e-10) where T
+function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=one(T)e-10) where T
     sigma = (xx - x * x' / L) / (L - 1)
     if correction
         sigma = (sigma + sigma') / 2 + eps * I
@@ -145,9 +145,9 @@ function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=1
     return sigma
 end
 
-am_sigma(diagnostics::DiagnosticsFFJORD{T}; correction=true, eps::T=1e-10) where T = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.xx, correction=correction, eps=eps) : zeros(Float64, 0, 0)
+am_sigma(diagnostics::DiagnosticsFFJORD{T}; correction=true, eps::T=one(T)e-10) where T = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.xx, correction=correction, eps=eps) : zeros(Float64, 0, 0)
 
-function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T}; acceptance_target::T=0.44, min_delta::T=0.01) where T #, minmax_logscale::T=10.0)
+function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T}; acceptance_target::T=0.44, min_delta::T=0.01) where T #, minmax_logscale::T=one(T)0.0)
     delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))
     acc_rates = diagnostics.accepted ./ (diagnostics.accepted .+ diagnostics.rejected)
     diagnostics.amwg.logscales .+= delta_n .* (acc_rates .< acceptance_target) .- delta_n .* (acc_rates .>= acceptance_target)

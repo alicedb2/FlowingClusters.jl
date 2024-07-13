@@ -94,46 +94,39 @@
 
 # end
 
-function logprobgenerative(
-    clusters::AbstractVector{<:AbstractCluster},
-    hyperparams::AbstractFCHyperparams;
-    ignorehyperpriors=false, ignoreffjord=false, temperature=1.0)
-    return logprobgenerative(clusters, hyperparams._, hyperpriors=hyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hyperparams::AbstractFCHyperparams{T, D}; ignorehyperpriors::Bool=false, ignoreffjord::Bool=false, temperature::T=one(T))::T where {T, D}
+    return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
 end
 
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors::Bool=false, ignoreffjord::Bool=false, temperature::T=one(T))::T where {T, D}
 
-function logprobgenerative(
-    clusters::Vector{C},
-    hyperparamsarray::ComponentArray{T};
-    ignorehyperpriors=false, ignoreffjord=false, temperature=1.0) where {T, D, C <: AbstractCluster}
-
-    @assert all(length(c) > 0 for c in clusters)
+    # @assert all(length(c) > 0 for c in clusters)
 
     hpa = hyperparamsarray
 
     alpha, mu, lambda, psi, nu = hpa.pyp.alpha, hpa.niw.mu, hpa.niw.lambda, foldpsi(hpa.niw.flatL), hpa.niw.nu
 
-    N = sum([length(c) for c in clusters])
+    N = sum(length.(clusters))
     K = length(clusters)
-    d = size(hpa.niw.mu, 1)
 
-    # psi is always finite by construction
-    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || (!isnothing(nn) && hpa.nn.t.alpha <= 0.0 && hpa.nn.t.scale <= 0.0)
+    # psi is always valid by construction
+    # except perhaps when logdet is too small/large
+    if alpha <= 0 || lambda <= 0 || nu <= D - 1 || (hasnn(hpa) && hpa.nn.t.alpha <= 0 && hpa.nn.t.scale <= 0)
         return -Inf
     end
 
     # Log-probability associated with the Chinese Restaurant Process
-    log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum([loggamma(length(c)) for c in clusters])
+    log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum(loggamma.(length.(clusters)))
 
     # Log-probability associated with the data likelihood
     # and Normal-Inverse-Wishart base distribution of the CRP
-    log_niw = 0.0
+    log_niw = zero(T)
     for cluster in clusters
-        log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
+        log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * D/2 * log(2pi)
     end
-    log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
+    log_niw -= K * log_Zniw(EmptyCluster{T, D}(), mu, lambda, psi, nu)
 
-    log_nn = 0.0
+    log_nn = zero(T)
 
     if !ignoreffjord && hasnn(hpa)
 
@@ -148,12 +141,12 @@ function logprobgenerative(
         # if C isa SetCluster
             # origmat = Matrix(
 
-        log_nn -= sum(forwardffjord(origmat, hpa).delta_logps)
+        log_nn -= sum(forwardffjord(Matrix(clusters, orig=true), hpa).delta_logps)
 
         log_nn += nn_prior(hpa.nn.params, hpa.nn.t.alpha, hpa.nn.t.scale)
     end
 
-    log_hyperpriors = 0.0
+    log_hyperpriors = zero(T)
 
     if !ignorehyperpriors
         # mu0 has a flat hyperpriors
@@ -162,75 +155,79 @@ function logprobgenerative(
 
         # NIW hyperpriors
         log_hyperpriors += -log(lambda)
-        log_hyperpriors += -d * logdetpsd(psi)
-        log_hyperpriors += log(jeffreys_nu(nu, d))
+        log_hyperpriors += -D * logdetpsd(psi)
+        log_hyperpriors += log(jeffreys_nu(nu, D))
 
         if !ignoreffjord && hasnn(hpa)
-            # log_hyperpriors += log(jeffreys_t_alpha(nn_alpha))
-            # log_hyperpriors -= log(nn_scale)
+            # Independence Jeffreys prior
+            # log_hyperpriors += log(jeffreys_t_alpha(hpa.nn.t.alpha))
+            # log_hyperpriors -= log(hpa.nn.t.scale)
+            
+            # Bivariate Jeffreys prior
             log_hyperpriors += log_jeffreys_t(hpa.nn.t.alpha, hpa.nn.t.scale)
         end
     end
 
+    # println("$(round(log_crp, digits=4)) $(round(log_niw, digits=4)) $(round(log_nn, digits=4)) $(round(log_hyperpriors, digits=4))")
     log_p = log_crp + log_niw + log_nn + log_hyperpriors
 
     return isfinite(log_p) ? log_p / temperature : -Inf
 
 end
 
-function logprobgenerative(
-    clusters::Vector{Cluster},
-    hyperparamsarray::ComponentArray{Float64},
-    base2original::Dict{Vector{Float64}, Vector{Float64}},
-    hyperpriors=true, ffjord=false, temperature=1.0)
-    return logprobgenerative(clusters, hyperparamsarray, base2original, nothing, nothing; hyperpriors=hyperpriors, ffjord=ffjorT, Demperature=temperature)
-end
+# function logprobgenerative(
+#     clusters::Vector{Cluster},
+#     hyperparamsarray::ComponentArray{Float64},
+#     base2original::Dict{Vector{Float64}, Vector{Float64}},
+#     hyperpriors=true, ffjord=false, temperature=1.0)
+#     return logprobgenerative(clusters, hyperparamsarray, base2original, nothing, nothing; hyperpriors=hyperpriors, ffjord=ffjorT, Demperature=temperature)
+# end
 
 
-function logprobgenerative(clusters::Vector{Cluster},
-    hyperparamsarray::ComponentArray{Float64},
-    hyperpriors=true, temperature=1.0)
+# function logprobgenerative(clusters::Vector{Cluster},
+#     hyperparamsarray::ComponentArray{Float64},
+#     hyperpriors=true, temperature=1.0)
 
-    hpa = hyperparamsarray
+#     hpa = hyperparamsarray
 
-    alpha, mu, lambda, psi, nu = hpa.pyp.alpha, hpa.niw.mu, hpa.niw.lambda, foldpsi(hpa.niw.flatL), hpa.niw.nu
+#     alpha, mu, lambda, psi, nu = hpa.pyp.alpha, hpa.niw.mu, hpa.niw.lambda, foldpsi(hpa.niw.flatL), hpa.niw.nu
 
-    N = sum([length(c) for c in clusters])
-    K = length(clusters)
-    d = size(hpa.niw.mu, 1)
+#     N = sum([length(c) for c in clusters])
+#     K = length(clusters)
+#     d = size(hpa.niw.mu, 1)
 
-    if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi))
-        return -Inf
-    end
+#     if alpha <= 0.0 || lambda <= 0.0 || nu <= d - 1 || !isfinite(logdetpsd(psi))
+#         return -Inf
+#     end
 
-    # Log-probability associated with the Chinese Restaurant Process
-    log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum([loggamma(length(c)) for c in clusters])
+#     # Log-probability associated with the Chinese Restaurant Process
+#     log_crp = K * log(alpha) - loggamma(alpha + N) + loggamma(alpha) + sum([loggamma(length(c)) for c in clusters])
 
-    # Log-probability associated with the data likelihood
-    # and Normal-Inverse-Wishart base distribution of the CRP
-    log_niw = 0.0
-    for cluster in clusters
-        log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
-    end
-    log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
+#     # Log-probability associated with the data likelihood
+#     # and Normal-Inverse-Wishart base distribution of the CRP
+#     log_niw = 0.0
+#     for cluster in clusters
+#         log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * d/2 * log(2pi)
+#     end
+#     log_niw -= K * log_Zniw(nothing, mu, lambda, psi, nu)
 
-    log_nn = 0.0
+#     log_nn = 0.0
 
-    log_hyperpriors = 0.0
+#     log_hyperpriors = 0.0
 
-    if hyperpriors
-        # mu0 has a flat hyperpriors
-        # alpha hyperprior
-        log_hyperpriors += log(jeffreys_alpha(alpha, N))
+#     if hyperpriors
+#         # mu0 has a flat hyperpriors
+#         # alpha hyperprior
+#         log_hyperpriors += log(jeffreys_alpha(alpha, N))
 
-        # NIW hyperpriors
-        log_hyperpriors += -log(lambda)
-        log_hyperpriors += -d * logdetpsd(psi)
-        log_hyperpriors += log(jeffreys_nu(nu, d))
+#         # NIW hyperpriors
+#         log_hyperpriors += -log(lambda)
+#         log_hyperpriors += -d * logdetpsd(psi)
+#         log_hyperpriors += log(jeffreys_nu(nu, d))
 
-    end
+#     end
 
-    log_p = log_crp + log_niw + log_hyperpriors
+#     log_p = log_crp + log_niw + log_hyperpriors
 
-    return isfinite(log_p) ? log_p / temperature : -Inf
-end
+#     return isfinite(log_p) ? log_p / temperature : -Inf
+# end

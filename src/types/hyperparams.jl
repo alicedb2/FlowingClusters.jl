@@ -11,7 +11,7 @@ struct FCHyperparamsFFJORD{T, D} <: AbstractFCHyperparams{T, D}
     # everything is already in the parameters.
 end
 
-function FCHyperparams(D::Int, ::Type{T}, nn::Union{Nothing, Chain}=nothing) where {T <: AbstractFloat}
+function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) where {T <: AbstractFloat}
     
     if isnothing(nn)
         return FCHyperparams{T, D}(
@@ -46,29 +46,6 @@ function FCHyperparams(D::Int, ::Type{T}, nn::Union{Nothing, Chain}=nothing) whe
     end
 end
 
-function forwardffjord(x::AbstractMatrix{T}, hyperparams::FCHyperparamsFFJORD{T, D}, ffjord::FFJORD) where {T, D}
-    ret, _ = ffjord(x, hyperparams._.nn.params, hyperparams.nn.nns)
-    return (; logps=ret.logp, delta_logps=ret.delta_logps, z=z)
-end
-
-function forwardffjord(x::AbstractMatrix{T}, hyperparams::FCHyperparamsFFJORD{T, D}) where {T, D}
-    ffjord_model = FFJORD(hyperparams.nn.nn, (zero(T), one(T)), (D,), Tsit5(), ad=AutoForwardDiff())
-    return forwardffjord(x, hyperparams, ffjord_model)
-end
-
-backwardffjord(x::AbstractVector{T}, hyperparams::FCHyperparamsFFJORD{T, D}, ffjord::FFJORD) where {T, D} = reshape(backwardffjord(ffjord, reshape(x, D, 1), hyperparams), D)
-backwardffjord(x::AbstractMatrix{T}, hyperparams::FCHyperparamsFFJORD{T, D}, ffjord::FFJORD) where {T, D} = Matrix{T}(__backward_ffjord(ffjord, x, hyperparams.nn_params, hyperparams.nn_state))
-
-function backwardffjord(x::AbstractVector{T}, hyperparams::FCHyperparamsFFJORD{T, D}) where {T, D}
-    ffjord_model = FFJORD(hyperparams.nn.nn, (zero(T), one(T)), (D,), Tsit5(), ad=AutoForwardDiff())
-    return return backwardffjord(x, hyperparams, ffjord_model)
-end
-
-function backwardffjord(x::AbstractMatrix{T}, hyperparams::FCHyperparamsFFJORD{T, D}) where {T, D}
-    model = FFJORD(hyperparams.nn.nn, (zero(T), one(T)), (D,), Tsit5(), ad=AutoForwardDiff())
-    return backwardffjord(x, hyperparams, model)
-end
-
 dimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
 
 function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true) 
@@ -82,27 +59,27 @@ modeldimension(hyperparams::FCHyperparams) = size(hyperparams._, 1)
 hasnn(hyperparams::AbstractFCHyperparams) = hyperparams isa FCHyperparamsFFJORD
 hasnn(hyperparamsarray::ComponentArray) = :nn in keys(hyperparamsarray)
 
-transform(hparray::ComponentArray) = backtransform!(similar(hparray))
-backtransform(transformedhparray::ComponentArray) = backtransform!(similar(transformedhparray))
+transform(hparray::ComponentArray) = transform!(copy(hparray))
+backtransform(transformedhparray::ComponentArray) = backtransform!(copy(transformedhparray))
 
 function transform!(hparray::ComponentArray)
-    hparray.alpha .= log(hparray.alpha)
-    hparray.lambda .= log(hparray.lambda)
-    hparray.nu .= log(hparray.nu - d + 1)
+    hparray.pyp.alpha = log(hparray.pyp.alpha)
+    hparray.niw.lambda = log(hparray.niw.lambda)
+    hparray.niw.nu = log(hparray.niw.nu - size(hparray.niw.mu, 1) + 1)
     if hasnn(hparray)
-        hparray.nn.t.alpha .= log(hparray.nn.t.alpha)
-        hparray.nn.t.scale .= log(hparray.nn.t.scale)
+        hparray.nn.t.alpha = log(hparray.nn.t.alpha)
+        hparray.nn.t.scale = log(hparray.nn.t.scale)
     end
     return hparray
 end
 
 function backtransform!(transformedhparray::ComponentArray)
-    transformedhparray.alpha .= exp(transformedhparray.alpha)
-    transformedhparray.lambda .= exp(transformedhparray.lambda)
-    transformedhparray.nu .= exp(transformedhparray.nu) + d - 1
+    transformedhparray.pyp.alpha = exp(transformedhparray.pyp.alpha)
+    transformedhparray.niw.lambda = exp(transformedhparray.niw.lambda)
+    transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + size(transformedhparray.niw.mu, 1) - 1
     if hasnn(transformedhparray)
-        transformedhparray.nn.t.alpha .= exp(transformedhparray.nn.t.alpha)
-        transformedhparray.nn.t.scale .= exp(transformedhparray.nn.t.scale)
+        transformedhparray.nn.t.alpha = exp(transformedhparray.nn.t.alpha)
+        transformedhparray.nn.t.scale = exp(transformedhparray.nn.t.scale)
     end
     return transformedhparray
 end
@@ -124,7 +101,7 @@ end
 
 # This eventually hits BLAS, no need to try to optimize it with for loops
 function foldpsi(flatL::AbstractVector)
-    L = foldL(flatL)
+    L = LowerTriangular(flatL)
     return L * L'
 end
 
@@ -178,4 +155,9 @@ function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
         println(io, "      alpha: $(round(hyperparams._.nn.t.alpha, digits=3))")
         print(io,   "      scale: $(round(hyperparams._.nn.t.scale, digits=3))")
     end
+end
+
+function perturb!(hyperparams::AbstractFCHyperparams{T, D}, rng::AbstractRNG=default_rng(); logstep::T=one(T)/3) where {T, D}
+    backtransform!(transform!(hyperparams._) .+= logstep * randn(rng, length(hyperparams._)))
+    return hyperparams
 end

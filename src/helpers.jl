@@ -165,16 +165,31 @@ function generate_data(;D=6, T=Float64, K=10, N=100, seed=70, test=false)
         rng = Xoshiro()
     end
 
-    base_matclusters = [rand(rng, MvNormal(10*randn(rng, T, D), Diagonal(T(1) .+ rand(rng, T, D))), N) for _ in 1:K]
-    orig_matclusters = [rand(rng, MvNormal(10*randn(rng, T, D), Diagonal(T(1) .+ rand(rng, T, D))), N) for _ in 1:K]
+    
+    base_matclusters = [Matrix{T}(rand(rng, MvNormal(randn(rng, D), Diagonal(0.05*rand(rng, D))), N)) for _ in 1:K]
+    orig_matclusters = [Matrix{T}(rand(rng, MvNormal(randn(rng, D), Diagonal(0.05*rand(rng, D))), N)) for _ in 1:K]
 
     b2oset = Dict{Vector{T}, Vector{T}}(vb => vo for (clb, clo) in zip(base_matclusters, orig_matclusters) for (vb, vo) in zip(eachcol(clb), eachcol(clo)))    
     setclusters = [SetCluster(cl, b2oset, check=test) for cl in base_matclusters]
-    
-    b2obit = cat(reduce(hcat, base_matclusters), reduce(hcat, orig_matclusters), dims=3)
-    idxclusters = [N*(i-1)+1:N*i for i in 1:K]
-    bitclusters = [BitCluster(idx, b2obit, check=test) for idx in idxclusters]
 
+    isvalid, offenders = isvalidpartition(setclusters, fullresult=true)
+    if !isvalid
+        # We are removing the offenders from the base2original dictionary
+        filter!(pair -> !(pair[1] in offenders), b2oset) # b2o is common to all
+        for cl in setclusters
+            filter!(el -> !(el in offenders), cl.elements)
+            _recalculate_sums!(cl)
+        end
+        filter!(!isempty, setclusters)
+        # @warn "There were collisions in the SetClusters, discarding offenders.\nYou won't get exactly $(K*N) elements in $K clusters in total, you'll get $(length(b2oset)) elements in $(length(setclusters)) instead.\nBet you were playing in low precision, low dimension, and with large N.\n\033[1;33mThis might fail a few tests in the test suite, that's fine.\033[0m"
+    end
+
+    b = reduce((b2o, x) -> hcat(b2o, Matrix(x)), setclusters, init=zeros(T, D, 0))
+    o = reduce((b2o, x) -> hcat(b2o, Matrix(x, orig=true)), setclusters, init=zeros(T, D, 0))
+    b2obit = cat(b, o, dims=3)
+    idxclusters = chunkslices(length.(setclusters))
+    bitclusters = [BitCluster(idx, b2obit, check=test) for idx in idxclusters]
+    _recalculate_sums!(bitclusters)
     if test
         return true
     else

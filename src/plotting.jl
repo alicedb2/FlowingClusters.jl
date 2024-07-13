@@ -1,8 +1,11 @@
-function plot!(ax, clusters::AbstractVector{<:AbstractCluster}; proj_or_dims=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...)
-
-    size(proj_or_dims, 1) == 2 || error("Can only support plotting 2 dimesions for now")
-
-    clusters = project_clusters(sort(clusters, by=length, rev=!rev), proj_or_dims)
+function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D}}; proj=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...) where {T, D}
+    
+    if D >= 2
+        size(proj, 1) == 2 || error("Can only support plotting 1 or 2 dimensions for now")
+        clusters = project_clusters(sort(clusters, by=length, rev=!rev), proj, orig=orig)
+    else
+        clusters = [[first(el) for el in cl] for cl in Vector.(sort(clusters, by=length, rev=!rev), orig=orig)]
+    end
 
     if nb_clusters === nothing || nb_clusters < 0
         nb_clusters = length(clusters)
@@ -10,9 +13,13 @@ function plot!(ax, clusters::AbstractVector{<:AbstractCluster}; proj_or_dims=[1,
 
     for (cluster, i) in zip(clusters, 1:nb_clusters)
         if !isempty(cluster)
-            x = getindex.(clusters[i], 1)
-            y = getindex.(clusters[i], 2)
-            scatter!(ax, x, y, label="$(length(cluster))", color=Cycled(i), plot_kw...)
+            if D >= 2
+                x = getindex.(clusters[i], 1)
+                y = getindex.(clusters[i], 2)
+                scatter!(ax, x, y, label="$(length(cluster))", color=Cycled(i), plot_kw...)
+            else
+                hist!(ax, cluster, label="$(length(cluster))", color=Cycled(i), plot_kw...)
+            end
         end
     end
     axislegend(ax)
@@ -20,14 +27,14 @@ function plot!(ax, clusters::AbstractVector{<:AbstractCluster}; proj_or_dims=[1,
     return ax
 end
 
-function plot(clusters::AbstractVector{<:AbstractCluster}; proj_or_dims=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...)
+function plot(clusters::AbstractVector{<:AbstractCluster}; proj=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...)
     fig = Figure()
     ax = Axis(fig[1, 1])
-    plot!(ax, clusters, proj_or_dims=proj_or_dims, rev=rev, nb_clusters=nb_clusters, orig=orig, plot_kw...)
+    plot!(ax, clusters, proj=proj, rev=rev, nb_clusters=nb_clusters, orig=orig, plot_kw...)
     return fig
 end
 
-# function plot(chain::FCChain; proj_or_dims::Vector{Int}=[1, 2], burn=0, rev=false, nb_clusters=nothing, plot_kw...)
+# function plot(chain::FCChain; proj::Vector{Int}=[1, 2], burn=0, rev=false, nb_clusters=nothing, plot_kw...)
 
 #     @assert length(dims) == 2 "We can only plot in 2 dimensions for now, dims must be a vector of length 2."
 

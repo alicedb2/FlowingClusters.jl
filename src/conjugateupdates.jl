@@ -1,5 +1,5 @@
-function updated_niw_hyperparams(clusters::Vector{C}, hyperparams::AbstractFCHyperparams) where {T, D, C <: AbstractCluster{T, D}}
-    return updated_niw_hyperparams(clusters, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu)
+function updated_niw_hyperparams(cluster::AbstractCluster{T, D}, hyperparams::AbstractFCHyperparams) where {T, D}
+    return updated_niw_hyperparams(cluster, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu)
 end
 
 function updated_niw_hyperparams(
@@ -11,20 +11,8 @@ function updated_niw_hyperparams(
     ) where {T, D}
 
     return mu, lambda, psi, nu
-
 end
 
-function updated_niw_hyperparams(
-    ::Nothing,
-    mu::AbstractVector{T},
-    lambda::T,
-    psi::AbstractMatrix{T},
-    nu::T
-    ) where T
-
-    return updated_niw_hyperparams(EmptyCluster{length(mu), T}(), mu, lambda, psi, nu)
-
-end
 
 function updated_niw_hyperparams(cluster::AbstractCluster{T, D},
     mu::AbstractVector{T},
@@ -67,51 +55,6 @@ function updated_niw_hyperparams(cluster::AbstractCluster{T, D},
 
 end
 
-# function log_Zniw(
-#     ::Nothing,
-#     mu::AbstractVector{T},
-#     lambda::T,
-#     psi::AbstractMatrix{T},
-#     nu::T) where T
-#     return log_Zniw(EmptyCluster{length(mu), T}(), mu, lambda, psi, nu)
-# end
-
-# function log_Zniw(
-#     ::Nothing,
-#     mu::AbstractVector{T},
-#     lambda::T,
-#     L::LowerTriangular{T},
-#     nu::T) where T
-#     return log_Zniw(EmptyCluster{length(mu), T}(), mu, lambda, L, nu)
-# end
-
-# function log_Zniw(
-#     ::EmptyCluster{T, D},
-#     mu::AbstractVector{T},
-#     lambda::T,
-#     psi::AbstractMatrix{T},
-#     nu::T) where {T, D}
-
-#     log_numerator = D/2 * log(2*T(pi)) + nu * D/2 * log(T(2)) + logmvgamma(D, nu/2)
-#     log_denominator = D/2 * log(lambda) + nu/2 * logdetpsd(psi)
-#     return log_numerator - log_denominator
-
-# end
-
-# function log_Zniw(
-#     ::EmptyCluster{T, D},
-#     mu::AbstractVector{T},
-#     lambda::T,
-#     L::LowerTriangular{T},
-#     nu::T) where {T, D}
-
-#     log_numerator = D/2 * log(2*T(pi)) + nu * D/2 * log(2) + logmvgamma(D, nu/2)
-#     log_denominator = D/2 * log(lambda) + nu * sum(log.(diag(L)))
-#     return log_numerator - log_denominator
-
-# end
-
-
 # Return the normalization constant
 # of the normal-inverse-Wishart distribution,
 # possibly in the presence of data if cluster isn't empty
@@ -120,7 +63,7 @@ function log_Zniw(
     mu::AbstractVector{T},
     lambda::T,
     psi::AbstractMatrix{T},
-    nu::T) where {T, D}
+    nu::T)::T where {T, D}
 
     mu, lambda, psi, nu = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
 
@@ -132,7 +75,7 @@ function log_Zniw(
 
 end
 
-function log_cluster_weight(element::AbstractVector{T}, cluster::AbstractCluster{T, D}, alpha::T, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T, N::Int=-1) where {T, D}
+function log_cluster_weight(element::AbstractVector{T}, cluster::AbstractCluster{T, D}, alpha::T, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T, N::Int=-1)::T where {T, D}
 
     !(element in cluster) || error(KeyError("Duplicate $(element)"))
 
@@ -142,6 +85,8 @@ function log_cluster_weight(element::AbstractVector{T}, cluster::AbstractCluster
         log_weight = log(T(length(cluster))) # - log(alpha + Nminus1)
     end
 
+    # Not really useful because weights are normalized
+    # during Gibbs samples
     if N >= 0
         log_weight -= log(alpha + N)
     end

@@ -1,6 +1,6 @@
 module FlowingClusters
 
-    using Random: randperm, shuffle, shuffle!, seed!, Xoshiro, AbstractRNG
+    using Random: randperm, shuffle, shuffle!, seed!, Xoshiro, AbstractRNG, default_rng
     using StatsBase
     using StatsFuns: logsumexp, logmvgamma, logit, logistic
     using LinearAlgebra
@@ -13,7 +13,7 @@ module FlowingClusters
     using SpecialFunctions: loggamma, polygamma, logbeta
 
     using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!,
-                 hidespines!, hidedecorations!, Cycled, scatter!
+                 hidespines!, hidedecorations!, Cycled, scatter!, hist!
 
     using JLD2
     using ProgressMeter: Progress, ProgressUnknown, next!
@@ -29,29 +29,14 @@ module FlowingClusters
     import MCMCDiagnosticTools: ess_rhat
     import Makie: plot, plot!
 
-    export advance_chain!
-    export advance_hyperparams_adaptive!
-    export advance_ffjord!
-    export attempt_map!, burn!
-
-    export logprobgenerative
-    export optimize_hyperparams, optimize_hyperparams!
-
-    # Plotting related functions
-    export project_clusters, project_cluster, project_hyperparams, project_mu, project_psi
-    export plot, plot!
-
-    # Predictions
-    export predictive_distribution, tail_probability, tail_probability_summary
-
     include("types/diagnostics.jl")
     export Diagnostics, DiagnosticsFFJORD
     export clear_diagnostics!, am_sigma
 
     include("types/hyperparams.jl")
-    export FCHyperparams, FCHyperparamsFFJORD
+    export AbstractFCHyperparams, FCHyperparams, FCHyperparamsFFJORD
     export dimension, modeldimension, ij, flatk, foldL, foldpsi, flatten
-    export forwardffjord, backwardffjord
+    export perturb!
 
     include("types/cluster.jl")
     export AbstractCluster, BitCluster, SetCluster
@@ -59,29 +44,38 @@ module FlowingClusters
     export isvalidpartition, iscompletepartition
     export pop!, push!, find
 
-    include("types/chain.jl")
-    export FCChain
-    
     include("conjugateupdates.jl")
     export log_Zniw, updated_niw_hyperparams, updated_mvstudent_params
 
-    # include("hyperpriors.jl")
-    # include("modelprobabilities.jl")
-    # export logprobgenerative
+    include("hyperpriors.jl")
+    include("modelprobabilities.jl")
+    export logprobgenerative
 
-    include("chainsteps.jl")
+    include("ffjord.jl")
+    export forwardffjord, backwardffjord
 
+    # include("sampler.jl")
+    # export advance_gibbs!, advance_splitmerge_seq!, advance_hyperparams_adaptive!
+    # export advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!
+    # export advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
 
-    export logprob_chain, nbclusters_chain, largestcluster_chain
-    export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain
-    export nn_chain, nn_alpha_chain, nn_scale_chain
-    export ess_rhat, stats
+    # include("types/chain.jl")
+    # export FCChain
+    # export logprob_chain, nbclusters_chain, largestcluster_chain
+    # export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain
+    # export nn_chain, nn_alpha_chain, nn_scale_chain
+    # export ess_rhat, stats
 
     include("plotting.jl")
+    export plot, plot!
 
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
     export bioclim_predictor
+
+    # include("predictions.jl")
+    # export predictive_distribution, tail_probability, tail_probability_summary
+
 
     include("helpers.jl")
     export generate_data
@@ -92,7 +86,6 @@ module FlowingClusters
     export logdetpsd, logdetflatLL
     export freedmandiaconis, doane
     export project_vec, project_mat
-
 
     # function advance_chain!(chain::MNCRPChain, nb_steps=100;
     #     nb_hyperparams=1, nb_gibbs=1,
