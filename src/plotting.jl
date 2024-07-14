@@ -1,5 +1,5 @@
 function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D, E}}; proj=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...) where {T, D, E}
-    
+
     if D >= 2
         size(proj, 1) == 2 || error("Can only support plotting 1 or 2 dimensions for now")
         clusters = project_clusters(sort(clusters, by=length, rev=!rev), proj, orig=orig)

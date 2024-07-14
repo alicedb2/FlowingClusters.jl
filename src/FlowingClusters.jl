@@ -32,15 +32,15 @@ module FlowingClusters
 
     include("types/diagnostics.jl")
     export Diagnostics, DiagnosticsFFJORD
-    export clear_diagnostics!, am_sigma
+    export clear_diagnostics!
 
     include("types/hyperparams.jl")
-    export AbstractFCHyperparams, FCHyperparams, FCHyperparamsFFJORD
+    export FCHyperparams, FCHyperparamsFFJORD
     export dimension, modeldimension, ij, flatk, foldL, foldpsi, flatten, niwparams
     export perturb!
 
     include("types/cluster.jl")
-    export AbstractCluster, BitCluster, SetCluster, EmptyCluster
+    export BitCluster, SetCluster
     export project_cluster, project_clusters
     export isvalidpartition, iscompletepartition
     export pop!, push!, find

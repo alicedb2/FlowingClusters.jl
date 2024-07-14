@@ -74,7 +74,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
         # Independence Jeffreys prior
         # log_hyperpriors += log(jeffreys_t_alpha(hpa.nn.t.alpha))
         # log_hyperpriors -= log(hpa.nn.t.scale)
-        
+
         # Bivariate Jeffreys prior
         logprob_ffjord += log_jeffreys_t(hpa.nn.t.alpha, hpa.nn.t.scale)
     end

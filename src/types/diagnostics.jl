@@ -21,22 +21,22 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
 
     if nn_params === nothing
         accepted = ComponentArray{Int}(
-                        pyp=(alpha=0,),#, sigma=0), 
-                        niw=(mu=zeros(D), 
-                            lambda=0, 
-                            flatL=zeros(sizeflatL), 
+                        pyp=(alpha=0,),#, sigma=0),
+                        niw=(mu=zeros(D),
+                            lambda=0,
+                            flatL=zeros(sizeflatL),
                             nu=0
-                            ), 
-                        splitmerge=(split=0, merge=0, 
+                            ),
+                        splitmerge=(split=0, merge=0,
                                     splitper=0, mergeper=0
                                     )
                     )
         amwg = ComponentArray{T}(
-                    nbbatches=zero(T), 
-                    logscales=(pyp=(alpha=zero(T),),# sigma=zero(T)), 
-                               niw=(mu=zeros(T, D), 
-                                    lambda=zero(T), 
-                                    flatL=zeros(T, sizeflatL), 
+                    nbbatches=zero(T),
+                    logscales=(pyp=(alpha=zero(T),),# sigma=zero(T)),
+                               niw=(mu=zeros(T, D),
+                                    lambda=zero(T),
+                                    flatL=zeros(T, sizeflatL),
                                     nu=zero(T))
                               )
                     )
@@ -46,24 +46,24 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
         am_xx = zeros(T, size(nn_params, 1), size(nn_params, 1))
 
         accepted = ComponentArray{Int}(
-                        pyp=(alpha=0,),# , sigma=0), 
-                        niw=(mu=zeros(D), 
-                             lambda=0, 
-                             flatL=zeros(sizeflatL), 
-                             nu=0), 
-                        splitmerge=(split=0, merge=0, 
+                        pyp=(alpha=0,),# , sigma=0),
+                        niw=(mu=zeros(D),
+                             lambda=0,
+                             flatL=zeros(sizeflatL),
+                             nu=0),
+                        splitmerge=(split=0, merge=0,
                                     splitper=0, mergeper=0),
-                        nn=(params=0, 
-                            t=(alpha=0, 
+                        nn=(params=0,
+                            t=(alpha=0,
                             scale=0))
                     )
 
         amwg = ComponentArray{T}(
-                    nbbatches=zero(T), 
-                    logscales=(pyp=(alpha=zero(T),),#, sigma=zero(T)), 
-                               niw=(mu=zeros(T, D), 
-                                       lambda=zero(T), 
-                                       flatL=zeros(T, sizeflatL), 
+                    nbbatches=zero(T),
+                    logscales=(pyp=(alpha=zero(T),),#, sigma=zero(T)),
+                               niw=(mu=zeros(T, D),
+                                       lambda=zero(T),
+                                       flatL=zeros(T, sizeflatL),
                                        nu=zero(T)
                                        ),
                                nn=(params=zero(T),
@@ -100,8 +100,8 @@ function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
 
 end
 
-function clear_diagnostics!(diagnostics::AbstractDiagnostics; 
-                            resethyperparams=true, resetsplitmerge=false, 
+function clear_diagnostics!(diagnostics::AbstractDiagnostics;
+                            resethyperparams=true, resetsplitmerge=false,
                             resetnn=false, resetamwg=false, resetam=false
                             )
 
@@ -133,30 +133,6 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics;
     if hasnn(diagnostics) && resetam
         diagnostics.am .= 0
     end
-
-    return diagnostics
-end
-
-function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=one(T)e-10) where T
-    sigma = (xx - x * x' / L) / (L - 1)
-    if correction
-        sigma = (sigma + sigma') / 2 + eps * I
-    end
-    return sigma
-end
-
-am_sigma(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=one(T)e-10) where {T, D} = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.xx, correction=correction, eps=eps) : zeros(Float64, 0, 0)
-
-function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptance_target::T=0.44, min_delta::T=0.01) where {T, D} #, minmax_logscale::T=one(T)0.0)
-    delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))
-    
-    contparams = hasnn(diagnostics) ? (:pyp, :niw, :nn) : (:pyp, :niw)
-    acc_rates = diagnostics.accepted[contparams] ./ (diagnostics.accepted[contparams] .+ diagnostics.rejected[contparams])
-    diagnostics.amwg.logscales .+= delta_n .* (acc_rates .< acceptance_target) .- delta_n .* (acc_rates .>= acceptance_target)
-    
-    
-    # diagnostics.amwg_logscales[diagnostics.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
-    # diagnostics.amwg_logscales[diagnostics.amwg_logscales .> minmax_logscale] .= minmax_logscale
 
     return diagnostics
 end

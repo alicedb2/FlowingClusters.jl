@@ -36,7 +36,7 @@ function advance_gibbs!(rng::AbstractRNG, element::E, clusters::AbstractVector{C
     end
 
     push!(new_assignment, element)
-    
+
     if !leaveempty
         filter!(!isempty, clusters)
     end
@@ -167,7 +167,7 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
 
         L = LowerTriangular(hyperparams._.niw.flatL)
         psi = L * L'
-        
+
         proposed_flatL = hyperparams._.niw.flatL[:]
         proposed_flatL[k] = proposed_flatL[k] + steps[k]
 
@@ -239,7 +239,7 @@ function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
 
     nn_alpha = hyperparams._.nn.t.alpha
     nn_scale = hyperparams._.nn.t.scale
-    nn_params = hyperparams._.nn.params    
+    nn_params = hyperparams._.nn.params
 
     log_nn_alpha = log(nn_alpha)
 
@@ -275,18 +275,18 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     nn_alpha = hyperparams._.nn.t.alpha
     nn_scale = hyperparams._.nn.t.scale
     nn_params = hyperparams._.nn.params
-    
+
     log_nn_scale = log(nn_scale)
 
     proposed_log_nn_scale = log_nn_scale + rand(rng, step_distrib)
     proposed_nn_scale = exp(proposed_log_nn_scale)
 
     log_acceptance = nn_prior(nn_params, nn_alpha, proposed_nn_scale) - nn_prior(nn_params, nn_alpha, nn_scale)
- 
+
     # Comment next two line for independence Jeffreys prior on nn_scale
     log_acceptance += proposed_log_nn_scale - log_nn_scale # Hastings factor
     log_acceptance += log_jeffreys_t(nn_alpha, proposed_nn_scale) - log_jeffreys_t(nn_alpha, nn_scale)
-    
+
     log_acceptance = min(zero(T), log_acceptance)
 
     if log(rand(rng, T)) < log_acceptance
@@ -295,7 +295,7 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     else
         diagnostics.rejected.nn.t.scale += 1
     end
-    
+
     return hyperparams
 end
 
@@ -453,7 +453,7 @@ end
 
 #     hasnn(hyperparams) && !isnothing(step_distrib) || return 0
 
-#     ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (dimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())    
+#     ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (dimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
 #     original_clusters = realspace_clusters(Matrix, clusters, base2original)
 
 #     proposed_nn_params = hyperparams._.nn.params .+ rand(step_distrib)
@@ -588,3 +588,28 @@ end
 # function advance_ffjord!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; step_distrib=nothing, temperature::T=one(T)) where {T, D, E}
 #     return advance_ffjord!(default_rng(), clusters, hyperparams, step_distrib=step_distrib, temperature=temperature)
 # end
+
+
+function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=one(T)e-10) where T
+    sigma = (xx - x * x' / L) / (L - 1)
+    if correction
+        sigma = (sigma + sigma') / 2 + eps * I
+    end
+    return sigma
+end
+
+am_sigma(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=one(T)e-10) where {T, D} = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.xx, correction=correction, eps=eps) : zeros(Float64, 0, 0)
+
+function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptance_target::T=0.44, min_delta::T=0.01) where {T, D} #, minmax_logscale::T=one(T)0.0)
+    delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))
+
+    contparams = hasnn(diagnostics) ? (:pyp, :niw, :nn) : (:pyp, :niw)
+    acc_rates = diagnostics.accepted[contparams] ./ (diagnostics.accepted[contparams] .+ diagnostics.rejected[contparams])
+    diagnostics.amwg.logscales .+= delta_n .* (acc_rates .> acceptance_target) .- delta_n .* (acc_rates .<= acceptance_target)
+
+
+    # diagnostics.amwg_logscales[diagnostics.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
+    # diagnostics.amwg_logscales[diagnostics.amwg_logscales .> minmax_logscale] .= minmax_logscale
+
+    return diagnostics
+end

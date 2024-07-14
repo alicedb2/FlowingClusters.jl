@@ -1,5 +1,5 @@
 ### We have to deal with vector input explicitly in
-### forwardffjord so that we can specify the output types 
+### forwardffjord so that we can specify the output types
 ### of named tuple in a type stable way. The logpxs/deltalogpxs
 ### are numbers when a vector is passed, so you can't
 ### specify the ouput as Array{T, N-1} when N=1.
@@ -36,7 +36,7 @@ function forwardffjord(x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{
 
     ffjord = FFJORD(nn.nn, (zero(T), one(T)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = first(ffjord(_x, hyperparamsarray.nn.params, nn.nns))
-  
+
     return (;logpx=reshape(ret.logpx, size(x)[2:end]...), deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...), z=reshape(ret.z, size(x)...))
 end
 
