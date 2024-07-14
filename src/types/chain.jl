@@ -58,7 +58,7 @@ end
 
 function FCChain(
     data::AbstractVector{<:AbstractVector{T}},
-    cluster_type::Type{C};
+    cluster_type::Type{C}=BitCluster;
     nb_samples=200,
     strategy=:sequential,
     optimize=false,

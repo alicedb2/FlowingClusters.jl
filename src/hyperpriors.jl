@@ -24,6 +24,7 @@ function nn_prior(nn_params::ComponentArray{T}, alpha::T=one(T), scale::T=one(T)
 
 end
 
+# Neat!
 function jeffreys_t_alpha(alpha::T) where T
     # Otherwise weird stuff happens in nn_prior
     if alpha < 10000
@@ -38,7 +39,7 @@ function log_jeffreys_t_scale(scale::T) where T
     return -log(abs(scale))
 end
 
-# Bivariate Jeffreys prior of scaled t-distribution
+# Bivariate Jeffreys prior of scaled t-distribution, how neat is that!
 function log_jeffreys_t(alpha::T, scale::T) where T
     # Otherwise weird stuff happens in nn_prior
     if alpha < 10000

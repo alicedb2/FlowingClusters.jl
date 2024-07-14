@@ -70,7 +70,7 @@ end
 
 # Quick and dirty but faster logdet
 # for (assumed) positive-definite matrix
-function logdetpsd(A::AbstractMatrix{T}) where T
+function logdetpsd(A::AbstractMatrix{T})::T where T
     chol = cholesky(Symmetric(A), check=false)
     if issuccess(chol)
         return logdet(chol)
@@ -109,13 +109,13 @@ function drawNIW(
     mu::AbstractVector{Float64},
     lambda::Float64,
     psi::AbstractMatrix{Float64},
-    nu::Float64)::Tuple{Vector{Float64}, Matrix{Float64}}
+    nu::Float64, rng::default_rng())::Tuple{Vector{Float64}, Matrix{Float64}}
 
     invWish = InverseWishart(nu, psi)
-    sigma = rand(invWish)
+    sigma = rand(rng, invWish)
 
     multNorm = MvNormal(mu, sigma/lambda)
-    mu = rand(multNorm)
+    mu = rand(rng, multNorm)
 
     return mu, sigma
 end

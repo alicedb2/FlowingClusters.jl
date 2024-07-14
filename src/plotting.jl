@@ -34,7 +34,7 @@ function plot(clusters::AbstractVector{<:AbstractCluster}; proj=[1, 2], rev=fals
     return fig
 end
 
-function plot(chain::FCChain, proj=[1, 2]; burn=0, rev=false, nb_clusters=nothing)
+function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothing)
 
     N = length(chain)
 

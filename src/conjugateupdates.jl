@@ -1,12 +1,12 @@
-function updated_niw_hyperparams(cluster::AbstractCluster{T, D, E}, hyperparams::AbstractFCHyperparams{T, D}) where {T, D, E}
+function updated_niw_hyperparams(cluster::AbstractCluster{T, D, E}, hyperparams::AbstractFCHyperparams{T, D})::@NamedTuple{mu_c::Vector{T}, lambda_c::T, psi_c::Matrix{T}, nu_c::T}  where {T, D, E}
     return updated_niw_hyperparams(cluster, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu)
 end
 
-function updated_niw_hyperparams(::EmptyCluster{T, D, E}, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T) where {T, D, E}
+function updated_niw_hyperparams(::EmptyCluster{T, D, E}, mu::AbstractVector{T}, lambda::T, psi::Matrix{T}, nu::T)::@NamedTuple{mu_c::Vector{T}, lambda_c::T, psi_c::Matrix{T}, nu_c::T}  where {T, D, E}
     return (;mu_c=mu, lambda_c=lambda, psi_c=psi, nu_c=nu)
 end
 
-function updated_niw_hyperparams(cluster::AbstractCluster{T, D, E}, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T)::@NamedTuple{mu_c::AbstractVector{T}, lambda_c::T, psi_c::AbstractMatrix{T}, nu_c::T} where {T, D, E}
+function updated_niw_hyperparams(cluster::AbstractCluster{T, D, E}, mu::AbstractVector{T}, lambda::T, psi::Matrix{T}, nu::T)::@NamedTuple{mu_c::Vector{T}, lambda_c::T, psi_c::Matrix{T}, nu_c::T} where {T, D, E}
 
     if isempty(cluster)
         return (;mu_c=mu, lambda_c=lambda, psi_c=psi, nu_c=nu)
