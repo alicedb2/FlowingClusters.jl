@@ -92,17 +92,15 @@ function FCChain(
         ret, _ = ffjord_model(unique_matdata, hyperparams._.nn.params, hyperparams.nn.nns)
         base_data = collect.(eachcol(ret.z))
     else
-
         base_data = deepcopy(unique_data)
-
     end
 
     # data and original_data are still aligned
     if cluster_type === SetCluster
         # If I don't use collect some weird things happen and keys pick up junk
-        base2original = Dict{Vector{T}, Vector{T}}(collect.(base_data) .=> collect.(unique_data))
-        initial_elements = base_data
-        element_type = Vector{T}
+        base2original = Dict{SVector{D, T}, SVector{D, T}}(collect.(base_data) .=> collect.(unique_data))
+        element_type = SVector{D, T}
+        initial_elements = [SVector{D, T}(el) for el in base_data]
     elseif cluster_type === BitCluster
         base2original = cat(reduce(hcat, base_data), reduce(hcat, unique_data), dims=3)
         initial_elements = collect(1:length(base_data))
@@ -130,7 +128,7 @@ function FCChain(
     if strategy == :hot
         push!(chain.clusters, cluster_type(initial_elements, base2original))
         for i in 1:10
-            advance_gibbs!(rng, chain.clusters, chain.hyperparams, temperature=1.2)
+            advance_gibbs!(rng, chain.clusters, chain.hyperparams, temperature=1.6)
         end
     elseif strategy == :N
         append!(chain.clusters, [cluster_type(el, base2original) for el in initial_elements])
@@ -138,10 +136,11 @@ function FCChain(
         push!(chain.clusters, cluster_type(initial_elements, base2original))
     elseif strategy == :sequential
         push!(chain.clusters, cluster_type(initial_elements[1], base2original))
-        for element in initial_elements[2:end]
+        for (i, element) in enumerate(initial_elements[2:end])
             advance_gibbs!(rng, element, chain.clusters, chain.hyperparams)
         end
     end
+    filter!(c -> !isempty(c), chain.clusters)
 
     if optimize
         println("    Initializing hyperparameters...")

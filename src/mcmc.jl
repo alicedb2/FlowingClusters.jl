@@ -60,7 +60,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             advance_hyperparams_adaptive!(
                 chain.clusters,
                 chain.hyperparams,
-                chain.base2original,
+                chain.diagnostics,
                 nb_ffjord_am=nb_ffjord_am, hyperparams_chain=chain.hyperparams_chain,
                 amwg_batch_size=amwg_batch_size, acceptance_target=0.44
                 )

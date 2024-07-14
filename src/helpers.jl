@@ -171,7 +171,7 @@ function generate_data(;D=6, T=Float64, K=10, N=100, muscale=0.5, sigmascale=0.3
     base_matclusters = [Matrix{T}(rand(rng, MvNormal(T(muscale)*randn(rng, T, D), Diagonal(T(sigmascale)^2*rand(rng, D))), N)) for _ in 1:K]
     orig_matclusters = [Matrix{T}(rand(rng, MvNormal(T(muscale)*randn(rng, T, D), Diagonal(T(sigmascale)^2*rand(rng, D))), N)) for _ in 1:K]
 
-    b2oset = Dict{Vector{T}, Vector{T}}(vb => vo for (clb, clo) in zip(base_matclusters, orig_matclusters) for (vb, vo) in zip(eachcol(clb), eachcol(clo)))    
+    b2oset = Dict{SVector{D, T}, SVector{D, T}}(vb => vo for (clb, clo) in zip(base_matclusters, orig_matclusters) for (vb, vo) in zip(eachcol(clb), eachcol(clo)))    
     setclusters = [SetCluster(cl, b2oset, check=test) for cl in base_matclusters]
 
     isvalid, offenders = isvalidpartition(setclusters, fullresult=true)

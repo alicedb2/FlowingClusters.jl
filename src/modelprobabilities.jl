@@ -8,7 +8,7 @@ end
 
 function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D, E}
 
-    all([length(c) > 0 for c in clusters]) || return -Inf
+    sum(length.(clusters)) > 1 || return -Inf
 
     hpa = hyperparamsarray
 
@@ -20,7 +20,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
     # psi is always valid by construction
     # except perhaps when logdet is too small/large
-    if alpha <= 0 || lambda <= 0 || nu <= D - 1 || (hasnn(hpa) && hpa.nn.t.alpha <= 0 && hpa.nn.t.scale <= 0)
+    if alpha <= 0 || lambda <= 0 || nu <= D - 1 || (hasnn(hpa) && (hpa.nn.t.alpha <= 0 || hpa.nn.t.scale <= 0))
         return -Inf
     end
 
@@ -50,7 +50,6 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
     end
 
-    # println("$(round(log_crp, digits=4)) $(round(log_niw, digits=4)) $(round(log_nn, digits=4)) $(round(log_hyperpriors, digits=4))")
     log_p = log_crp + log_niw + log_hyperpriors
 
     return isfinite(log_p) ? log_p / temperature : -Inf

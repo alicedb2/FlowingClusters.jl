@@ -4,6 +4,7 @@ module FlowingClusters
     using StatsBase
     using StatsFuns: logsumexp, logmvgamma, logit, logistic
     using LinearAlgebra
+    using StaticArrays: SVector
 
     using Distributions: MvNormal, MvTDist, InverseWishart, Normal,
                          Cauchy, Uniform, Exponential, Dirichlet,
