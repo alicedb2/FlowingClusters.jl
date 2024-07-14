@@ -1,4 +1,4 @@
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hyperparams::AbstractFCHyperparams{T, D}; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
     if hasnn(hyperparams)
         return logprobgenerative(clusters, hyperparams._, hyperparams.nn, ignorehyperpriors=ignorehyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
     else
@@ -6,13 +6,14 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hy
     end
 end
 
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D, E}
 
     all([length(c) > 0 for c in clusters]) || return -Inf
 
     hpa = hyperparamsarray
 
-    alpha, mu, lambda, psi, nu = hpa.pyp.alpha, Vector{T}(hpa.niw.mu), hpa.niw.lambda, foldpsi(hpa.niw.flatL), hpa.niw.nu
+    alpha = hpa.pyp.alpha
+    mu, lambda, psi, nu = niwparams(hpa)
 
     N = sum(length.(clusters))
     K = length(clusters)
@@ -32,7 +33,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hy
     for cluster in clusters
         log_niw += log_Zniw(cluster, mu, lambda, psi, nu) - length(cluster) * D/2 * log(2pi)
     end
-    log_niw -= K * log_Zniw(EmptyCluster{T, D}(), mu, lambda, psi, nu)
+    log_niw -= K * log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu)
 
 
     log_hyperpriors = zero(T)
@@ -56,7 +57,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hy
 
 end
 
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D}}, hyperparamsarray::ComponentArray{T}, nn::NamedTuple; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, nn::NamedTuple; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
 
     hpa = hyperparamsarray
 

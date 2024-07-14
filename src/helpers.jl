@@ -156,18 +156,20 @@ function project_mat(mat::AbstractMatrix, dims::AbstractVector{Int})
 end
 
 
-function generate_data(;D=6, T=Float64, K=10, N=100, seed=70, test=false)
-    if seed isa Int
-        rng = Xoshiro(seed)
+function generate_data(;D=6, T=Float64, K=10, N=100, muscale=0.5, sigmascale=0.3, seed=default_rng(), test=false)
+    if isnothing(seed)
+        rng = default_rng()
     elseif seed isa AbstractRNG
         rng = seed
+    elseif seed isa Int
+        rng = MersenneTwister(seed)
     else
-        rng = Xoshiro()
+        throw(ArgumentError("seed must be an AbstractRNG or an integer"))
     end
 
     
-    base_matclusters = [Matrix{T}(rand(rng, MvNormal(randn(rng, D), Diagonal(0.05*rand(rng, D))), N)) for _ in 1:K]
-    orig_matclusters = [Matrix{T}(rand(rng, MvNormal(randn(rng, D), Diagonal(0.05*rand(rng, D))), N)) for _ in 1:K]
+    base_matclusters = [Matrix{T}(rand(rng, MvNormal(T(muscale)*randn(rng, T, D), Diagonal(T(sigmascale)^2*rand(rng, D))), N)) for _ in 1:K]
+    orig_matclusters = [Matrix{T}(rand(rng, MvNormal(T(muscale)*randn(rng, T, D), Diagonal(T(sigmascale)^2*rand(rng, D))), N)) for _ in 1:K]
 
     b2oset = Dict{Vector{T}, Vector{T}}(vb => vo for (clb, clo) in zip(base_matclusters, orig_matclusters) for (vb, vo) in zip(eachcol(clb), eachcol(clo)))    
     setclusters = [SetCluster(cl, b2oset, check=test) for cl in base_matclusters]

@@ -157,7 +157,27 @@ function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
     end
 end
 
-function perturb!(hyperparams::AbstractFCHyperparams{T, D}, rng::AbstractRNG=default_rng(); logstep::T=one(T)/3) where {T, D}
+function perturb!(hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3) where {T, D}
+    return perturb!(default_rng(), hyperparams, logstep=logstep)
+end
+
+function perturb!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3) where {T, D}
     backtransform!(transform!(hyperparams._) .+= logstep * randn(rng, length(hyperparams._)))
     return hyperparams
+end
+
+function niwparams(hyperparams::AbstractFCHyperparams{T, D}; psi=true) where {T, D}
+    if psi
+        return hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    else
+        return hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.flatL, hyperparams._.niw.nu
+    end
+end
+
+function niwparams(hyperparamsarray::ComponentArray{T}; psi=true) where T
+    if psi
+        return hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, foldpsi(hyperparamsarray.niw.flatL), hyperparamsarray.niw.nu
+    else
+        return hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, hyperparamsarray.niw.flatL, hyperparamsarray.niw.nu
+    end
 end

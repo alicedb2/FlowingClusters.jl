@@ -11,9 +11,10 @@ for T in [Float32, Float64], D in [1, 5, 20]
     @testset "BitCluster validity with {$T, $D}" begin
         for N in rand(rng, 300:100:1000, 5)
             for K in rand(rng, 1:20, 5)
-                bitclusters, _ = generate_data(T=T, D=D, N=N, K=K, seed=rng, test=false)                
+                bitclusters, setclusters = generate_data(T=T, D=D, N=N, K=K, seed=rng, test=false)
                 @test isvalidpartition(bitclusters)
                 @test !isvalidpartition(vcat(bitclusters, rand(rng, bitclusters)))
+                @test all([x in keys(setclusters[1].b2o) for x in Vector.(Ref(bitclusters), allelements(bitclusters))])
             end
         end
     end
@@ -63,12 +64,18 @@ for T in [Float32, Float64], D in [1, 5, 20]
                 # Move a random element to a random cluster
                 for _ in 1:20
                     oldc = rand(rng, 1:length(bitclusters))
-                    eli = rand(elements(bitclusters[oldc]))
+                    eli = rand(collect(bitclusters[oldc]))
                     elx = Vector(bitclusters, eli)
                     newc = rand(rng, 1:length(bitclusters))
+                    
+                    pop!(bitclusters, eli)
+                    @test !any(eli in cl for cl in bitclusters)
+                    push!(bitclusters[newc], eli)
+                    
+                    pop!(setclusters, elx)
+                    @test !any(elx in cl for cl in setclusters)
+                    push!(setclusters[newc], elx)
 
-                    push!(bitclusters[newc], pop!(bitclusters, eli))
-                    push!(setclusters[newc], pop!(setclusters, elx))
                     @test find(elx, setclusters)[2] === find(eli, bitclusters)[2]
                     if !(T === Float16 && D === 1)
                         @test isapprox(bitclusters[oldc].sum_x, setclusters[oldc].sum_x)
@@ -77,6 +84,9 @@ for T in [Float32, Float64], D in [1, 5, 20]
                         @test isapprox(bitclusters[newc].sum_xx, setclusters[newc].sum_xx)
                     end
                 end
+
+
+
             end
         end
     end
