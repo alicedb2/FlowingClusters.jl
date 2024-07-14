@@ -83,3 +83,54 @@ function log_cluster_weight(element::E, cluster::AbstractCluster{T, D, E}, alpha
     return log_weight
 
 end
+
+
+# function updated_mvstudent_params(
+#     ::Nothing,
+#     mu::AbstractVector{Float64},
+#     lambda::Float64,
+#     psi::AbstractMatrix{Float64},
+#     nu::Float64
+#     )::Tuple{Float64, Vector{Float64}, Matrix{Float64}}
+
+#     d = length(mu)
+
+#     return (nu - d + 1, mu, (lambda + 1)/lambda/(nu - d + 1) * psi)
+
+# end
+
+# function updated_mvstudent_params(
+#     cluster::Cluster,
+#     mu::AbstractVector{Float64},
+#     lambda::Float64,
+#     psi::AbstractMatrix{Float64},
+#     nu::Float64
+#     )::Tuple{Float64, Vector{Float64}, Matrix{Float64}}
+
+#     d = length(mu)
+#     mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
+
+#     return (nu_c - d + 1, mu_c, (lambda_c + 1)/lambda_c/(nu_c - d + 1) * psi_c)
+
+# end
+
+# function updated_mvstudent_params(
+#     clusters::Vector{Cluster},
+#     mu::AbstractVector{Float64},
+#     lambda::Float64,
+#     psi::AbstractMatrix{Float64},
+#     nu::Float64;
+#     add_empty=true
+#     )::Vector{Tuple{Float64, Vector{Float64}, Matrix{Float64}}}
+
+#     updated_mvstudent_degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
+#     if add_empty
+#         push!(updated_mvstudent_degs_mus_sigs, updated_mvstudent_params(nothing, mu, lambda, psi, nu))
+#     end
+
+#     return updated_mvstudent_degs_mus_sigs
+# end
+
+# function updated_mvstudent_params(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; add_empty=true)
+#     return updated_mvstudent_params(clusters, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu, add_empty=add_empty)
+# end
