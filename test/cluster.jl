@@ -65,7 +65,7 @@ for T in [Float32, Float64], D in [1, 5, 20]
                 for _ in 1:20
                     oldc = rand(rng, 1:length(bitclusters))
                     eli = rand(collect(bitclusters[oldc]))
-                    elx = Vector(bitclusters, eli)
+                    elx = SVector{D, T}(Vector(bitclusters, eli))
                     newc = rand(rng, 1:length(bitclusters))
                     
                     pop!(bitclusters, eli)
