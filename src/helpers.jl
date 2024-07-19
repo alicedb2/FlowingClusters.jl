@@ -109,7 +109,7 @@ function drawNIW(
     mu::AbstractVector{Float64},
     lambda::Float64,
     psi::AbstractMatrix{Float64},
-    nu::Float64, rng::default_rng())::Tuple{Vector{Float64}, Matrix{Float64}}
+    nu::Float64, rng::AbstractRNG=default_rng())::Tuple{Vector{Float64}, Matrix{Float64}}
 
     invWish = InverseWishart(nu, psi)
     sigma = rand(rng, invWish)

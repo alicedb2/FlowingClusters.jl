@@ -71,7 +71,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         # Sequential split-merge
         if nb_splitmerge isa Int64
             for i in 1:nb_splitmerge
-                advance_splitmerge_seq!(chain.rng, chain.clusters, chain.hyperparams, t=splitmerge_t)
+                advance_splitmerge_seq!(chain.rng, chain.clusters, chain.hyperparams, diagnostics, t=splitmerge_t)
             end
         elseif nb_splitmerge isa Float64 || nb_splitmerge === :matchgibbs
             # old_nb_ssuccess = chain.hyperparams.diagnostics.accepted_split
@@ -84,10 +84,10 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         # Gibbs sweep
         if nb_gibbs isa Int64
             for i in 1:nb_gibbs
-                advance_gibbs!(rng, schain.clusters, chain.hyperparams)
+                advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
             end
-        elseif (0.0 < nb_gibbs < 1.0) && (rand(rng) < nb_gibbs)
-            advance_gibbs!(rng, schain.clusters, chain.hyperparams)
+        elseif (0 < nb_gibbs < 1) && (rand(chain.rng, T) < nb_gibbs)
+            advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
         end
 
         push!(chain.nbclusters_chain, length(chain.clusters))
@@ -247,8 +247,6 @@ function advance_chain!(chain::FCChain, nb_steps=100;
     end
 
 end
-
-
 
 
 function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=false, verbose=true, force=false)

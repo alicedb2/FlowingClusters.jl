@@ -16,14 +16,13 @@ module FlowingClusters
     using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!,
                  hidespines!, hidedecorations!, Cycled, scatter!, hist!
 
-    using JLD2
+    using JLD2: jldsave, load
     using ProgressMeter: Progress, ProgressUnknown, next!
     using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
 
-    using DifferentialEquations
-    using DiffEqFlux
-    using DiffEqFlux: __forward_ffjord, __backward_ffjord
+    using DifferentialEquations: Tsit5
+    using DiffEqFlux: Lux, Chain, Dense, FFJORD, __forward_ffjord, __backward_ffjord
 
     using ComponentArrays: ComponentArray
 
@@ -46,21 +45,6 @@ module FlowingClusters
     export pop!, push!, find
     export availableelements, allelements
 
-    include("conjugateupdates.jl")
-    export log_Zniw, updated_niw_hyperparams, updated_mvstudent_params, log_cluster_weight
-
-    include("hyperpriors.jl")
-    include("modelprobabilities.jl")
-    export logprobgenerative
-
-    include("ffjord.jl")
-    export forwardffjord, backwardffjord
-
-    include("sampler.jl")
-    export advance_gibbs!, advance_splitmerge_seq!, advance_hyperparams_adaptive!
-    export advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!
-    # export advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
-
     include("types/chain.jl")
     export FCChain
     export logprob_chain, nbclusters_chain, largestcluster_chain
@@ -68,8 +52,24 @@ module FlowingClusters
     export nn_chain, nn_alpha_chain, nn_scale_chain
     export ess_rhat, stats
 
+
+    include("model/conjugateupdates.jl")
+    export log_Zniw, updated_niw_hyperparams, updated_mvstudent_params, log_cluster_weight
+
+    include("model/hyperpriors.jl")
+    include("model/modelprobabilities.jl")
+    export logprobgenerative
+
+    include("model/ffjord.jl")
+    export forwardffjord, backwardffjord
+
+    include("sampler.jl")
+    export advance_gibbs!, advance_splitmerge_seq!, advance_hyperparams_adaptive!
+    export advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!
+    # export advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
+
     include("mcmc.jl")
-    export advance_chain! #, attempt_map!
+    export advance_chain!, attempt_map!
 
     include("plotting.jl")
     export plot, plot!

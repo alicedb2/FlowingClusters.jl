@@ -307,107 +307,126 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 
     alpha, (mu, lambda, psi, nu) = hyperparams._.pyp.alpha, niwparams(hyperparams)
     
-    d = D
+    _b2o = first(clusters).b2o
 
     # cluster_indices = Tuple{Int, E}[(ce, e) for (ce, cluster) in enumerate(clusters) for e in cluster]
 
     # (ci, ei), (cj, ej) = sample(rng, cluster_indices, 2, replace=false)
 
-    clusterpob = length.(clusters) ./ sum(length.(clusters))
-    ci = rand(rng, Categorical(clusterpob))
+    clusterprob = length.(clusters) ./ sum(length.(clusters))
+    ci = rand(rng, Categorical(clusterprob))
     ei = rand(rng, collect(clusters[ci]))
     @assert pop!(clusters[ci], ei) === ei
-    
-    # New weights with ei removed
-    clusterpob = length.(clusters) ./ sum(length.(clusters))
-    cj = rand(rng, Categorical(clusterpob))
+
+    # New weights with ei removed from the partition
+    clusterprob = length.(clusters) ./ sum(length.(clusters))
+    cj = rand(rng, Categorical(clusterprob))
     ej = rand(rng, collect(clusters[cj]))
     @assert pop!(clusters[cj], ej) === ej
-    # filter!(!isempty, clusters)
-
+    
     if ci == cj
 
         scheduled_elements = [e for e in clusters[ci] if !(e === ei) && !(e === ej)]
-        state = Cluster[clusters[ci]]
+
+        # Isolate the current merged state
+        current_state = C[push!(push!(clusters[ci], ei), ej)]
+        # and remove it from the current partition
         deleteat!(clusters, ci)
 
     elseif ci != cj
 
-        scheduled_elements = [e for e in flatten((clusters[ci], clusters[cj])) if !(e === ei) && !(e === ej)]
-        state = Cluster[clusters[ci], clusters[cj]]
+        scheduled_elements = [e for cl in [clusters[ci], clusters[cj]] for e in cl if !(e === ei) && !(e === ej)]
+        
+        # Isolate the current split state
+        current_state = C[push!(clusters[ci], ei), push!(clusters[cj], ej)]
+        # and remove it from the current partition
         deleteat!(clusters, sort([ci, cj]))
 
     end
 
-    shuffle!(scheduled_elements)
+    #filter!(!isempty, clusters)
 
-    proposed_state = Cluster[Cluster([ei]), Cluster([ej])]
-    launch_state = Cluster[]
+    ClusterConstructor = C.name.wrapper
+
+    # We force a split state. This state is used for both
+    # - split moves, in which case it's the proposed state,
+    #   and we accumulate the log_q appearing in the numerator
+    #   of the  Metropolis ratio, or
+    # - merge moves, in which case it's to accumulate log_q
+    #   appearing in the denominator of the Metropolis ratio
+    #   using a fictitious split state. We do not use the
+    #   current state for that purpose because we'd have to
+    #   undo it. We could, but it's tricky and annoyhing and
+    #   stationarity is not affected by this choice.
+    #   Any well mixed split state will do. Neat.
+    split_state = C[ClusterConstructor([ei], _b2o), ClusterConstructor([ej], _b2o)]
 
     log_q = 0.0
 
-    for step in flatten((0:t, [:create_proposed_state]))
+    # step=0 is the sequential Gibbs step
+    # step=1:t are the Gibbs "shuffling" steps
+    # step=t+1 is the step during which we accumulate log_q
+    # for the inverse move (1 -> 2 clusters) in a merge (2 -> 1 clusters)
+    # this step is skipped when accumulating log_q for a split (1 -> 2 clusters)
+    for step in 0:t+1
 
+        # if step == t+1
+        #     if ci == cj
+        #         # Do a last past to the proposed
+        #         # split state to accumulate
+        #         # q(proposed|launch)
+        #         # remember that
+        #         # q(launch|proposed) = q(merged|some fictional split state) = 1
+        #         append!(launch_state, proposed_state)
+        #     elseif ci != cj
+        #         # Don't perform last step in a merge,
+        #         # keep log_q as the transition probability
+        #         # to the launch state, i.e.
+        #         # q(launch|proposed) = q(launch|launch-1)
+                
+        #         # launch_state = proposed_state
+        #         append!(launch_state, proposed_state)
+        #         break
+        #     end
+        # end
 
-        # Keep copy of launch state
-        #
-        if step == :create_proposed_state
-            if ci == cj
-                # Do a last past to the proposed
-                # split state to accumulate
-                # q(proposed|launch)
-                # remember that
-                # q(launch|proposed)
-                # = q(merged|some split launch state) = 1
-                launch_state = copy(proposed_state)
-            elseif ci != cj
-                # Don't perform last step in a merge,
-                # keep log_q as the transition probability
-                # to the launch state, i.e.
-                # q(launch|proposed) = q(launch|launch-1)
-                launch_state = proposed_state
-                break
-            end
-        end
+        log_q = zero(T)
+ 
+        for el in shuffle!(scheduled_elements)
 
-        log_q = 0.0
-
-        for e in shuffle!(scheduled_elements)
-
-            delete!(proposed_state, e)
+            # Does nothing during first, sequential step
+            delete!(split_state, el)
 
             # Should be true by construction, just
-            # making sure the construction is valid
-            @assert all([!isempty(c) for c in proposed_state])
-            @assert length(proposed_state) == 2
+            # making sure we didn't mess up (yet)
+            @assert all([!isempty(c) for c in split_state])
+            @assert length(split_state) == 2
 
             #############
 
-            log_weights = zeros(length(proposed_state))
-            for (i, cluster) in enumerate(proposed_state)
-                log_weights[i] = log_cluster_weight(e, cluster, alpha, mu, lambda, psi, nu)
-            end
+            log_weights = zeros(T, length(split_state))
 
-            if temperature > 0.0
-                unnorm_logp = log_weights / temperature
+            log_weights = T[log_cluster_weight(el, split_state[1], alpha, mu, lambda, psi, nu),
+                            log_cluster_weight(el, split_state[2], alpha, mu, lambda, psi, nu)]
+
+            if temperature > 0
+                unnorm_logp = log_weights / T(temperature)
                 norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
-                probs = Weights(exp.(norm_logp))
-                new_assignment, log_transition = sample(rng, collect(zip(proposed_state, norm_logp)), probs)
-                log_q += log_transition
-            elseif temperature <= 0.0
-                _, max_idx = findmax(log_weights)
-                new_assignment = proposed_state[max_idx]
-                log_q += 0.0 # symbolic, transition is certain
+                new_assignment = rand(rng, Categorical(exp.(norm_logp)))
+                log_q += norm_logp[new_assignment]
+            elseif temperature <= 0
+                _, new_assignment = findmax(log_weights)
+                log_q += 0 # symbolic, transition is certain
             end
 
-            push!(new_assignment, e)
+            push!(split_state[new_assignment], el)
 
         end
 
     end
 
-    # At this point if we are doing a split state
-    # then log_q = q(split*|launch)
+    # At this point if we are doing a split move
+    # then log_q = q(split* | single cluster launch state)
     # and if we are doing a merge state
     # then log_q = q(launch|merge)=  q(launch|launch-1)
 
@@ -416,41 +435,60 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
         # The previous loop was only to get
         # q(launch|proposed) = q(launch|launch-1)
         # and at this point launch_state = proposed_state
-        proposed_state = Cluster[Cluster(Vector{Float64}[e for cluster in state for e in cluster])]
+        proposed_state = [ClusterConstructor([e for cl in current_state for e in cl], _b2o)]
     elseif ci == cj
-        # do nothing, we already have the proposed state
+        # In a merge move the proposed state is
+        # the split state we just constructed
+        # using restricted Gibbs moves
+        proposed_state = split_state
     end
 
-    log_acceptance = (logprobgenerative(proposed_state, hyperparams, hyperpriors=false)
-                    - logprobgenerative(state, hyperparams, hyperpriors=false))
+    
+    if temperature > 0
 
-    log_acceptance /= temperature
+        log_acceptance = (logprobgenerative(proposed_state, hyperparams, ignorehyperpriors=true, ignoreffjord=true)
+                        - logprobgenerative(current_state, hyperparams, ignorehyperpriors=true, ignoreffjord=true))
+        log_acceptance /= T(temperature)
+    
+        # Hastings factor
+        if ci != cj
+            #   q(proposed | current) / q(current | proposed)
+            # = q(split | merge) / q(merge | split)
+            # = q / 1
+            log_acceptance += log_q
+        elseif ci == cj
+            #   q(proposed | current) / q(current | proposed)
+            # = q(merge | split) / q(split | merge)
+            # = 1 / q
+            log_acceptance -= log_q
+        end
 
-    # log_q is plus-minus the log-Hastings factor.
-    # log_q already includes the tempering.
-    if ci != cj
-        log_acceptance += log_q
-    elseif ci == cj
-        log_acceptance -= log_q
+        log_acceptance = min(zero(T), log_acceptance)
+
+    elseif temperature <= 0
+       
+        log_acceptance = zero(T)
+    
     end
 
-    log_acceptance = min(0.0, log_acceptance)
 
-    if log(rand(rng)) < log_acceptance
+    if log(rand(rng, T)) < log_acceptance
         append!(clusters, proposed_state)
         if ci != cj
-            return [-1, 1]
+            diagnostics.accepted.splitmerge.merge += 1
         elseif ci == cj
-            return [1, -1]
+            diagnostics.accepted.splitmerge.split += 1
         end
     else
-        append!(clusters, state)
+        append!(clusters, current_state)
         if ci != cj
-            return [-1, 0]
+            diagnostics.rejected.splitmerge.merge += 1
         elseif ci == cj
-            return [0, -1]
+            diagnostics.rejected.splitmerge.split += 1
         end
     end
+
+    return clusters
 
 end
 
@@ -577,6 +615,10 @@ end
 function advance_gibbs!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; temperature::T=one(T)) where {T, D, E}
     return advance_gibbs!(default_rng(), clusters, hyperparams, temperature=temperature)
 end
+function advance_splitmerge_seq!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T)) where {T, D, E}
+    return advance_splitmerge_seq!(default_rng(), clusters, hyperparams, diagnostics, t=t, temperature=temperature)
+end
+
 function advance_alpha!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
     return advance_alpha!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
 end

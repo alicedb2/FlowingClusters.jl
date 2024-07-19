@@ -237,7 +237,14 @@ function Base.delete!(cluster::SetCluster{T, D, E}, x::E) where {T, D, E}
     return cluster
 end
 
-function Base.delete!(clusters::AbstractVector{SetCluster{T, D, E}}, x::E; deleteifempty=true) where {T, D, E}
+function Base.delete!(cluster::BitCluster{T, D, E}, x::E) where {T, D, E}
+    if cluster.mask[x]
+        pop!(cluster, x)
+    end
+    return cluster
+end
+
+function Base.delete!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, x::E; deleteifempty=true) where {T, D, E}
     for (ci, cluster) in enumerate(clusters)
         delete!(cluster, x)
         if deleteifempty && isempty(cluster)
