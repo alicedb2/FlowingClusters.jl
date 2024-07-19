@@ -535,7 +535,7 @@ function advance_ffjord!(
     log_acceptance /= temperature
 
     log_acceptance = min(0.0, log_acceptance)
-    if log(rand(rng)) < log_acceptance
+    if log(rand(rng, T)) < log_acceptance
         hyperparams._.nn.params = proposed_nn_params
         empty!(clusters)
         append!(clusters, Cluster.(proposed_baseclusters))
