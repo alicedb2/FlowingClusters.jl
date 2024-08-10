@@ -301,12 +301,14 @@ end
 
 
 # Sequential splitmerge from Dahl & Newcomb
-function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T)) where {T, D, C <: AbstractCluster{T, D, E}} where E
+function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T))::AbstractVector{<:AbstractCluster{T, D, E}} where {T, D, C <: AbstractCluster{T, D, E}} where E
 
     @assert t >= 0
 
-    alpha, (mu, lambda, psi, nu) = hyperparams._.pyp.alpha, niwparams(hyperparams)
-    
+    alpha = hyperparams._.pyp.alpha
+    mu, lambda, flatL, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.flatL, hyperparams._.niw.nu
+    psi = foldpsi(flatL)
+
     _b2o = first(clusters).b2o
 
     # cluster_indices = Tuple{Int, E}[(ce, e) for (ce, cluster) in enumerate(clusters) for e in cluster]
@@ -326,7 +328,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
     
     if ci == cj
 
-        scheduled_elements = [e for e in clusters[ci] if !(e === ei) && !(e === ej)]
+        scheduled_elements = E[e for e in clusters[ci] if !(e === ei) && !(e === ej)]
 
         # Isolate the current merged state
         current_state = C[push!(push!(clusters[ci], ei), ej)]
@@ -335,7 +337,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 
     elseif ci != cj
 
-        scheduled_elements = [e for cl in [clusters[ci], clusters[cj]] for e in cl if !(e === ei) && !(e === ej)]
+        scheduled_elements = E[e for cl in C[clusters[ci], clusters[cj]] for e in cl if !(e === ei) && !(e === ej)]
         
         # Isolate the current split state
         current_state = C[push!(clusters[ci], ei), push!(clusters[cj], ej)]
@@ -359,7 +361,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
     #   undo it. We could, but it's tricky and annoyhing and
     #   stationarity is not affected by this choice.
     #   Any well mixed split state will do. Neat.
-    split_state = C[ClusterConstructor([ei], _b2o), ClusterConstructor([ej], _b2o)]
+    split_state = [ClusterConstructor([ei], _b2o), ClusterConstructor([ej], _b2o)]
 
     log_q = 0.0
 

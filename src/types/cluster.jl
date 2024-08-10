@@ -537,11 +537,11 @@ function _recalculate_sums!(cluster::AbstractCluster)
     new_sum_x, new_sum_xx = calculate_sums(cluster)
     cluster.sum_x .= new_sum_x
     cluster.sum_xx .= new_sum_xx
-    return cluster
+    return cluster.sum_x, cluster.sum_xx
 end
 function _recalculate_sums!(clusters::AbstractVector{<:AbstractCluster})
     _recalculate_sums!.(clusters)
-    return clusters
+    return cluster.sum_x, cluster.sum_xx
 end
 
 ## _pop/_push functions do not perform any check
@@ -562,6 +562,8 @@ function _push_update_sums!(cluster::AbstractCluster{T, D, E}, x::AbstractVector
             cluster.sum_xx[j, i] = cluster.sum_xx[i, j]
         end
     end
+
+    return cluster.sum_x, cluster.sum_xx
 
 end
 

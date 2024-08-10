@@ -58,12 +58,12 @@ function log_Zniw(cluster::AbstractCluster{T, D, E}, mu::AbstractVector{T}, lamb
 end
 
 
-function log_cluster_weight(element::E, cluster::AbstractCluster{T, D, E}, alpha::T, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T, N::Int=-1)::T where {T, D, E}
+function log_cluster_weight(element::E, cluster::AbstractCluster{T, D, E}, alpha::T, mu::AbstractVector{T}, lambda::T, psi::AbstractMatrix{T}, nu::T; N::Int=-1)::T where {T, D, E}
 
     !(element in cluster) || error(KeyError("Duplicate $(element)"))
 
     if isempty(cluster)
-        log_weight = log(alpha) # - log(alpha + Nminus1)
+        log_weight = log(T(alpha)) # - log(alpha + Nminus1)
     else
         log_weight = log(T(length(cluster))) # - log(alpha + Nminus1)
     end
@@ -71,7 +71,7 @@ function log_cluster_weight(element::E, cluster::AbstractCluster{T, D, E}, alpha
     # Not really useful because weights are normalized
     # during Gibbs samples
     if N >= 0
-        log_weight -= log(alpha + N)
+        log_weight -= log(T(alpha + N))
     end
 
     push!(cluster, element)
