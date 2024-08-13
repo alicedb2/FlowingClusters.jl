@@ -31,7 +31,7 @@ function Base.show(io::IO, chain::FCChain)
     println(io, typeof(chain))
     println(io)
     println(io, "                      #elements: $(sum(length.(chain.clusters)))")
-    println(io, "                data dimensions: $(dimension(chain.hyperparams))")
+    println(io, "                data dimensions: $(datadimension(chain.hyperparams))")
     println(io, "               model dimensions: $(modeldimension(chain.hyperparams))")
     println(io, "                   chain length: $(length(chain))")
     conv = length(chain) > 30 ? ess_rhat(largestcluster_chain(chain)[div(end, 3):end]) : (ess=0.0, rhat=0.0)
@@ -88,8 +88,8 @@ function FCChain(
 
     if ffjord_nn isa Chain
         unique_matdata = reduce(hcat, unique_data)
-        ffjord_model = FFJORD(hyperparams.nn.nn, (0.0, 1.0), (D,), Tsit5(), ad=AutoForwardDiff())
-        ret, _ = ffjord_model(unique_matdata, hyperparams._.nn.params, hyperparams.nn.nns)
+        ffjord_model = FFJORD(hyperparams.ffjord.nn, (0.0, 1.0), (D,), Tsit5(), ad=AutoForwardDiff())
+        ret, _ = ffjord_model(unique_matdata, hyperparams._.nn.params, hyperparams.ffjord.nns)
         base_data = collect.(eachcol(ret.z))
     else
         base_data = deepcopy(unique_data)
@@ -238,7 +238,7 @@ function ess_rhat(chain::FCChain, burn=0)
     end
     N -= burn
 
-    d = dimension(chain.hyperparams)
+    d = datadimension(chain.hyperparams)
     flatL_d = size(chain.hyperparams.flatL, 1)
     nn_D = chain.hyperparams.nn_params !== nothing ? size(chain.hyperparams.nn_params, 1) : 0
 

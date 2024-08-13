@@ -56,7 +56,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
 end
 
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, nn::NamedTuple; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
 
     hpa = hyperparamsarray
 
@@ -65,7 +65,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     logprob_ffjord = zero(T)
 
     if hasnn(hpa) && !ignoreffjord
-        logprob_ffjord -= sum(forwardffjord(Matrix(clusters, orig=true), hpa, nn).deltalogpxs)
+        logprob_ffjord -= sum(forwardffjord(Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
         logprob_ffjord += nn_prior(hpa.nn.params, hpa.nn.t.alpha, hpa.nn.t.scale)
     end
 

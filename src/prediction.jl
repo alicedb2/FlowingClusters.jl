@@ -90,7 +90,7 @@
 
     #     if hyperparams.nn !== nothing
     #         basetailprob_func = tail_probability(weights, updated_mvstudent_degs_mus_sigs, nb_rejection_samples=nb_rejection_samples)
-    #         ffjord_mdl = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (dimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
+    #         ffjord_mdl = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (datadimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
     #         function tailprob_func(coordinates::AbstractArray)
     #             ret, _ = ffjord_mdl(coordinates isa AbstractVector ? reshape(coordinates, :, 1) : reshape(coordinates, first(size(coordinates)), :), hyperparams.nn_params, hyperparams.nn_state)
     #             base_elements = reshape(ret.z, size(coordinates)...)

@@ -6,7 +6,7 @@ end
 
 struct FCHyperparamsFFJORD{T, D} <: AbstractFCHyperparams{T, D}
     _::ComponentArray{T}
-    nn::NamedTuple
+    ffjord::NamedTuple
     # neural network state, which I still don't understand what it does
     # everything is already in the parameters.
 end
@@ -46,7 +46,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) whe
     end
 end
 
-dimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
+datadimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
 
 function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
     dim = size(hyperparams._, 1)

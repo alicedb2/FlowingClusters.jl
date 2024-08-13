@@ -35,7 +35,7 @@ module FlowingClusters
 
     include("types/hyperparams.jl")
     export FCHyperparams, FCHyperparamsFFJORD
-    export dimension, modeldimension, ij, flatk, foldL, foldpsi, flatten, niwparams
+    export datadimension, modeldimension, ij, flatk, foldL, foldpsi, flatten, niwparams
     export perturb!
 
     include("types/cluster.jl")

@@ -506,7 +506,7 @@ function advance_ffjord!(
 
     hasnn(hyperparams) && !isnothing(step_distrib) || return 0
 
-    ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (dimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
+    ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (datadimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
     original_clusters = realspace_clusters(Matrix, clusters, base2original)
 
     proposed_nn_params = hyperparams._.nn.params .+ rand(rng, step_distrib)
