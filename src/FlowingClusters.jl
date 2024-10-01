@@ -78,17 +78,18 @@ module FlowingClusters
     using .NaiveBIOCLIM
     export bioclim_predictor
 
-    # include("predictions.jl")
-    # export predictive_distribution, tail_probability, tail_probability_summary
+    include("prediction.jl")
+    export predictive_distribution, tail_probability, tail_probability_summary
 
     include("helpers.jl")
     export generate_data
     export performance_statistics, best_score_threshold
     export drawNIW
     export sqrtsigmoid, sqrttanh, sqrttanhgrow
-    export chunk
+    export chunk, chunkslices
     export logdetpsd, logdetflatLL
     export freedmandiaconis, doane
     export project_vec, project_mat
+    export idinit
 
 end

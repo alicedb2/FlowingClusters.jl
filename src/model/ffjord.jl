@@ -37,7 +37,7 @@ function forwardffjord(x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{
         _x = x
     end
 
-    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), T(1)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
+    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), T(10)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = first(ffjord_mdl(_x, hyperparamsarray.nn.params, ffjord.nns))
 
     return (;logpx=reshape(ret.logpx, size(x)[2:end]...), deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...), z=reshape(ret.z, size(x)...))
@@ -64,10 +64,15 @@ function backwardffjord(x::AbstractArray{T, N}, hyperparamsarray::ComponentArray
         _x = reshape(x, D, :)
     end
 
-    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), T(1)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
+    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), T(10)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = __backward_ffjord(ffjord_mdl, _x, hyperparamsarray.nn.params, ffjord.nns)
     return reshape(ret, size(x)...)
 
+end
+
+function backwardffjord(x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D})::Array{T, N} where {T, D, N}
+    hasnn(hyperparams) || return x
+    return backwardffjord(x, hyperparams._, hyperparams.ffjord)
 end
 
 function reflow(clusters::AbstractVector{SetCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple) where {T, D, E}

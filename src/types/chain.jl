@@ -79,7 +79,7 @@ function FCChain(
     D = length(first(data))
     all(length.(data) .== D) || throw(ArgumentError("All data points must have the same length"))
 
-    hyperparams = FCHyperparams(T, D, ffjord_nn)
+    hyperparams = FCHyperparams(T, D, ffjord_nn, rng=rng)
     hyperparams._.pyp.alpha = 10.0 / log(length(data))
 
     # Keep unique observations only

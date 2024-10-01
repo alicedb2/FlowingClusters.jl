@@ -14,7 +14,7 @@ struct FCHyperparamsFFJORD{T, D} <: AbstractFCHyperparams{T, D}
     # everything is already in the parameters.
 end
 
-function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) where {T <: AbstractFloat}
+function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng=default_rng()) where {T <: AbstractFloat}
 
     if isnothing(nn)
         return FCHyperparams{T, D}(
@@ -30,7 +30,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) whe
 
         D == first(nn.layers).in_dims == last(nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
 
-        nn_params, nn_state = Lux.setup(Xoshiro(), nn)
+        nn_params, nn_state = Lux.setup(rng, nn)
         nn_params = ComponentArray{T}(nn_params)
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
 

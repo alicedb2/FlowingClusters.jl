@@ -85,52 +85,51 @@ function log_cluster_weight(element::E, cluster::AbstractCluster{T, D, E}, alpha
 end
 
 
-# function updated_mvstudent_params(
-#     ::Nothing,
-#     mu::AbstractVector{Float64},
-#     lambda::Float64,
-#     psi::AbstractMatrix{Float64},
-#     nu::Float64
-#     )::Tuple{Float64, Vector{Float64}, Matrix{Float64}}
+function updated_mvstudent_params(
+    ::EmptyCluster{T, D, E},
+    mu::AbstractVector{T},
+    lambda::T,
+    psi::AbstractMatrix{T},
+    nu::T
+    )::@NamedTuple{df_c::T, mu_c::Vector{T}, sigma_c::Matrix{T}} where {T, D, E}
 
-#     d = length(mu)
+    # d = length(mu)
 
-#     return (nu - d + 1, mu, (lambda + 1)/lambda/(nu - d + 1) * psi)
+    return (df_c=nu - D + 1, mu_c=Vector{T}(mu), sigma_c=Matrix{T}((lambda + 1)/lambda/(nu - D + 1) * psi))
 
-# end
+end
 
-# function updated_mvstudent_params(
-#     cluster::Cluster,
-#     mu::AbstractVector{Float64},
-#     lambda::Float64,
-#     psi::AbstractMatrix{Float64},
-#     nu::Float64
-#     )::Tuple{Float64, Vector{Float64}, Matrix{Float64}}
+function updated_mvstudent_params(
+    cluster::AbstractCluster{T, D, E},
+    mu::AbstractVector{T},
+    lambda::T,
+    psi::AbstractMatrix{T},
+    nu::T
+    )::@NamedTuple{df_c::T, mu_c::Vector{T}, sigma_c::Matrix{T}} where {T, D, E}
 
-#     d = length(mu)
-#     mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
+    mu_c, lambda_c, psi_c, nu_c = updated_niw_hyperparams(cluster, mu, lambda, psi, nu)
 
-#     return (nu_c - d + 1, mu_c, (lambda_c + 1)/lambda_c/(nu_c - d + 1) * psi_c)
+    return (df_c=nu_c - D + 1, mu_c=mu_c, sigma_c=(lambda_c + 1)/lambda_c/(nu_c - D + 1) * psi_c)
 
-# end
+end
 
-# function updated_mvstudent_params(
-#     clusters::Vector{Cluster},
-#     mu::AbstractVector{Float64},
-#     lambda::Float64,
-#     psi::AbstractMatrix{Float64},
-#     nu::Float64;
-#     add_empty=true
-#     )::Vector{Tuple{Float64, Vector{Float64}, Matrix{Float64}}}
+function updated_mvstudent_params(
+    clusters::AbstractVector{<:AbstractCluster{T, D, E}},
+    mu::AbstractVector{T},
+    lambda::T,
+    psi::AbstractMatrix{T},
+    nu::T;
+    add_empty=true
+    )::Vector{@NamedTuple{df_c::T, mu_c::Vector{T}, sigma_c::Matrix{T}}} where {T, D, E}
 
-#     updated_mvstudent_degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
-#     if add_empty
-#         push!(updated_mvstudent_degs_mus_sigs, updated_mvstudent_params(nothing, mu, lambda, psi, nu))
-#     end
+    updated_mvstudent_degs_mus_sigs = [updated_mvstudent_params(cluster, mu, lambda, psi, nu) for cluster in clusters]
+    if add_empty
+        push!(updated_mvstudent_degs_mus_sigs, updated_mvstudent_params(EmptyCluster{T, D, E}(), mu, lambda, psi, nu))
+    end
 
-#     return updated_mvstudent_degs_mus_sigs
-# end
+    return updated_mvstudent_degs_mus_sigs
+end
 
-# function updated_mvstudent_params(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; add_empty=true)
-#     return updated_mvstudent_params(clusters, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu, add_empty=add_empty)
-# end
+function updated_mvstudent_params(clusters::Vector{<:AbstractCluster}, hyperparams::AbstractFCHyperparams; add_empty=true)
+    return updated_mvstudent_params(clusters, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu, add_empty=add_empty)
+end

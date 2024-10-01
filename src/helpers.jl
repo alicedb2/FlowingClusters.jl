@@ -204,3 +204,22 @@ function Base.Array(b2o::Dict{SVector{D, T}, SVector{D, T}})::Array{T, 3} where 
     origdata = reduce(hcat, collect.(values(b2o)))
     return cat(basedata, origdata, dims=3)
 end
+
+function idinit(mult::T, direction=:in) where T <: Real
+    function init(rng::AbstractRNG, dims...)
+        w = zeros(T, dims...)
+        outdim, indim = dims[1], dims[2]
+        if direction === :in
+            slices = chunkslices(fill(div(outdim, indim), indim))
+            for (i, slice) in enumerate(slices)
+                w[slice, i] .= T(mult)
+            end
+        elseif direction === :out
+            slices = chunkslices(fill(div(indim, outdim), outdim))
+            for (i, slice) in enumerate(slices)
+                w[i, slice] .= T(mult)
+            end
+        end
+        return w
+    end
+end
