@@ -43,9 +43,9 @@ function advance_chain!(chain::FCChain, nb_steps=100;
     end
 
     if pretty_progress === :repl || pretty_progress === :file || pretty_progress
-        if nb_steps === nothing || !isfinite(nb_steps) || nb_steps < 0
+        if !isnothing(nb_steps) || !isfinite(nb_steps) || nb_steps < 0
             progbar = ProgressUnknown(showspeed=true, output=progressio)
-            nb_steps = nothing
+            nb_steps = Inf
             _nb_steps = typemax(Int64)
         else
             progbar = Progress(nb_steps; showspeed=true, output=progressio)
@@ -200,7 +200,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if pretty_progress === :repl || pretty_progress === :file || pretty_progress
             next!(progbar;
             showvalues=[
-            (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps === nothing ? Inf : nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
+            (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
             (:"chain length", "$(length(chain))"),
             (:"conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
             (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
@@ -215,7 +215,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             (:"last checkpoint at", last_checkpoint)
             ])
         else
-            print("\r$(step)/$(nb_steps === nothing ? Inf : nb_steps)")
+            print("\r$(step)/$(nb_steps)")
             print(" (t:$(length(chain.logprob_chain)))")
             print("   lp: $(round(chain.logprob_chain[end], digits=1))")
             print("   sr:" * split_ratio * " mr:" * merge_ratio)
