@@ -33,7 +33,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     delta_minusnn = 0.0
     if hasnn(hp)
-        delta_minusnn = nn_prior(similar(hp._.nn.params) .= 0.0, hp._.nn.t.alpha, hp._.nn.t.scale)
+        delta_minusnn = nn_prior(similar(hp._.nn.params) .= 0.0, hp._.nn.prior.alpha, hp._.nn.prior.scale)
     end
 
     if pretty_progress === :repl
@@ -194,7 +194,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
         _delta_minusnn_map = 0
         if hasnn(chain.hyperparams)
-            _delta_minusnn_map = delta_minusnn + log_jeffreys_t(chain.map_hyperparams._.nn.t.alpha, chain.map_hyperparams._.nn.t.scale)
+            _delta_minusnn_map = delta_minusnn + log_jeffreys_t(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
         end
 
         if pretty_progress === :repl || pretty_progress === :file || pretty_progress

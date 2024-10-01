@@ -198,3 +198,9 @@ function generate_data(;D=6, T=Float64, K=10, N=100, muscale=0.5, sigmascale=0.3
         return bitclusters, setclusters
     end
 end
+
+function Base.Array(b2o::Dict{SVector{D, T}, SVector{D, T}})::Array{T, 3} where {T, D}
+    basedata = reduce(hcat, collect.(keys(b2o)))
+    origdata = reduce(hcat, collect.(values(b2o)))
+    return cat(basedata, origdata, dims=3)
+end

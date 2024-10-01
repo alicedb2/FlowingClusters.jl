@@ -5,16 +5,19 @@
 ### specify the ouput as Array{T, N-1} when N=1.
 ### Honestly this is a bit overkill but it's a good exercise
 
+## forwardffjord pushes the data in the original space
+## through the neural network and returns the data in the
+## base space where the clustering happens
 function forwardffjord(x::AbstractVector{T}, hyperparams::AbstractFCHyperparams{T, D})::@NamedTuple{logpx::T, deltalogpxs::T, z::Vector{T}} where {T, D}
     D === size(x, 1) || throw(ArgumentError("The dimension of the data must be the same as the dimension of the hyperparameters"))
     hasnn(hyperparams) || return (;logpx=zero(T), deltalogpxs=zero(T), z=x)
-    return forwardffjord(x, hyperparams._, hyperparams.nn)
+    return forwardffjord(x, hyperparams._, hyperparams.ffjord)
 end
 
 function forwardffjord(x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D})::@NamedTuple{logpx::Array{T, N-1}, deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, D, N}
     D === size(x, 1) || throw(ArgumentError("The dimension of the data must be the same as the dimension of the hyperparameters"))
     hasnn(hyperparams) || return (;logpx=zeros(T, size(x)[2:end]), deltalogpxs=zeros(T, size(x)[2:end]), z=x)
-    return forwardffjord(x, hyperparams._, hyperparams.nn)
+    return forwardffjord(x, hyperparams._, hyperparams.ffjord)
 end
 
 function forwardffjord(x::AbstractVector{T}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple)::@NamedTuple{logpx::T, deltalogpxs::T, z::Vector{T}} where {T}
@@ -34,15 +37,20 @@ function forwardffjord(x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{
         _x = x
     end
 
-    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), one(T)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
+    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), T(1)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = first(ffjord_mdl(_x, hyperparamsarray.nn.params, ffjord.nns))
 
     return (;logpx=reshape(ret.logpx, size(x)[2:end]...), deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...), z=reshape(ret.z, size(x)...))
 end
 
+
 ## backwardffjord is easier in terms of type stability
 ## because the input is always an array with the
 ## same dimension as the output
+
+## backwardffjord pulls the data from the base space
+## through the neural network and returns the data in
+## the original space.
 function backwardffjord(x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple)::Array{T, N} where {T, N}
     hasnn(hyperparamsarray) || return x
     D = size(x, 1)
@@ -56,22 +64,34 @@ function backwardffjord(x::AbstractArray{T, N}, hyperparamsarray::ComponentArray
         _x = reshape(x, D, :)
     end
 
-    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), one(T)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
+    ffjord_mdl = FFJORD(ffjord.nn, (zero(T), T(1)), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = __backward_ffjord(ffjord_mdl, _x, hyperparamsarray.nn.params, ffjord.nns)
     return reshape(ret, size(x)...)
 
 end
 
-function reflow!(clusters::AbstractVector{SetCluster{T, D, E}}, nnparams::ComponentArray{T}, nns::NamedTuple) where {T, D, E}
+function reflow(clusters::AbstractVector{SetCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple) where {T, D, E}
     
-    
-    for cluster in clusters
-        reflow!(cluster, nnparams, nns)
-    end
+    cluster_sizes = length.(clusters)
+    base2original = first(clusters).b2o
+    @assert all([base2original === c.b2o for c in clusters])
+    # origdata = reduce(hcat, [base2original[el] for c in clusters for el in c])
+    origdata = Matrix(clusters, orig=true)
+
+    _, delta_logps, new_basedata = forwardffjord(origdata, hyperparamsarray, ffjord)
+
+    new_base2original = Dict{SVector{D, T}, SVector{D, T}}(collect.(eachcol(new_basedata)) .=> collect.(eachcol(origdata)))
+    new_clusters = [SetCluster(basedata, new_base2original) for basedata in chunk(new_basedata, cluster_sizes)]
+
+    return (clusters=new_clusters, delta_logps=delta_logps)
 end
 
-function reflow!(clusters::AbstractVector{BitCluster{T, D, E}}, nnparams::ComponentArray{T}, nns::NamedTuple) where {T, D, E}
+function reflow(clusters::AbstractVector{BitCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple) where {T, D, E}
+    base2original = first(clusters).b2o    
+    
+    _, delta_logps, new_basedata = forwardffjord(base2original[:, :, O], hyperparamsarray, ffjord)
+    
+    new_base2original = cat(new_basedata, base2original[:, :, O], dims=3)
+    
+    return (clusters=[BitCluster(cluster.mask, new_base2original) for cluster in clusters], delta_logps=delta_logps)
 end
-
-
-reflow!(clusters::AbstractClusters{TD, E}, hyperparams::AbstractFCHyperparams{T, D}) where {T, D, E, TD} = reflow!(clusters, hyperparams.nn.nn, hyperparams.nn.nns)

@@ -67,12 +67,12 @@ function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClu
     log_acceptance += K * proposed_logalpha - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
     log_acceptance -= K * log_alpha - loggamma(alpha + N) + loggamma(alpha)
 
-    log_acceptance += log(jeffreys_alpha(proposed_alpha, N)) - log(jeffreys_alpha(alpha, N))
+    log_acceptance += log(jeffreys_crp_alpha(proposed_alpha, N)) - log(jeffreys_crp_alpha(alpha, N))
 
     log_hastings = proposed_logalpha - log_alpha
     log_acceptance += log_hastings
 
-    log_acceptance = min(zero(T), log_acceptance)
+    # log_acceptance = min(zero(T), log_acceptance)
 
     if log(rand(rng, T)) < log_acceptance
         hyperparams._.pyp.alpha = proposed_alpha
@@ -106,7 +106,7 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 
         log_acceptance = sum([log_Zniw(c, proposed_mu, lambda, psi, nu) - log_Zniw(EmptyCluster{T, D, E}(), proposed_mu, lambda, psi, nu) - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu) for c in clusters])
 
-        log_acceptance = min(zero(T), log_acceptance)
+        # log_acceptance = min(zero(T), log_acceptance)
 
         if log(rand(rng, T)) < log_acceptance
             hyperparams._.niw.mu = proposed_mu
@@ -134,7 +134,7 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
     # Jeffreys prior over lambda is the logarithmic
     # prior and moves are symmetric on the log scale.
 
-    log_acceptance = min(zero(T), log_acceptance)
+    # log_acceptance = min(zero(T), log_acceptance)
 
     if log(rand(rng, T)) < log_acceptance
         hyperparams._.niw.lambda = proposed_lambda
@@ -184,7 +184,7 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
 
         log_acceptance += D * (logdetpsd(psi) - logdetpsd(proposed_psi))
 
-        log_acceptance = min(zero(T), log_acceptance)
+        # log_acceptance = min(zero(T), log_acceptance)
 
         if log(rand(rng, T)) < log_acceptance
             hyperparams._.niw.flatL = proposed_flatL
@@ -219,7 +219,8 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 
     log_acceptance += log(jeffreys_nu(proposed_nu, D)) - log(jeffreys_nu(nu, D))
 
-    log_acceptance = min(zero(T), log_acceptance)
+    # log_acceptance = min(zero(T), log_acceptance)
+
     if log(rand(rng, T)) < log_acceptance
         hyperparams._.niw.nu = proposed_nu
         diagnostics.accepted.niw.nu += 1
@@ -237,8 +238,8 @@ function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
 
     step_distrib = Normal(zero(T), stepsize)
 
-    nn_alpha = hyperparams._.nn.t.alpha
-    nn_scale = hyperparams._.nn.t.scale
+    nn_alpha = hyperparams._.nn.prior.alpha
+    nn_scale = hyperparams._.nn.prior.scale
     nn_params = hyperparams._.nn.params
 
     log_nn_alpha = log(nn_alpha)
@@ -254,13 +255,13 @@ function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     # log_acceptance += log(jeffreys_t_alpha(proposed_nn_alpha)) - log(jeffreys_t_alpha(nn_alpha))
     log_acceptance += log_jeffreys_t(proposed_nn_alpha, nn_scale) - log_jeffreys_t(nn_alpha, nn_scale)
 
-    log_acceptance = min(zero(T), log_acceptance)
+    # log_acceptance = min(zero(T), log_acceptance)
 
     if log(rand(rng, T)) < log_acceptance
-        hyperparams.nn.t.alpha = proposed_nn_alpha
-        diagnostics.accepted.nn.t.alpha += 1
+        hyperparams._.nn.prior.alpha = proposed_nn_alpha
+        diagnostics.accepted.nn.prior.alpha += 1
     else
-        diagnostics.rejected.nn.t.alpha += 1
+        diagnostics.rejected.nn.prior.alpha += 1
     end
 
     return hyperparams
@@ -272,8 +273,8 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
 
     step_distrib = Normal(zero(T), stepsize)
 
-    nn_alpha = hyperparams._.nn.t.alpha
-    nn_scale = hyperparams._.nn.t.scale
+    nn_alpha = hyperparams._.nn.prior.alpha
+    nn_scale = hyperparams._.nn.prior.scale
     nn_params = hyperparams._.nn.params
 
     log_nn_scale = log(nn_scale)
@@ -285,15 +286,16 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
 
     # Comment next two line for independence Jeffreys prior on nn_scale
     log_acceptance += proposed_log_nn_scale - log_nn_scale # Hastings factor
+    # log_acceptance += log_jeffreys_t_scale(proposed_nn_scale) - log_jeffreys_t_scale(nn_scale)
     log_acceptance += log_jeffreys_t(nn_alpha, proposed_nn_scale) - log_jeffreys_t(nn_alpha, nn_scale)
 
-    log_acceptance = min(zero(T), log_acceptance)
+    # log_acceptance = min(zero(T), log_acceptance)
 
     if log(rand(rng, T)) < log_acceptance
-        hyperparams._.nn.t.scale = proposed_nn_scale
-        diagnostics.accepted.nn.t.scale += 1
+        hyperparams._.nn.prior.scale = proposed_nn_scale
+        diagnostics.accepted.nn.prior.scale += 1
     else
-        diagnostics.rejected.nn.t.scale += 1
+        diagnostics.rejected.nn.prior.scale += 1
     end
 
     return hyperparams
@@ -465,7 +467,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
             log_acceptance -= log_q
         end
 
-        log_acceptance = min(zero(T), log_acceptance)
+        # log_acceptance = min(zero(T), log_acceptance)
 
     elseif temperature <= 0
        
@@ -495,60 +497,97 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 end
 
 
-
 function advance_ffjord!(
     rng::AbstractRNG,
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
-    base2original::Dict{SVector{D, T}, SVector{D, T}};
-    step_distrib=nothing,
-    temperature::T=one(T))::Int where {T, D, E}
+    diagnostics::AbstractDiagnostics{T, D};
+    step_distrib=nothing) where {T, D, E}
 
-    hasnn(hyperparams) && !isnothing(step_distrib) || return 0
+    hasnn(hyperparams) && !isnothing(step_distrib) || return hyperparams
 
-    ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (datadimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
-    original_clusters = realspace_clusters(Matrix, clusters, base2original)
+    proposed_hparray = copy(hyperparams._)
+    proposed_hparray.nn.params .= proposed_hparray.nn.params .+ rand(rng, step_distrib)
 
-    proposed_nn_params = hyperparams._.nn.params .+ rand(rng, step_distrib)
+    proposed_clusters, new_delta_logps = reflow(clusters, proposed_hparray, hyperparams.ffjord)
 
-    # We could have left the calculation of deltalogps
-    # to logprobgenerative below, but we a proposal comes
-    # a new base2original so we do both at once here and
-    # call logprobgenerative with ffjord=false
+    # ignoreffjord=true to avoid the ffjord logp
+    # which reflow already calculated
+    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, hyperparams.ffjord, ignorehyperpriors=true, ignoreffjord=true)
+    log_acceptance -= sum(new_delta_logps)
+    log_acceptance += nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior.alpha, proposed_hparray.nn.prior.scale)
 
-    original_elements = reduce(hcat, original_clusters)
-    proposed_base, _ = ffjord_model(original_elements, proposed_nn_params, hyperparams.nns)
-    proposed_elements = Matrix{Float64}(proposed_base.z)
-    proposed_baseclusters = chunk(proposed_elements, size.(original_clusters, 2))
-    proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}(eachcol(proposed_elements) .=> eachcol(original_elements))
+    log_acceptance -= logprobgenerative(clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true, ignoreffjord=false)
 
-    log_acceptance = -sum(proposed_base.delta_logp)
+    # log_acceptance = min(zero(T), log_acceptance)
 
-    # We already accounted for the ffjord deltalogps above
-    # so call logprobgenerative with ffjord=false on the
-    # proposed state.
-    log_acceptance += logprobgenerative(Cluster.(proposed_baseclusters), hyperparams, proposed_base2original, hyperpriors=false, ffjord=false) - logprobgenerative(clusters, hyperparams, base2original, hyperpriors=false, ffjord=true)
-
-    # We called logprobgenerative with ffjord=true on the current state
-    # but not on the proposed state, so we need to account for the
-    # prior on the neural network for the proposed state
-    log_acceptance += nn_prior(proposed_nn_params, hyperparams._.nn.t.alpha, hyperparams._.nn.t.scale)
-
-    log_acceptance /= temperature
-
-    log_acceptance = min(0.0, log_acceptance)
     if log(rand(rng, T)) < log_acceptance
-        hyperparams._.nn.params = proposed_nn_params
         empty!(clusters)
-        append!(clusters, Cluster.(proposed_baseclusters))
-        empty!(base2original)
-        merge!(base2original, proposed_base2original)
-        return 1
+        append!(clusters, proposed_clusters)
+        hyperparams._ .= proposed_hparray
+        diagnostics.accepted.nn.params += 1
     else
-        return 0
+        diagnostics.rejected.nn.params += 1
     end
 
+    return hyperparams
+
 end
+
+
+# function advance_ffjord!(
+#     rng::AbstractRNG,
+#     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
+#     hyperparams::AbstractFCHyperparams{T, D},
+#     base2original::Dict{SVector{D, T}, SVector{D, T}};
+#     step_distrib=nothing,
+#     temperature::T=one(T))::Int where {T, D, E}
+
+#     hasnn(hyperparams) && !isnothing(step_distrib) || return 0
+
+#     ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (datadimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
+#     original_clusters = realspace_clusters(Matrix, clusters, base2original)
+
+#     proposed_nn_params = hyperparams._.nn.params .+ rand(rng, step_distrib)
+
+#     # We could have left the calculation of deltalogps
+#     # to logprobgenerative below, but we a proposal comes
+#     # a new base2original so we do both at once here and
+#     # call logprobgenerative with ffjord=false
+
+#     original_elements = reduce(hcat, original_clusters)
+#     proposed_base, _ = ffjord_model(original_elements, proposed_nn_params, hyperparams.nns)
+#     proposed_elements = Matrix{Float64}(proposed_base.z)
+#     proposed_baseclusters = chunk(proposed_elements, size.(original_clusters, 2))
+#     proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}(eachcol(proposed_elements) .=> eachcol(original_elements))
+
+#     log_acceptance = -sum(proposed_base.delta_logp)
+
+#     # We already accounted for the ffjord deltalogps above
+#     # so call logprobgenerative with ffjord=false on the
+#     # proposed state.
+#     log_acceptance += logprobgenerative(Cluster.(proposed_baseclusters), hyperparams, proposed_base2original, hyperpriors=false, ffjord=false) - logprobgenerative(clusters, hyperparams, base2original, hyperpriors=false, ffjord=true)
+
+#     # We called logprobgenerative with ffjord=true on the current state
+#     # but not on the proposed state, so we need to account for the
+#     # prior on the neural network for the proposed state
+#     log_acceptance += nn_prior(proposed_nn_params, hyperparams._.nn.prior.alpha, hyperparams._.nn.prior.scale)
+
+#     log_acceptance /= temperature
+
+#     log_acceptance = min(0.0, log_acceptance)
+#     if log(rand(rng, T)) < log_acceptance
+#         hyperparams._.nn.params = proposed_nn_params
+#         empty!(clusters)
+#         append!(clusters, Cluster.(proposed_baseclusters))
+#         empty!(base2original)
+#         merge!(base2original, proposed_base2original)
+#         return 1
+#     else
+#         return 0
+#     end
+
+# end
 
 
 function advance_hyperparams_adaptive!(
@@ -558,7 +597,7 @@ function advance_hyperparams_adaptive!(
     diagnostics::AbstractDiagnostics{T, D};
     amwg_batch_size=40, acceptance_target::T=0.44,
     nb_ffjord_am=1, am_safety_probability::T=0.05, am_safety_sigma::T=0.1,
-    hyperparams_chain=nothing, temperature::T=one(T)) where {T, D, E}
+    hyperparams_chain=nothing) where {T, D, E}
 
 
     di = diagnostics
@@ -574,8 +613,8 @@ function advance_hyperparams_adaptive!(
         advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL))
         advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
         if hasnn(hyperparams)
-            advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.t.alpha))
-            advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.t.scale))
+            advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
+            advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
         end
     end
     di.amwg.nbbatches += 1
@@ -599,8 +638,7 @@ function advance_hyperparams_adaptive!(
         end
 
         for i in 1:nb_ffjord_am
-            # advance_ffjord!(rng, clusters, hyperparams, base2original,
-            #                 step_distrib=step_distrib, temperature=temperature)
+            advance_ffjord!(rng, clusters, hyperparams, di, step_distrib=step_distrib)
         end
 
         diagnostics.am.L += 1
@@ -647,7 +685,7 @@ end
 # end
 
 
-function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=one(T)e-10) where T
+function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=one(T)e-10) where T
     sigma = (xx - x * x' / L) / (L - 1)
     if correction
         sigma = (sigma + sigma') / 2 + eps * I
@@ -655,7 +693,7 @@ function am_sigma(L::Int, x::Vector{T}, xx::Matrix{T}; correction=true, eps::T=o
     return sigma
 end
 
-am_sigma(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=one(T)e-10) where {T, D} = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.xx, correction=correction, eps=eps) : zeros(Float64, 0, 0)
+am_sigma(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=T(1e-10)) where {T, D} = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.am.xx, correction=correction, eps=eps) #: zeros(Float64, 0, 0)
 
 function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptance_target::T=0.44, min_delta::T=0.01) where {T, D} #, minmax_logscale::T=one(T)0.0)
     delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))

@@ -52,8 +52,8 @@ end
 
 # load_chain(filename::AbstractString) = JLD2.load(filename)["chain"]
 
-function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing) where T
-    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn)
+function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing, seed=default_rng()) where T
+    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn, seed=seed)
 end
 
 function FCChain(
@@ -88,9 +88,8 @@ function FCChain(
 
     if ffjord_nn isa Chain
         unique_matdata = reduce(hcat, unique_data)
-        ffjord_model = FFJORD(hyperparams.ffjord.nn, (0.0, 1.0), (D,), Tsit5(), ad=AutoForwardDiff())
-        ret, _ = ffjord_model(unique_matdata, hyperparams._.nn.params, hyperparams.ffjord.nns)
-        base_data = collect.(eachcol(ret.z))
+        _, _, base_data = forwardffjord(unique_matdata, hyperparams._, hyperparams.ffjord)
+        base_data = collect.(eachcol(base_data))
     else
         base_data = deepcopy(unique_data)
     end
@@ -98,13 +97,13 @@ function FCChain(
     # data and original_data are still aligned
     if cluster_type === SetCluster
         # If I don't use collect some weird things happen and keys pick up junk
-        base2original = Dict{SVector{D, T}, SVector{D, T}}(collect.(base_data) .=> collect.(unique_data))
         element_type = SVector{D, T}
+        base2original = Dict{SVector{D, T}, SVector{D, T}}(collect.(base_data) .=> collect.(unique_data))
         initial_elements = [SVector{D, T}(el) for el in base_data]
     elseif cluster_type === BitCluster
+        element_type = Int
         base2original = cat(reduce(hcat, base_data), reduce(hcat, unique_data), dims=3)
         initial_elements = collect(1:length(base_data))
-        element_type = Int
     else
         throw(ArgumentError("Cluster must be of type SetCluster or BitCluster"))
     end
@@ -192,8 +191,8 @@ nn_chain(chain::Vector{FCHyperparams}, burn=0) = [p._.nn.params for p in chain[b
 nn_chain(chain::FCChain, burn=0) = [p._.nn.params for p in chain.hyperparams_chain[burn+1:end]]
 nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{FCHyperparams}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
 
-nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams.nn !== nothing ? [p._.nn.t.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
-nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams.nn !== nothing ? [p._.nn.t.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
+nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
+nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
 
 function burn!(chain::FCChain, n::Int64=0; burn_map=false)
 

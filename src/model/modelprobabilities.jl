@@ -1,6 +1,6 @@
 function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
     if hasnn(hyperparams)
-        return logprobgenerative(clusters, hyperparams._, hyperparams.nn, ignorehyperpriors=ignorehyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
+        return logprobgenerative(clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=ignorehyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
     else
         return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors, temperature=temperature)
     end
@@ -20,7 +20,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
     # psi is always valid by construction
     # except perhaps when logdet is too small/large
-    if alpha <= 0 || lambda <= 0 || nu <= D - 1 || (hasnn(hpa) && (hpa.nn.t.alpha <= 0 || hpa.nn.t.scale <= 0))
+    if alpha <= 0 || lambda <= 0 || nu <= D - 1 || (hasnn(hpa) && (hpa.nn.prior.alpha <= 0 || hpa.nn.prior.scale <= 0))
         return -Inf
     end
 
@@ -35,13 +35,12 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     end
     log_niw -= K * log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu)
 
-
     log_hyperpriors = zero(T)
 
     if !ignorehyperpriors
         # mu0 has a flat hyperpriors
         # alpha hyperprior
-        log_hyperpriors += log(jeffreys_alpha(alpha, N))
+        log_hyperpriors += log(jeffreys_crp_alpha(alpha, N))
 
         # NIW hyperpriors
         log_hyperpriors += -log(lambda)
@@ -66,17 +65,17 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
     if hasnn(hpa) && !ignoreffjord
         logprob_ffjord -= sum(forwardffjord(Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
-        logprob_ffjord += nn_prior(hpa.nn.params, hpa.nn.t.alpha, hpa.nn.t.scale)
+        logprob_ffjord += nn_prior(hpa.nn.params, hpa.nn.prior.alpha, hpa.nn.prior.scale)
     end
 
     ## Still debating whether nn_prior is an hyperprior or not
     if hasnn(hpa) && !ignoreffjord && !ignorehyperpriors
         # Independence Jeffreys prior
-        # log_hyperpriors += log(jeffreys_t_alpha(hpa.nn.t.alpha))
-        # log_hyperpriors -= log(hpa.nn.t.scale)
+        # logprob_ffjord += log(jeffreys_t_alpha(hpa.nn.prior.alpha))
+        # logprob_ffjord += log_jeffreys_t_scale(hpa.nn.prior.scale)
 
         # Bivariate Jeffreys prior
-        logprob_ffjord += log_jeffreys_t(hpa.nn.t.alpha, hpa.nn.t.scale)
+        logprob_ffjord += log_jeffreys_t(hpa.nn.prior.alpha, hpa.nn.prior.scale)
     end
 
     logprob = logprob_noffjord + logprob_ffjord / temperature

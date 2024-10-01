@@ -109,6 +109,47 @@ function BitCluster(b2o::AbstractArray{T, 3}) where T
     return BitCluster{T, D, Int}(falses(N), b2o, zeros(T, D), zeros(T, D, D), Array{T}(undef, D), Array{T}(undef, D, D))
 end
 
+function SetCluster(cluster::BitCluster{T, D, E}; check=false) where {T, D, E}
+    b2o = Dict{SVector{D, T}, SVector{D, T}}(collect.(eachcol(cluster.b2o[:, :, B])) .=> collect.(eachcol(cluster.b2o[:, :, O])))
+    return SetCluster(SVector{D, T}.(Vector(cluster, orig=false)), b2o, check=check)
+end
+
+function SetCluster(clusters::AbstractVector{BitCluster{T, D, E}}; check=false)::Vector{SetCluster{T, D, SVector{D, T}}} where {T, D, E}
+    b2o = first(clusters).b2o
+    b2o = Dict{SVector{D, T}, SVector{D, T}}(collect.(eachcol(b2o[:, :, B])) .=> collect.(eachcol(b2o[:, :, O])))
+    return [SetCluster(SVector{D, T}.(Vector(cluster, orig=false)), b2o, check=check) for cluster in clusters]
+end
+
+# No real way to do that efficiently
+# other than by repeatedly traversing 
+# b2o and testing vector equalities.
+# Unfortunately this means the masks
+# are not guaranteed to be the same between
+# BitCluster(clusters) and BitCluster.(clusters)
+function BitCluster(cluster::SetCluster{T, D, E}) where {T, D, E}
+    b2o = Array(cluster.b2o)
+    mask = BitVector(zeros(Bool, size(b2o, 2)))
+    for v in cluster
+        idx = findall(eachcol(b2o[:, :, B]) .== [v])
+        length(idx) == 1 || throw("Duplicates in base2original map")
+        mask[first(idx)] = true
+    end
+    return BitCluster(mask, b2o)
+end
+
+function BitCluster(clusters::AbstractVector{SetCluster{T, D, E}}; check=false)::Vector{BitCluster{T, D, Int}} where {T, D, E}
+    basedata = Matrix(clusters, orig=false)
+    origdata = Matrix(clusters, orig=true)
+    b2o = cat(basedata, origdata, dims=3)
+    slices = chunkslices(length.(clusters))
+    nbelements = size(b2o, 2)
+    masks = [BitVector(zeros(Bool, nbelements)) for _ in slices]
+    for (mask, slice) in zip(masks, slices)
+        mask[slice] .= true
+    end
+    return [BitCluster(mask, b2o, check=check) for mask in masks]
+end
+
 # Cute, only uses two bitvectors, doesn't need to switch to integers
 function isvalidpartition(bitclusters::AbstractVector{BitCluster{T, D, E}}; fullresult=false) where {T, D, E}
     isempty(bitclusters) && return true

@@ -163,10 +163,10 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
             vlines!(nn_axis, [map_idx], label=nothing, color=:black)
         end
 
-        nnscalec = nn_alpha_chain(chain, burn)
+        nnalphac = nn_alpha_chain(chain, burn)
         nnscale_axis = Axis(fig[10, 1], title="FFJORD hyperprior log α")
         deco!(nnscale_axis)
-        lines!(nnscale_axis, burn+1:N, log.(nnscalec), label=nothing)
+        lines!(nnscale_axis, burn+1:N, log.(nnalphac), label=nothing)
         if map_idx > 0
             vlines!(nnscale_axis, [map_idx], label=nothing, color=:black)
         end

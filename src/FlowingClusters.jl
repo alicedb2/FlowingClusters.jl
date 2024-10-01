@@ -1,6 +1,6 @@
 module FlowingClusters
 
-    using Random: randperm, shuffle, shuffle!, seed!, MersenneTwister, AbstractRNG, default_rng
+    using Random: randperm, shuffle, shuffle!, seed!, MersenneTwister, Xoshiro, AbstractRNG, default_rng
     using StatsBase
     using StatsFuns: logsumexp, logmvgamma, logit, logistic
     using LinearAlgebra
@@ -22,7 +22,7 @@ module FlowingClusters
     using DataStructures: CircularBuffer
 
     using DifferentialEquations: Tsit5
-    using DiffEqFlux: Lux, Chain, Dense, FFJORD, __forward_ffjord, __backward_ffjord
+    using DiffEqFlux: Lux, Chain, Dense, FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff
 
     using ComponentArrays: ComponentArray
 
@@ -34,7 +34,7 @@ module FlowingClusters
     export clear_diagnostics!
 
     include("types/hyperparams.jl")
-    export FCHyperparams, FCHyperparamsFFJORD
+    export FCHyperparams, FCHyperparamsFFJORD, hasnn
     export datadimension, modeldimension, ij, flatk, foldL, foldpsi, flatten, niwparams
     export perturb!
 
@@ -61,7 +61,7 @@ module FlowingClusters
     export logprobgenerative
 
     include("model/ffjord.jl")
-    export forwardffjord, backwardffjord
+    export forwardffjord, backwardffjord, reflow
 
     include("sampler.jl")
     export advance_gibbs!, advance_splitmerge_seq!, advance_hyperparams_adaptive!

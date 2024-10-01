@@ -1,5 +1,8 @@
 abstract type AbstractFCHyperparams{T, D} end
 
+# That janky underscore is really ugly,
+# I'm sorry, I'm not clever enough to come up
+# with the idiomatic clean way to do this.
 struct FCHyperparams{T, D} <: AbstractFCHyperparams{T, D}
     _::ComponentArray{T}
 end
@@ -38,7 +41,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing) whe
                             flatL=unfold(LowerTriangular{T}(I(D))),
                             nu=T(D + 1)),
                         nn=(params=nn_params,
-                            t=(alpha=T(1), scale=T(1))
+                            prior=(alpha=T(1), scale=T(1))
                             )
                         ),
                     (nn=nn, nns=nn_state)
@@ -67,8 +70,8 @@ function transform!(hparray::ComponentArray)
     hparray.niw.lambda = log(hparray.niw.lambda)
     hparray.niw.nu = log(hparray.niw.nu - size(hparray.niw.mu, 1) + 1)
     if hasnn(hparray)
-        hparray.nn.t.alpha = log(hparray.nn.t.alpha)
-        hparray.nn.t.scale = log(hparray.nn.t.scale)
+        hparray.nn.prior.alpha = log(hparray.nn.prior.alpha)
+        hparray.nn.prior.scale = log(hparray.nn.prior.scale)
     end
     return hparray
 end
@@ -78,8 +81,8 @@ function backtransform!(transformedhparray::ComponentArray)
     transformedhparray.niw.lambda = exp(transformedhparray.niw.lambda)
     transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + size(transformedhparray.niw.mu, 1) - 1
     if hasnn(transformedhparray)
-        transformedhparray.nn.t.alpha = exp(transformedhparray.nn.t.alpha)
-        transformedhparray.nn.t.scale = exp(transformedhparray.nn.t.scale)
+        transformedhparray.nn.prior.alpha = exp(transformedhparray.nn.prior.alpha)
+        transformedhparray.nn.prior.scale = exp(transformedhparray.nn.prior.scale)
     end
     return transformedhparray
 end
@@ -152,8 +155,8 @@ function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
         println(io, "  nn")
         println(io, "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
         println(io, "    t")
-        println(io, "      alpha: $(round(hyperparams._.nn.t.alpha, digits=3))")
-        print(io,   "      scale: $(round(hyperparams._.nn.t.scale, digits=3))")
+        println(io, "      alpha: $(round(hyperparams._.nn.prior.alpha, digits=3))")
+        print(io,   "      scale: $(round(hyperparams._.nn.prior.scale, digits=3))")
     end
 end
 

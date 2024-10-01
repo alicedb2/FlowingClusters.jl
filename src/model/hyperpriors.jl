@@ -1,5 +1,5 @@
 # Very cute!
-function jeffreys_alpha(alpha::T, n::Int) where T
+function jeffreys_crp_alpha(alpha::T, n::Int) where T
 
     return sqrt((polygamma(0, alpha + n) - polygamma(0, alpha))/alpha + polygamma(1, alpha + n) - polygamma(1, alpha))
 
@@ -45,6 +45,6 @@ function log_jeffreys_t(alpha::T, scale::T) where T
     if alpha < 10000
         return -log(abs(scale)) + 1/2 * log(alpha / 2 / (3 + alpha) * (polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2)) - 1 / (1 + alpha)^2)
     else
-        return zero(T)
+        return T(-Inf)
     end
 end

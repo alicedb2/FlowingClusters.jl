@@ -54,8 +54,8 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                         splitmerge=(split=0, merge=0,
                                     splitper=0, mergeper=0),
                         nn=(params=0,
-                            t=(alpha=0,
-                            scale=0))
+                            prior=(alpha=0,
+                                   scale=0))
                     )
 
         amwg = ComponentArray{T}(
@@ -67,8 +67,8 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                                        nu=zero(T)
                                        ),
                                nn=(params=zero(T),
-                                   t=(alpha=zero(T),
-                                       scale=zero(T))
+                                   prior=(alpha=zero(T),
+                                          scale=zero(T))
                                 )
                             )
                     )
@@ -94,8 +94,8 @@ function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
         println()
         println(io, "    nn")
         println(io, "       params: $(round(diagnostics.accepted.nn.params / (diagnostics.rejected.nn.params + diagnostics.accepted.nn.params), digits=4))")
-        println(io, "      t_alpha: $(round(diagnostics.accepted.nn.t.alpha / (diagnostics.rejected.nn.t.alpha + diagnostics.accepted.nn.t.alpha), digits=4))")
-        print(io,   "      t_scale: $(round(diagnostics.accepted.nn.t.scale / (diagnostics.rejected.nn.t.scale + diagnostics.accepted.nn.t.scale), digits=4))")
+        println(io, "      t_alpha: $(round(diagnostics.accepted.nn.prior.alpha / (diagnostics.rejected.nn.prior.alpha + diagnostics.accepted.nn.prior.alpha), digits=4))")
+        print(io,   "      t_scale: $(round(diagnostics.accepted.nn.prior.scale / (diagnostics.rejected.nn.prior.scale + diagnostics.accepted.nn.prior.scale), digits=4))")
     end
 
 end
@@ -111,8 +111,8 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics;
         diagnostics.accepted.niw .= 0
         diagnostics.rejected.niw .= 0
         if hasnn(diagnostics)
-            diagnostics.accepted.nn.t .= 0
-            diagnostics.rejected.nn.t .= 0
+            diagnostics.accepted.nn.prior .= 0
+            diagnostics.rejected.nn.prior .= 0
         end
     end
 
