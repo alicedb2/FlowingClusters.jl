@@ -88,7 +88,7 @@ function FCChain(
 
     if ffjord_nn isa Chain
         unique_matdata = reduce(hcat, unique_data)
-        _, _, base_data = forwardffjord(unique_matdata, hyperparams._, hyperparams.ffjord)
+        _, _, base_data = forwardffjord(rng, unique_matdata, hyperparams._, hyperparams.ffjord)
         base_data = collect.(eachcol(base_data))
     else
         base_data = deepcopy(unique_data)

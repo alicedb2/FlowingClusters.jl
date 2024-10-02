@@ -28,15 +28,16 @@ end
 function jeffreys_t_alpha(alpha::T) where T
     # Otherwise weird stuff happens in nn_prior
     if alpha < 10000
-        # return 1/2 * sqrt(polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2) - (5 + alpha) / 2 / alpha * exp(loggamma((1 + alpha) / 2) - loggamma((5 + alpha) / 2)))
         return 1/2 * sqrt(polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2) - 2 * (5 + alpha) / alpha / (alpha^2 + 4 * alpha  + 3))
     else
         return zero(T)
     end
 end
 
-function log_jeffreys_t_scale(scale::T) where T
-    return -log(abs(scale))
+# Independence Jeffreys prior
+# of scale parameter for scaled t-distribution
+function log_jeffreys_t_scale(scale::T, alpha::T=one(T)) where T
+    return -log(abs(scale)) + log(2 * alpha) - log(3 + alpha)
 end
 
 # Bivariate Jeffreys prior of scaled t-distribution, how neat is that!

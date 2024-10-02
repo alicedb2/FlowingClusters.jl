@@ -1,9 +1,8 @@
 function advance_chain!(chain::FCChain, nb_steps=100;
     nb_hyperparams=1, nb_gibbs=1,
     nb_splitmerge=30, splitmerge_t=3,
-    amwg_batch_size=50,
-    nb_ffjord_am=2,
-    sample_every=:autocov, stop_chain=nothing,
+    nb_ffjord_am=1, amwg_batch_size=50,
+    sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
     attempt_map=true, pretty_progress=:repl)
 
@@ -43,7 +42,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
     end
 
     if pretty_progress === :repl || pretty_progress === :file || pretty_progress
-        if !isnothing(nb_steps) || !isfinite(nb_steps) || nb_steps < 0
+        if isnothing(nb_steps) || !isfinite(nb_steps) || nb_steps < 0
             progbar = ProgressUnknown(showspeed=true, output=progressio)
             nb_steps = Inf
             _nb_steps = typemax(Int64)
@@ -86,7 +85,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             for i in 1:nb_gibbs
                 advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
             end
-        elseif (0 < nb_gibbs < 1) && (rand(chain.rng, T) < nb_gibbs)
+        elseif (0 < nb_gibbs < 1) && (rand(chain.rng, T)r < nb_gibbs)
             advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
         end
 
@@ -109,7 +108,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         ########################
 
         # logprob
-        logprob = logprobgenerative(chain.clusters, chain.hyperparams)
+        logprob = logprobgenerative(chain.clusters, chain.hyperparams, chain.rng)
         push!(chain.logprob_chain, logprob)
 
         # MAP
@@ -203,7 +202,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             (:"step (hyperparams per, gibbs per, splitmerge per)", "$(step)/$(nb_steps) ($nb_hyperparams, $nb_gibbs, $(round(nb_splitmerge, digits=2)))"),
             (:"chain length", "$(length(chain))"),
             (:"conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
-            (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (trim if ess<$(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
+            (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (trimmed if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
             (:"logprob (max, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
             (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
             (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
@@ -232,8 +231,9 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             flush(stdout)
         end
 
-        if stop_chain === :sample_ess
-            if samples_convergence.ess >= length(chain.samples_idx.buffer)
+        if stop_criterion === :sample_ess
+            if (chain.samples_idx.length >= chain.samples_idx.capacity
+                && samples_convergence.ess >= chain.samples_idx.capacity)
                 break
             end
         end
@@ -242,9 +242,13 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     end
 
+    finish!(progbar)
+
     if pretty_progress === :file
         close(progressio)
     end
+
+    return chain
 
 end
 
@@ -259,7 +263,7 @@ function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=fal
     # Greedy Gibbs!
     for p in 1:max_nb_pushes
         test_attempt = copy(map_clusters_attempt)
-        advance_gibbs!(test_attempt, map_hyperparams; temperature=0.0)
+        advance_gibbs!(chain.rng, test_attempt, map_hyperparams; temperature=0.0)
         test_mll = logprobgenerative(test_attempt, map_hyperparams, ignoreffjord=true)
         if test_mll <= map_mll
             # We've regressed, so stop and leave
@@ -278,7 +282,7 @@ function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=fal
         optimize_hyperparams!(map_clusters_attempt, map_hyperparams, verbose=verbose)
     end
 
-    attempt_logprob = logprobgenerative(map_clusters_attempt, map_hyperparams, ignorehyperpriors=false, ignoreffjord=false)
+    attempt_logprob = logprobgenerative(chain.rng, map_clusters_attempt, map_hyperparams, ignorehyperpriors=false, ignoreffjord=false)
     if attempt_logprob > chain.map_logprob || force
         chain.map_logprob = attempt_logprob
         chain.map_clusters = map_clusters_attempt

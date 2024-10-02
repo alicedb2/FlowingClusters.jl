@@ -17,7 +17,7 @@ module FlowingClusters
                  hidespines!, hidedecorations!, Cycled, scatter!, hist!
 
     using JLD2: jldsave, load
-    using ProgressMeter: Progress, ProgressUnknown, next!
+    using ProgressMeter: Progress, ProgressUnknown, next!, finish!
     using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
 

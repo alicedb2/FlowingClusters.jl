@@ -1,11 +1,3 @@
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
-    if hasnn(hyperparams)
-        return logprobgenerative(clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=ignorehyperpriors, ignoreffjord=ignoreffjord, temperature=temperature)
-    else
-        return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors, temperature=temperature)
-    end
-end
-
 function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D, E}
 
     sum(length.(clusters)) > 1 || return -Inf
@@ -20,7 +12,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
     # psi is always valid by construction
     # except perhaps when logdet is too small/large
-    if alpha <= 0 || lambda <= 0 || nu <= D - 1 || (hasnn(hpa) && (hpa.nn.prior.alpha <= 0 || hpa.nn.prior.scale <= 0))
+    if alpha <= 0 || lambda <= 0 || nu <= D - 1
         return -Inf
     end
 
@@ -55,31 +47,41 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
 end
 
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
+function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D, E}
 
     hpa = hyperparamsarray
 
+    hasnn(hpa) || throw(ArgumentError("You must provide a neural network when using FFJORD"))
+
+    if hpa.nn.prior.alpha <= 0 || hpa.nn.prior.scale <= 0
+        return -Inf
+    end
+    
     logprob_noffjord = logprobgenerative(clusters, hyperparamsarray; ignorehyperpriors=ignorehyperpriors, temperature=temperature)
 
-    logprob_ffjord = zero(T)
+    logprob_ffjord = -sum(forwardffjord(rng, Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
+    logprob_ffjord += nn_prior(hpa.nn.params, hpa.nn.prior.alpha, hpa.nn.prior.scale)
 
-    if hasnn(hpa) && !ignoreffjord
-        logprob_ffjord -= sum(forwardffjord(Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
-        logprob_ffjord += nn_prior(hpa.nn.params, hpa.nn.prior.alpha, hpa.nn.prior.scale)
-    end
-
-    ## Still debating whether nn_prior is an hyperprior or not
-    if hasnn(hpa) && !ignoreffjord && !ignorehyperpriors
+    if !ignorehyperpriors
         # Independence Jeffreys prior
         # logprob_ffjord += log(jeffreys_t_alpha(hpa.nn.prior.alpha))
         # logprob_ffjord += log_jeffreys_t_scale(hpa.nn.prior.scale)
 
         # Bivariate Jeffreys prior
-        logprob_ffjord += log_jeffreys_t(hpa.nn.prior.alpha, hpa.nn.prior.scale)
+        # logprob_ffjord += log_jeffreys_t(hpa.nn.prior.alpha, hpa.nn.prior.scale)
     end
 
     logprob = logprob_noffjord + logprob_ffjord / temperature
 
     return isfinite(logprob) ? logprob : -Inf
 
+end
+
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, rng::Union{Nothing, AbstractRNG}=default_rng(); ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
+    if hasnn(hyperparams) && !ignoreffjord
+        (rng isa AbstractRNG)|| throw(ArgumentError("You must provide a random number generator when using FFJORD"))
+        return logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=ignorehyperpriors, temperature=temperature)
+    else
+        return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors, temperature=temperature)
+    end
 end

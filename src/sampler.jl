@@ -95,7 +95,7 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
     mu = hyperparams._.niw.mu
 
     if random_order
-        dim_order = randperm(D)
+        dim_order = randperm(rng, D)
     else
         dim_order = 1:D
     end
@@ -156,7 +156,7 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
     steps = rand(rng, step_distrib)
 
     if random_order
-        dim_order = randperm(flatL_d)
+        dim_order = randperm(rng, flatL_d)
     else
         dim_order = 1:flatL_d
     end
@@ -286,7 +286,11 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
 
     # Comment next two line for independence Jeffreys prior on nn_scale
     log_acceptance += proposed_log_nn_scale - log_nn_scale # Hastings factor
+    
+    # Independence Jeffreys
     # log_acceptance += log_jeffreys_t_scale(proposed_nn_scale) - log_jeffreys_t_scale(nn_scale)
+    
+    # Bivariate pi(alpha, scale) Jeffreys prior
     log_acceptance += log_jeffreys_t(nn_alpha, proposed_nn_scale) - log_jeffreys_t(nn_alpha, nn_scale)
 
     # log_acceptance = min(zero(T), log_acceptance)
@@ -396,7 +400,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 
         log_q = zero(T)
  
-        for el in shuffle!(scheduled_elements)
+        for el in shuffle!(rng, scheduled_elements)
 
             # Does nothing during first, sequential step
             delete!(split_state, el)
@@ -509,15 +513,17 @@ function advance_ffjord!(
     proposed_hparray = copy(hyperparams._)
     proposed_hparray.nn.params .= proposed_hparray.nn.params .+ rand(rng, step_distrib)
 
-    proposed_clusters, new_delta_logps = reflow(clusters, proposed_hparray, hyperparams.ffjord)
+    proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
 
     # ignoreffjord=true to avoid the ffjord logp
     # which reflow already calculated
-    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, hyperparams.ffjord, ignorehyperpriors=true, ignoreffjord=true)
-    log_acceptance -= sum(new_delta_logps)
+    log_acceptance = logprobgenerative(rng, proposed_clusters, proposed_hparray, hyperparams.ffjord, 
+                        ignorehyperpriors=true, ignoreffjord=true
+                    )
+    log_acceptance -= sum(proposed_delta_logps)
     log_acceptance += nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior.alpha, proposed_hparray.nn.prior.scale)
 
-    log_acceptance -= logprobgenerative(clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true, ignoreffjord=false)
+    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true, ignoreffjord=false)
 
     # log_acceptance = min(zero(T), log_acceptance)
 
@@ -533,62 +539,6 @@ function advance_ffjord!(
     return hyperparams
 
 end
-
-
-# function advance_ffjord!(
-#     rng::AbstractRNG,
-#     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
-#     hyperparams::AbstractFCHyperparams{T, D},
-#     base2original::Dict{SVector{D, T}, SVector{D, T}};
-#     step_distrib=nothing,
-#     temperature::T=one(T))::Int where {T, D, E}
-
-#     hasnn(hyperparams) && !isnothing(step_distrib) || return 0
-
-#     ffjord_model = FFJORD(hyperparams.nn, (0.0, 1.0), (datadimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
-#     original_clusters = realspace_clusters(Matrix, clusters, base2original)
-
-#     proposed_nn_params = hyperparams._.nn.params .+ rand(rng, step_distrib)
-
-#     # We could have left the calculation of deltalogps
-#     # to logprobgenerative below, but we a proposal comes
-#     # a new base2original so we do both at once here and
-#     # call logprobgenerative with ffjord=false
-
-#     original_elements = reduce(hcat, original_clusters)
-#     proposed_base, _ = ffjord_model(original_elements, proposed_nn_params, hyperparams.nns)
-#     proposed_elements = Matrix{Float64}(proposed_base.z)
-#     proposed_baseclusters = chunk(proposed_elements, size.(original_clusters, 2))
-#     proposed_base2original = Dict{Vector{Float64}, Vector{Float64}}(eachcol(proposed_elements) .=> eachcol(original_elements))
-
-#     log_acceptance = -sum(proposed_base.delta_logp)
-
-#     # We already accounted for the ffjord deltalogps above
-#     # so call logprobgenerative with ffjord=false on the
-#     # proposed state.
-#     log_acceptance += logprobgenerative(Cluster.(proposed_baseclusters), hyperparams, proposed_base2original, hyperpriors=false, ffjord=false) - logprobgenerative(clusters, hyperparams, base2original, hyperpriors=false, ffjord=true)
-
-#     # We called logprobgenerative with ffjord=true on the current state
-#     # but not on the proposed state, so we need to account for the
-#     # prior on the neural network for the proposed state
-#     log_acceptance += nn_prior(proposed_nn_params, hyperparams._.nn.prior.alpha, hyperparams._.nn.prior.scale)
-
-#     log_acceptance /= temperature
-
-#     log_acceptance = min(0.0, log_acceptance)
-#     if log(rand(rng, T)) < log_acceptance
-#         hyperparams._.nn.params = proposed_nn_params
-#         empty!(clusters)
-#         append!(clusters, Cluster.(proposed_baseclusters))
-#         empty!(base2original)
-#         merge!(base2original, proposed_base2original)
-#         return 1
-#     else
-#         return 0
-#     end
-
-# end
-
 
 function advance_hyperparams_adaptive!(
     rng::AbstractRNG,
@@ -613,8 +563,8 @@ function advance_hyperparams_adaptive!(
         advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL))
         advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
         if hasnn(hyperparams)
-            advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
-            advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
+            # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
+            # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
         end
     end
     di.amwg.nbbatches += 1
@@ -652,36 +602,36 @@ function advance_hyperparams_adaptive!(
 end
 
 
-function advance_gibbs!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; temperature::T=one(T)) where {T, D, E}
-    return advance_gibbs!(default_rng(), clusters, hyperparams, temperature=temperature)
-end
-function advance_splitmerge_seq!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T)) where {T, D, E}
-    return advance_splitmerge_seq!(default_rng(), clusters, hyperparams, diagnostics, t=t, temperature=temperature)
-end
+# function advance_gibbs!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; temperature::T=one(T)) where {T, D, E}
+#     return advance_gibbs!(default_rng(), clusters, hyperparams, temperature=temperature)
+# end
+# function advance_splitmerge_seq!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T)) where {T, D, E}
+#     return advance_splitmerge_seq!(default_rng(), clusters, hyperparams, diagnostics, t=t, temperature=temperature)
+# end
 
-function advance_alpha!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
-    return advance_alpha!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
-end
-function advance_mu!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::Vector{T}=fill(1/10, D), random_order=true) where {T, D, E}
-    return advance_mu!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize, random_order=random_order)
-end
-function advance_lambda!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)/10) where {T, D, E}
-    return advance_lambda!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
-end
-function advance_psi!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::Vector{T}=fill(1/10, div(D * (D + 1), 2)), random_order=true) where {T, D, E}
-    return advance_psi!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize, random_order=random_order)
-end
-function advance_nu!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
-    return advance_nu!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
-end
-function advance_nn_alpha!(hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
-    return advance_nn_alpha!(default_rng(), hyperparams, diagnostics, stepsize=stepsize)
-end
-function advance_nn_scale!(hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
-    return advance_nn_scale!(default_rng(), hyperparams, diagnostics, stepsize=stepsize)
-end
-# function advance_ffjord!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; step_distrib=nothing, temperature::T=one(T)) where {T, D, E}
-#     return advance_ffjord!(default_rng(), clusters, hyperparams, step_distrib=step_distrib, temperature=temperature)
+# function advance_alpha!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
+#     return advance_alpha!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
+# end
+# function advance_mu!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::Vector{T}=fill(1/10, D), random_order=true) where {T, D, E}
+#     return advance_mu!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize, random_order=random_order)
+# end
+# function advance_lambda!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)/10) where {T, D, E}
+#     return advance_lambda!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
+# end
+# function advance_psi!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::Vector{T}=fill(1/10, div(D * (D + 1), 2)), random_order=true) where {T, D, E}
+#     return advance_psi!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize, random_order=random_order)
+# end
+# function advance_nu!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
+#     return advance_nu!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
+# end
+# function advance_nn_alpha!(hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
+#     return advance_nn_alpha!(default_rng(), hyperparams, diagnostics, stepsize=stepsize)
+# end
+# function advance_nn_scale!(hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
+#     return advance_nn_scale!(default_rng(), hyperparams, diagnostics, stepsize=stepsize)
+# end
+# function advance_ffjord!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; step_distrib=nothing) where {T, D, E}
+#     return advance_ffjord!(default_rng(), clusters, hyperparams, diagnostics, step_distrib=step_distrib)
 # end
 
 

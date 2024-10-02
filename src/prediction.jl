@@ -99,7 +99,7 @@ function tail_probability(
         function tailprob_func(coordinates::AbstractArray)
             # ret, _ = ffjord_mdl(coordinates isa AbstractVector ? reshape(coordinates, :, 1) : reshape(coordinates, first(size(coordinates)), :), hyperparams.nn_params, hyperparams.nn_state)
             # base_elements = reshape(ret.z, size(coordinates)...)
-            _, _, base_elements = forwardffjord(coordinates, hyperparams)
+            _, _, base_elements = forwardffjord(rng, coordinates, hyperparams)
             return basetailprob_func(base_elements)
         end
         return tailprob_func
