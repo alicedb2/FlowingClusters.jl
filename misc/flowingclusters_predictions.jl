@@ -1,36 +1,34 @@
-function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, predictors; perfstat=:MCC, nb_rejection_samples=50_000)
-    
-    # Presence/absence masks
-    validation_presence_mask = dataset.validation.presmask(species)
-    validation_absence_mask = dataset.validation.absmask(species)
-    test_presence_mask = dataset.test.presmask(species)
-    test_absence_mask = dataset.test.absmask(species)
-    
+function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, predictors, perfstat=:MCC; nb_rejection_samples=50_000)
+
     # Chain has already been trained on the training set
 
     # MAP and chain summary prediction functions
-    maptpfun = tail_probability(chain.map_clusters, chain.map_hyperparams)
-    summfun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
-    
-    # MAP predictions on validation set to find best threshold
-    validation_map_presabs_tailprobs = maptpfun(dataset.validation.standardize(predictors...)(predictors...))
-    best_map_thresh = best_score_threshold(validation_map_presabs_tailprobs[validation_presence_mask], validation_map_presabs_tailprobs[validation_absence_mask], statistic=perfstat)
-    
-    # MAP predictions on test set
-    test_map_presabs_tailprobs = maptpfun(dataset.test.standardize(predictors...)(predictors...))
+    map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams)
+    chain_tailprob_fun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
 
+    # MAP predictions on validation set to find best threshold
+    validation_map_presabs_tailprobs = map_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
+    validation_presence_mask = dataset.validation.presmask(species)
+    validation_absence_mask = dataset.validation.absmask(species)
+    best_map_thresh = best_score_threshold(validation_map_presabs_tailprobs[validation_presence_mask], validation_map_presabs_tailprobs[validation_absence_mask], statistic=perfstat)
+
+    # MAP predictions on test set
+    test_map_presabs_tailprobs = map_tailprob_fun(dataset.test.standardize(predictors...)(predictors...))
+    test_presence_mask = dataset.test.presmask(species)
+    test_absence_mask = dataset.test.absmask(species)
     # Performance of MAP predictions with and without threshold
     test_map_performances = map(x -> round(x, digits=5), performance_statistics(test_map_presabs_tailprobs[test_presence_mask], test_map_presabs_tailprobs[test_absence_mask]))
     test_map_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(test_map_presabs_tailprobs[test_presence_mask], test_map_presabs_tailprobs[test_absence_mask], threshold=best_map_thresh))
-    
+
+    println("#####################")
     println("FlowingClusters MAP performances")
     println("    MAP without threshold: $perfstat=$(getindex(test_map_performances, perfstat))")
     println("       MAP with threshold: $perfstat=$(getindex(test_map_performances_atthresh, perfstat))")
     println()
 
     # Chain predictions on validation set
-    validation_presabs_tailprob_summaries = summfun(dataset.validation.standardize(predictors...)(predictors...))
-    
+    validation_presabs_tailprob_summaries = chain_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
+
     # Find best scoring and threshold using validation set
     best_thresh = nothing
     validation_performances = (MCC=-Inf, J=-Inf, kappa=-Inf)
@@ -53,12 +51,12 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
     end
 
     # Chain predictions on test set
-    test_presabs_tailprob_summaries = summfun(dataset.test.standardize(predictors...)(predictors...))
+    test_presabs_tailprob_summaries = chain_tailprob_fun(dataset.test.standardize(predictors...)(predictors...))
 
     # Performance of chain predictions
     test_performances = map(x -> round(x, digits=5), performance_statistics(test_presabs_tailprob_summaries[best_scoring][test_presence_mask], test_presabs_tailprob_summaries[best_scoring][test_absence_mask]))
     test_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(test_presabs_tailprob_summaries[best_scoring_atthresh][test_presence_mask], test_presabs_tailprob_summaries[best_scoring_atthresh][test_absence_mask], threshold=best_thresh))
-    
+
     println("FlowingClusters chain performances")
     println("    Best without threshold: $best_scoring, $perfstat=$(getindex(test_performances, perfstat))")
     println("       Best with threshold: $best_scoring_atthresh, $perfstat=$(getindex(test_performances_atthresh, perfstat))")
@@ -80,10 +78,11 @@ end
 
 
 ###########
-species = :sp4
+species = :sp1
 predictors = (:BIO1, :BIO12)
+perfstat = :MCC
 dataset = eb
 ###########
 
-fc_perfs = evaluate_flowingclusters(_presence_chain, dataset, species, predictors, nb_rejection_samples=50_000)
-fc_perfs = evaluate_flowingclusters(chainnn, dataset, species, predictors, nb_rejection_samples=50_000)
+# fc_perfs = evaluate_flowingclusters(chain, dataset, species, predictors, perfstat, nb_rejection_samples=50_000);
+fc_perfs = evaluate_flowingclusters(chainnn, dataset, species, predictors, perfstat, nb_rejection_samples=50_000);
