@@ -533,8 +533,8 @@ function advance_hyperparams_adaptive!(
     clusters::Vector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    amwg_batch_size=40, acceptance_target::T=0.44,
-    nb_ffjord_am=1, am_safety_probability::T=0.05, am_safety_sigma::T=0.1,
+    amwg_batch_size=40, acceptance_target::T=T(0.44),
+    nb_ffjord_am=1, am_safety_probability::T=T(0.05), am_safety_sigma::T=T(0.3),
     hyperparams_chain=nothing) where {T, D, E}
 
 
@@ -561,11 +561,11 @@ function advance_hyperparams_adaptive!(
 
     if hasnn(hyperparams) && nb_ffjord_am > 0
 
-        if length(hyperparams_chain) <= 4 * nn_D
+        if length(hyperparams_chain) <= 2 * nn_D
 
             step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
 
-        elseif length(hyperparams_chain) > 4 * nn_D
+        else
 
             nn_sigma = am_sigma(diagnostics)
 

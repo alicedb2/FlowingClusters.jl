@@ -117,7 +117,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if logprob > logp_quantile95 && attempt_map
                 nb_map_attemps += 1
                 try
-                    map_success = attempt_map!(chain, max_nb_pushes=15, verbose=false, optimize_hyperparams=false)
+                    map_success = attempt_map!(chain, max_nb_pushes=20, verbose=false, optimize_hyperparams=false)
                 catch e
                     throw(e)
                     map_success = false

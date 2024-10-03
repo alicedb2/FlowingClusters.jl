@@ -54,9 +54,15 @@ function best_score_threshold(scores_at_presences, scores_at_absences; statistic
 end
 
 
-sqrtsigmoid(x::T; a=1/2) where {T} = T(1/2) + T(a) * x / sqrt(T(1) + T(a)^2 * x^2) / T(2)
-sqrttanh(x::T) where {T} = T(2) * sqrtsigmoid(x, a=1) - T(1)
-sqrttanhgrow(x) = x + sqrttanh(x)
+function sqrtsigmoid(x::T; a=1/2) where T
+    E = eltype(T)
+    return E(1/2) .+ E(a) .* x ./ sqrt.(E(1) .+ E(a).^2 .* x.^2) ./ E(2)
+end
+function sqrttanh(x::T; a=1) where T
+    E = eltype(T)
+    return E(2) .* sqrtsigmoid.(x, a=E(a)) .- E(1)
+end
+sqrttanhgrow(x) = x .+ sqrttanh.(x)
 
 function chunkslices(sizes)
     boundaries = cumsum(vcat(1, sizes))
