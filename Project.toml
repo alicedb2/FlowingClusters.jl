@@ -1,6 +1,6 @@
+authors = ["alicedb2 <alice.doucet.beaupre@gmail.com>"]
 name = "FlowingClusters"
 uuid = "5977a314-3542-451c-9f16-3f345fa250de"
-authors = ["alicedb2 <alice.doucet.beaupre@gmail.com>"]
 version = "0.0.1"
 
 [deps]
@@ -20,5 +20,10 @@ PDMats = "90014a1f-27ba-587c-ab20-58faa44d9150"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 StatsFuns = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
+
+[extras]
+LuxCore = "bb33d45b-7691-41d6-9220-0943567d0623"
+LuxLib = "82251201-b29d-42c6-8e01-566dec8acb11"

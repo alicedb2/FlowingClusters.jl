@@ -1,137 +1,138 @@
-mutable struct Diagnostics
-    D::Int64
+abstract type AbstractDiagnostics{T, D} end
 
-    accepted_alpha::Int64
-    rejected_alpha::Int64
-
-    accepted_mu::Vector{Int64}
-    rejected_mu::Vector{Int64}
-
-    accepted_lambda::Int64
-    rejected_lambda::Int64
-
-    accepted_flatL::Vector{Int64}
-    rejected_flatL::Vector{Int64}
-
-    accepted_nu::Int64
-    rejected_nu::Int64
-
-    accepted_split::Int64
-    rejected_split::Int64
-
-    accepted_merge::Int64
-    rejected_merge::Int64
-
-    accepted_nn::Vector{Int64}
-    rejected_nn::Vector{Int64}
-
-    amwg_nbbatches::Int64
-    amwg_logscales::Vector{Float64}
-
-    am_L::Int64
-    am_N::Vector{Float64}
-    am_NN::Matrix{Float64}
-
+struct Diagnostics{T, D} <: AbstractDiagnostics{T, D}
+    accepted::ComponentArray{Int}
+    rejected::ComponentArray{Int}
+    amwg::ComponentArray{T}
 end
 
-function acceptance_rates(d::Diagnostics)
-    return (;
-        alpha = d.accepted_alpha / (d.accepted_alpha + d.rejected_alpha),
-        mu = d.accepted_mu ./ (d.accepted_mu .+ d.rejected_mu),
-        lambda = d.accepted_lambda / (d.accepted_lambda + d.rejected_lambda),
-        flatL = d.accepted_flatL ./ (d.accepted_flatL .+ d.rejected_flatL),
-        nu = d.accepted_nu / (d.accepted_nu + d.rejected_nu),
-        split = d.accepted_split / (d.accepted_split + d.rejected_split),
-        merge = d.accepted_merge / (d.accepted_merge + d.rejected_merge),
-        nn = d.accepted_nn ./ (d.accepted_nn .+ d.rejected_nn)
-    )
+struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
+    accepted::ComponentArray{Int}
+    rejected::ComponentArray{Int}
+    amwg::ComponentArray{T}
+    am::ComponentArray{T}
 end
 
-function Base.show(io::IO, d::Diagnostics)
-    ar = acceptance_rates(d)
-    println(io, "   Accepted/Rejected")
-    println(io, "                alpha : $(round(ar.alpha, digits=2))")
-    println(io, "    (mean,min,max) mu : $(round(mean(ar.mu), digits=2)), $(round(minimum(ar.mu), digits=2)), $(round(maximum(ar.mu), digits=2))")
-    println(io, "               lambda : $(round(ar.lambda, digits=2))")
-    println(io, "     (mean,min,max) L : $(round(mean(ar.flatL), digits=2)), $(round(minimum(ar.flatL), digits=2)), $(round(maximum(ar.flatL), digits=2))")
-    println(io, "                   nu : $(round(ar.nu, digits=2))")
-    println(io)
-    println(io, "                split : $(round(ar.split, digits=4))")
-    println(io, "                merge : $(round(ar.merge, digits=4))")
-    println(io)
-    println(io, "    (mean,min,max) nn : $(round(mean(ar.nn), digits=2)), $(round(minimum(ar.nn, init=0), digits=2)), $(round(maximum(ar.nn, init=0), digits=2))")
-    println(io)
-    print(io, "        nb parameters : $(d.D)")
+hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
+
+function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
+
+    sizeflatL = div(D * (D + 1), 2)
+
+    if nn_params === nothing
+        accepted = ComponentArray{Int}(
+                        pyp=(alpha=0,),#, sigma=0),
+                        niw=(mu=zeros(D),
+                            lambda=0,
+                            flatL=zeros(sizeflatL),
+                            nu=0
+                            ),
+                        splitmerge=(split=0, merge=0,
+                                    splitper=0, mergeper=0
+                                    )
+                    )
+        amwg = ComponentArray{T}(
+                    nbbatches=zero(T),
+                    logscales=(pyp=(alpha=zero(T),),# sigma=zero(T)),
+                               niw=(mu=zeros(T, D),
+                                    lambda=zero(T),
+                                    flatL=zeros(T, sizeflatL),
+                                    nu=zero(T))
+                              )
+                    )
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg)
+    else
+        am_x = zeros(T, size(nn_params, 1))
+        am_xx = zeros(T, size(nn_params, 1), size(nn_params, 1))
+
+        accepted = ComponentArray{Int}(
+                        pyp=(alpha=0,),# , sigma=0),
+                        niw=(mu=zeros(D),
+                             lambda=0,
+                             flatL=zeros(sizeflatL),
+                             nu=0),
+                        splitmerge=(split=0, merge=0,
+                                    splitper=0, mergeper=0),
+                        nn=(params=0,
+                            prior=(alpha=0,
+                                   scale=0))
+                    )
+
+        amwg = ComponentArray{T}(
+                    nbbatches=zero(T),
+                    logscales=(pyp=(alpha=zero(T),),#, sigma=zero(T)),
+                               niw=(mu=zeros(T, D),
+                                       lambda=zero(T),
+                                       flatL=zeros(T, sizeflatL),
+                                       nu=zero(T)
+                                       ),
+                               nn=(params=zero(T),
+                                   prior=(alpha=zero(T),
+                                          scale=zero(T))
+                                )
+                            )
+                    )
+
+        am = ComponentArray{T}(L=0.0, x=am_x, xx=am_xx)
+
+        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am)
+    end
 end
 
-
-function Diagnostics(d; nn_params=nothing)
-
-    sizeflatL = div(d * (d + 1), 2)
-
-    D = 3 + d + sizeflatL
-    nn_D = nn_params === nothing ? 0 : size(nn_params, 1)
-
-    return Diagnostics(
-        D + nn_D,                         # D
-        0, 0,                             # alpha
-        zeros(Int64, d), zeros(Int64, d), # mu
-        0, 0,                             # lambda
-        zeros(Int64, sizeflatL), zeros(Int64, sizeflatL), # flatL (Psi)
-        0, 0,                             # nu
-        0, 0,                             # split
-        0, 0,                             # merge
-        zeros(Int64, nn_D), zeros(Int64, nn_D), # ffjord nn 
-        0,                                # amwg_nbbatches
-        zeros(D + nn_D),                  # amwg_logscales
-        0, zeros(nn_D), zeros(nn_D, nn_D) # am sigma
-        )
-end
-
-function clear_diagnostics!(diagnostics::Diagnostics; clearhyperparams=true, clearsplitmerge=true, keepstepscale=true)
-    
-    if clearhyperparams
-        diagnostics.accepted_alpha = 0
-        diagnostics.rejected_alpha = 0
-
-        diagnostics.accepted_mu = zeros(length(diagnostics.accepted_mu))
-        diagnostics.rejected_mu = zeros(length(diagnostics.rejected_mu))
-
-        diagnostics.accepted_lambda = 0
-        diagnostics.rejected_lambda = 0
-
-        diagnostics.accepted_flatL = zeros(length(diagnostics.accepted_flatL))
-        diagnostics.rejected_flatL = zeros(length(diagnostics.rejected_flatL))
-
-        diagnostics.accepted_nu = 0
-        diagnostics.rejected_nu = 0
+function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
+    println(io, "Diagnostics")
+    println(io, "  acceptance rates")
+    println(io, "    pyp")
+    println(io, "        alpha: $(round(diagnostics.accepted.pyp.alpha / (diagnostics.rejected.pyp.alpha + diagnostics.accepted.pyp.alpha), digits=4))")
+    # println(io, "        sigma: $(round(diagnostics.accepted.pyp.sigma / (diagnostics.rejected.pyp.sigma + diagnostics.accepted.pyp.sigma), digits=4))")
+    println(io, "    niw")
+    println(io, "           mu: $(round.(diagnostics.accepted.niw.mu ./ (diagnostics.rejected.niw.mu .+ diagnostics.accepted.niw.mu), digits=4))")
+    println(io, "       lambda: $(round(diagnostics.accepted.niw.lambda / (diagnostics.rejected.niw.lambda + diagnostics.accepted.niw.lambda), digits=4))")
+    println(io, "        flatL: $(round.(diagnostics.accepted.niw.flatL ./ (diagnostics.rejected.niw.flatL .+ diagnostics.accepted.niw.flatL), digits=4))")
+    print(io,   "           nu: $(round(diagnostics.accepted.niw.nu / (diagnostics.rejected.niw.nu + diagnostics.accepted.niw.nu), digits=4))")
+    if hasnn(diagnostics)
+        println()
+        println(io, "    nn")
+        println(io, "       params: $(round(diagnostics.accepted.nn.params / (diagnostics.rejected.nn.params + diagnostics.accepted.nn.params), digits=4))")
+        println(io, "      t_alpha: $(round(diagnostics.accepted.nn.prior.alpha / (diagnostics.rejected.nn.prior.alpha + diagnostics.accepted.nn.prior.alpha), digits=4))")
+        print(io,   "      t_scale: $(round(diagnostics.accepted.nn.prior.scale / (diagnostics.rejected.nn.prior.scale + diagnostics.accepted.nn.prior.scale), digits=4))")
     end
 
-    if clearsplitmerge
-        diagnostics.accepted_split = 0
-        diagnostics.rejected_split = 0
-
-        diagnostics.accepted_merge = 0
-        diagnostics.rejected_merge = 0
-    end
-
-    
-    if !keepstepscale
-        diagnostics.amwg_nbbatches = 0
-        diagnostics.amwg_logscales = zeros(size(diagnostics.amwg_logscales, 1))
-    end
-
-    return diagnostics
 end
 
-function add_one_dimension!(diagnostics::Diagnostics)
-    
-    d = length(diagnostics.accepted_mu)
-    
-    diagnostics.accepted_mu = vcat(diagnostics.accepted_mu, 0)
-    diagnostics.rejected_mu = vcat(diagnostics.rejected_mu, 0)
-    diagnostics.accepted_flatL = vcat(diagnostics.accepted_flatL, zeros(Int64, d + 1))
-    diagnostics.rejected_flatL = vcat(diagnostics.rejected_flatL, zeros(Int64, d + 1))
-    
+function clear_diagnostics!(diagnostics::AbstractDiagnostics;
+                            resethyperparams=true, resetsplitmerge=false,
+                            resetnn=false, resetamwg=false, resetam=false
+                            )
+
+    if resethyperparams
+        diagnostics.accepted.pyp .= 0
+        diagnostics.rejected.pyp .= 0
+        diagnostics.accepted.niw .= 0
+        diagnostics.rejected.niw .= 0
+        if hasnn(diagnostics)
+            diagnostics.accepted.nn.prior .= 0
+            diagnostics.rejected.nn.prior .= 0
+        end
+    end
+
+    if hasnn(diagnostics) && resetnn
+        diagnostics.accepted.nn.params = 0
+        diagnostics.rejected.nn.params = 0
+    end
+
+    if resetsplitmerge
+        diagnostics.accepted.splitmerge .= 0
+        diagnostics.rejected.splitmerge .= 0
+    end
+
+    if resetamwg
+        diagnostics.amwg .= 0
+    end
+
+    if hasnn(diagnostics) && resetam
+        diagnostics.am .= 0
+    end
+
     return diagnostics
 end

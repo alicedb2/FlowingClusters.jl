@@ -1,150 +1,134 @@
-mutable struct MNCRPHyperparams
-    alpha::Float64
-    mu::Vector{Float64}
-    lambda::Float64
-    flatL::Vector{Float64}
-    L::LowerTriangular{Float64, Matrix{Float64}}
-    psi::Matrix{Float64}
-    nu::Float64
+abstract type AbstractFCHyperparams{T, D} end
 
-    diagnostics::Diagnostics
-
-    nn::Union{Nothing, Chain}
-    nn_params::Union{Nothing, ComponentArray}
-    nn_state::Union{Nothing, NamedTuple}
-    
+# That janky underscore is really ugly,
+# I'm sorry, I'm not clever enough to come up
+# with the idiomatic clean way to do this.
+struct FCHyperparams{T, D} <: AbstractFCHyperparams{T, D}
+    _::ComponentArray{T}
 end
 
-function Base.show(io::IO, h::MNCRPHyperparams)
-    d = dimension(h)
-    D = 3 + d + div(d * (d + 1), 2)
-    if h.nn !== nothing
-        nn_dim = size(h.nn_params, 1)
-        D += nn_dim
-    end
-    str = "MNCRPHyperparams(d=$d, D=$D from sum(1, $d, 1, $(div(d * (d + 1), 2)), 1" * (h.nn !== nothing ? ", $nn_dim" : "") * "))"
-    print(io, str)
+struct FCHyperparamsFFJORD{T, D} <: AbstractFCHyperparams{T, D}
+    _::ComponentArray{T}
+    ffjord::NamedTuple
+    # neural network state, which I still don't understand what it does
+    # everything is already in the parameters.
 end
 
-function MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu; ffjord_nn=nothing)
-    d = size(mu, 1)
+function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng::Union{Nothing, AbstractRNG}=nothing) where {T <: AbstractFloat}
 
-    if ffjord_nn !== nothing
-        @assert d == ffjord_nn[1].in_dims == ffjord_nn[end].out_dims
-        nn_params, nn_state = Lux.setup(Xoshiro(), ffjord_nn)
-        nn_params = ComponentArray(nn_params) 
-        nn_state = (model=nn_state, regularize=false, monte_carlo=false)
+    if isnothing(nn)
+        return FCHyperparams{T, D}(
+            ComponentArray{T}(
+                        pyp=(alpha=T(7.77),),# sigma=0.0),
+                        niw=(mu=zeros(T, D),
+                             lambda=one(T),
+                             flatL=unfold(LowerTriangular{T}(I(D))),
+                             nu=T(D + 1))
+                )
+            )
     else
-        nn_params = nothing
-        nn_state = nothing
+        rng isa AbstractRNG || throw(ArgumentError("You must provide a random number generator when using FFJORD"))
+        D == first(nn.layers).in_dims == last(nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
+
+        nn_params, nn_state = Lux.setup(rng, nn)
+        nn_params = ComponentArray{T}(nn_params)
+        nn_state = (model=nn_state, regularize=false, monte_carlo=false)
+
+        return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
+                        pyp=(alpha=T(7.77),),# sigma=0.0),
+                        niw=(mu=zeros(T, D),
+                            lambda=one(T),
+                            flatL=unfold(LowerTriangular{T}(I(D))),
+                            nu=T(D + 1)),
+                        nn=(params=nn_params,
+                            prior=(alpha=T(1), scale=T(10))
+                            )
+                        ),
+                    (nn=nn, nns=nn_state)
+                )
     end
-
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, Diagnostics(d, nn_params=nn_params), ffjord_nn, nn_params, nn_state)
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, flatL::Vector{Float64}, nu::Float64; ffjord_nn=nothing)
-    d = size(mu, 1)
-    flatL_d = div(d * (d + 1), 2)
-    if size(flatL, 1) != flatL_d
-        error("Dimension mismatch, flatL should have length $flatL_d")
+datadimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
+
+function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
+    dim = size(hyperparams._, 1)
+    dim -= !include_nn ? 0 : size(hyperparams._.nn, 1)
+    return dim
+end
+
+modeldimension(hyperparams::FCHyperparams) = size(hyperparams._, 1)
+
+hasnn(hyperparams::AbstractFCHyperparams) = hyperparams isa FCHyperparamsFFJORD
+hasnn(hyperparamsarray::ComponentArray) = :nn in keys(hyperparamsarray)
+
+transform(hparray::ComponentArray) = transform!(copy(hparray))
+backtransform(transformedhparray::ComponentArray) = backtransform!(copy(transformedhparray))
+
+function transform!(hparray::ComponentArray)
+    hparray.pyp.alpha = log(hparray.pyp.alpha)
+    hparray.niw.lambda = log(hparray.niw.lambda)
+    hparray.niw.nu = log(hparray.niw.nu - size(hparray.niw.mu, 1) + 1)
+    if hasnn(hparray)
+        hparray.nn.prior.alpha = log(hparray.nn.prior.alpha)
+        hparray.nn.prior.scale = log(hparray.nn.prior.scale)
     end
-
-    L = foldflat(flatL)
-    psi = L * L'
-
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn)
+    return hparray
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, L::LowerTriangular{Float64}, nu::Float64; ffjord_nn=nothing)
-    d = size(mu, 1)
-    if !(d == size(L, 1))
-        error("Dimension mismatch, L should have dimension $d x $d")
+function backtransform!(transformedhparray::ComponentArray)
+    transformedhparray.pyp.alpha = exp(transformedhparray.pyp.alpha)
+    transformedhparray.niw.lambda = exp(transformedhparray.niw.lambda)
+    transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + size(transformedhparray.niw.mu, 1) - 1
+    if hasnn(transformedhparray)
+        transformedhparray.nn.prior.alpha = exp(transformedhparray.nn.prior.alpha)
+        transformedhparray.nn.prior.scale = exp(transformedhparray.nn.prior.scale)
     end
-
-    psi = L * L'
-    flatL = flatten(L)
-
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn)
+    return transformedhparray
 end
 
-function MNCRPHyperparams(alpha::Float64, mu::Vector{Float64}, lambda::Float64, psi::Matrix{Float64}, nu::Float64; ffjord_nn=nothing)
-    d = size(mu, 1)
-    if !(d == size(psi, 1) == size(psi, 2))
-        error("Dimension mismatch, L should have dimension $d x $d")
-    end
-
-    L = cholesky(psi).L
-    flatL = flatten(L)
-
-    return MNCRPHyperparams(alpha, mu, lambda, flatL, L, psi, nu, ffjord_nn=ffjord_nn)
+function ij(flatk::Int)
+    i = ceil(Int, (sqrt(1 + 8 * flatk) - 1) / 2)
+    j = flatk - div(i * (i - 1), 2)
+    return i, j
 end
 
-function MNCRPHyperparams(d::Int64; ffjord_nn=nothing)
-    return MNCRPHyperparams(
-        7.77, 
-        zeros(d), 
-        0.01, 
-        LowerTriangular(diagm(fill(0.1, d))), 
-        d + 1.0,
-        ffjord_nn=ffjord_nn)
+function flatk(i::Int, j::Int)
+    return div(i * (i - 1), 2) + j
 end
 
-function clear_diagnostics!(hyperparams::MNCRPHyperparams)
-    d = dimension(hyperparams)
-
-    hyperparams.diagnostics = Diagnostics(d)
-
-    return hyperparams    
+function squaredim(flatL::AbstractVector)
+    D = size(flatL, 1)
+    return div(Int(sqrt(1 + 8 * D)) - 1, 2)
 end
 
-function Base.collect(hyperparams::MNCRPHyperparams)
-    return [hyperparams.alpha, hyperparams.mu, hyperparams.lambda, hyperparams.psi, hyperparams.nu]
+# This eventually hits BLAS, no need to try to optimize it with for loops
+function foldpsi(flatL::AbstractVector)
+    L = LowerTriangular(flatL)
+    return L * L'
 end
 
-function ij(flat_k::Int64)
-    i = Int64(ceil(1/2 * (sqrt(1 + 8 * flat_k) - 1)))
-    j = Int64(flat_k - i * (i - 1)/2)
-    return (i, j)
-end
-
-function flatten(L::LowerTriangular{Float64})
-    
+function unfold(L::LowerTriangular{T}) where T
     d = size(L, 1)
-
-    flatL = zeros(Int64(d * (d + 1) / 2))
-
-    # Fortran flashbacks
+    flatL = Array{T}(undef, div(d * (d + 1), 2))
     idx = 1
-    for i in 1:d
-        for j in 1:i
+    @inbounds for i in 1:d
+        @inbounds for j in 1:i
             flatL[idx] = L[i, j]
             idx += 1
         end
     end
-
     return flatL
 end
 
+function LinearAlgebra.LowerTriangular(flatL::AbstractVector{T}) where T
+    d = squaredim(flatL)
+    L = LowerTriangular{T}(Array{T}(undef, d, d))
 
-
-function foldflat(flatL::Vector{Float64})
-    
-    n = size(flatL, 1)
-
-    # Recover the dimension of a matrix
-    # from the length of the vector
-    # containing elements of the diag + lower triangular
-    # part of the matrix. The condition is that
-    # length of vector == #els diagonal + #els lower triangular part
-    # i.e N == d + (d² - d) / 2 
-    # Will fail at Int64() if this condition
-    # cannot be satisfied for N and d integers
-    # Basically d is the "triangular root"
-    d = Int64((sqrt(1 + 8 * n) - 1) / 2)
-
-    L = LowerTriangular(zeros(d, d))
-
-    # The order is row major
+    # The order is row major. This is important because
+    # it allows the conversion k -> (i, j)
+    # and (i, j) -> k without neither a for-loop
+    # nor a passing dimension d as argument
     idx = 1
     for i in 1:d
         for j in 1:i
@@ -152,196 +136,51 @@ function foldflat(flatL::Vector{Float64})
             idx += 1
         end
     end
-
     return L
 end
 
-
-function dimension(hyperparams::MNCRPHyperparams)
-    @assert size(hyperparams.mu, 1) == size(hyperparams.psi, 1) == size(hyperparams.psi, 2) "Dimensions of mu (d) and psi (d x d) do not match"
-    return size(hyperparams.mu, 1)
-end
-
-function param_dimension(hyperparams::MNCRPHyperparams; include_nn=true)
-    d = dimension(hyperparams)
-    D = 3 + d + div(d * (d + 1), 2)
-    if hyperparams.nn_params !== nothing && include_nn
-        D += size(hyperparams.nn_params, 1)
+function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
+    println(io, "$(typeof(hyperparams))(model dimension: $(modeldimension(hyperparams)))")
+    println(io, "  pyp")
+    println(io, "    alpha: $(round(hyperparams._.pyp.alpha, digits=3))")
+    # println(io, "    sigma: $(round(hyperparams._.pyp.sigma, digits=3))")
+    println(io, "  niw")
+    println(io, "    mu: $(round.(hyperparams._.niw.mu, digits=3))")
+    println(io, "    lambda: $(round(hyperparams._.niw.lambda, digits=3))")
+    println(io, "    flatL: $(round.(hyperparams._.niw.flatL, digits=3))")
+    println(io, "    psi: $(round.(foldpsi(hyperparams._.niw.flatL), digits=3))")
+    print(io,   "    nu: $(round(hyperparams._.niw.nu, digits=3))")
+    if hasnn(hyperparams)
+        println(io)
+        println(io, "  nn")
+        println(io, "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
+        println(io, "    t")
+        println(io, "      alpha: $(round(hyperparams._.nn.prior.alpha, digits=3))")
+        print(io,   "      scale: $(round(hyperparams._.nn.prior.scale, digits=3))")
     end
-    return D
 end
 
-function flatL!(hyperparams::MNCRPHyperparams, value::Vector{Float64})
-    d = dimension(hyperparams)
-    if (2 * size(value, 1) != d * (d + 1))
-        error("Dimension mismatch, value should have length $(Int64(d*(d+1)/2))")
-    end
-    hyperparams.flatL = deepcopy(value) # Just making sure?
-    hyperparams.L = foldflat(hyperparams.flatL)
-    hyperparams.psi = hyperparams.L * hyperparams.L'
+function perturb!(hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3) where {T, D}
+    return perturb!(default_rng(), hyperparams, logstep=logstep)
 end
 
-function L!(hyperparams::MNCRPHyperparams, value::T) where {T <: AbstractMatrix{Float64}}
-    d = dimension(hyperparams)
-    if !(d == size(value, 1) == size(value, 2))
-        error("Dimension mismatch, value shoud have size $d x $d")
-    end
-    hyperparams.L = LowerTriangular(value)
-    hyperparams.flatL = flatten(hyperparams.L)
-    hyperparams.psi = hyperparams.L * hyperparams.L'
-end
-
-function psi!(hyperparams::MNCRPHyperparams, value::Matrix{Float64})
-    d = dimension(hyperparams)
-    if !(d == size(value, 1) == size(value, 2))
-        error("Dimension mismatch, value should have size $d x $d")
-    end
-    hyperparams.L = cholesky(value).L
-    hyperparams.flatL = flatten(hyperparams.L)
-    hyperparams.psi = deepcopy(value)
-end
-
-project_vec(vec::Vector{Float64}, proj::Matrix{Float64}) = proj * vec
-project_vec(vec::Vector{Float64}, dims::Vector{Int64}) = dims_to_proj(dims, size(vec, 1)) * vec
-
-project_mat(mat::Matrix{Float64}, proj::Matrix{Float64}) = proj * mat * proj'
-
-function project_mat(mat::Matrix{Float64}, dims::Vector{Int64})
-    d = size(mat, 1)
-    proj = dims_to_proj(dims, d)
-    return proj * mat * proj'
-end
-
-function project_hyperparams(hyperparams::MNCRPHyperparams, proj::Matrix{Float64})
-    proj_hp = deepcopy(hyperparams)
-    proj_hp.mu = proj * proj_hp.mu
-    proj_hp.psi = proj * proj_hp.psi * proj'
-    return proj_hp
-end
-
-
-function project_hyperparams(hyperparams::MNCRPHyperparams, dims::Vector{Int64})
-    d = dimension(hyperparams)
-    return project_hyperparams(hyperparams, dims_to_proj(dims, d))
-end
-
-
-function pack(theta::Vector{Float64}; backtransform=true)::Tuple{Float64, Vector{Float64}, Float64, Vector{Float64}, LowerTriangular{Float64}, Matrix{Float64}, Float64}
-    d = Int64((sqrt(8 * length(theta) - 15) - 3)/2)
-
-    alpha = theta[1]
-    mu = theta[2:(2 + d - 1)]
-    lambda = theta[2 + d]
-    flatL = theta[(2 + d + 1):(2 + d + div(d * (d + 1), 2))]
-    nu = theta[end]
-
-    if backtransform
-        alpha = exp(alpha)
-        lambda = exp(lambda)
-        nu = d - 1 + exp(nu)
-        # diag_idx = div.((1:d) .* (2:d+1), 2)
-        # flatL[diag_idx] = exp.(flatL[diag_idx])
-    end
-
-    L = foldflat(flatL)
-    psi = L * L'
-
-    return (alpha, mu, lambda, flatL, L, psi, nu)
-end
-
-
-function unpack(hyperparams::MNCRPHyperparams; transform=true)::Vector{Float64}
-    d = dimension(hyperparams)
-    alpha = hyperparams.alpha
-    lambda = hyperparams.lambda
-    nu = hyperparams.nu
-
-    if transform
-        alpha = log(alpha)
-        lambda = log(lambda)
-        nu = log(nu - d + 1)
-        # diag_idx = div.((1:d) .* (2:d+1), 2)
-        # flatL[diag_idx] = log.(flatL[diag_idx])
-    end
-
-    return vcat(alpha, hyperparams.mu, lambda, hyperparams.flatL, nu)
-
-end
-
-# We gotta go fast!
-# Propagate what theta[i] locally affects
-# This is mostly to avoid an explicit matrix multiplication
-# for Psi = LL' when one element of L is modified.
-function set_theta!(hyperparams::MNCRPHyperparams, val::Float64, i::Int64; backtransform=true)::MNCRPHyperparams
-    d = dimension(hyperparams)
-    D = 3 + d + div(d * (d + 1), 2)
-    @assert 1 <= i <= D
-    if i == 1
-        if backtransform
-            val = exp(val)
-        end
-        hyperparams.alpha = val
-    elseif 1 + 1 <= i <= 1 + d
-        k = i - 1
-        hyperparams.mu[k] = val
-    elseif i == 2 + d
-        if backtransform
-            val = exp(val)
-        end
-        hyperparams.lambda = val
-    elseif 2 + d + 1 <= i <= 2 + d + div(d * (d + 1), 2)
-        k = i - 2 - d
-        hyperparams.flatL[k] = val
-        i, j = ij(k)
-        L = hyperparams.L
-        hyperparams.psi[i, i] += val * val - L[i, j] * L[i, j]
-        for k in i+1:d
-            hyperparams.psi[k, i] += val * L[k, j] - L[i, j] * L[k, j]
-            hyperparams.psi[i, k] = hyperparams.psi[k, i]
-        end
-        for l in j:i-1
-            hyperparams.psi[i, l] += L[l, j] * val - L[l, j] * L[i, j]
-            hyperparams.psi[l, i] = hyperparams.psi[i, l]
-        end
-        L[i, j] = val
-    elseif i == D
-        if backtransform
-            val = d - 1 + exp(val)
-        end
-        hyperparams.nu = val
-    end
-
+function perturb!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3) where {T, D}
+    backtransform!(transform!(hyperparams._) .+= logstep * randn(rng, length(hyperparams._)))
     return hyperparams
 end
 
-function get_theta(hyperparams::MNCRPHyperparams, i::Int64; transform=true)
-    d = dimension(hyperparams)
-    D = 3 + d + div(d * (d + 1), 2)
-    @assert 1 <= i <= D
-    if i == 1
-        if transform
-            return log(hyperparams.alpha)
-        else
-            return hyperparams.alpha
-        end
-    elseif 1 + 1 <= i <= 1 + d
-        k = i - 1
-        return hyperparams.mu[k]
-    elseif i == 2 + d
-        if transform
-            return log(hyperparams.lambda)
-        else
-            return hyperparams.lambda
-        end
-    elseif 2 + d + 1 <= i <= 2 + d + div(d * (d + 1), 2)
-        k = i - 2 - d
-        i, j = ij(k)
-        return hyperparams.L[i, j]
-    elseif i == D
-        if transform
-            return log(hyperparams.nu - d + 1)
-        else
-            return hyperparams.nu
-        end
+function niwparams(hyperparams::AbstractFCHyperparams{T, D}; psi=true) where {T, D}
+    if psi
+        return hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    else
+        return hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.flatL, hyperparams._.niw.nu
+    end
+end
+
+function niwparams(hyperparamsarray::ComponentArray{T}; psi=true) where T
+    if psi
+        return hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, foldpsi(hyperparamsarray.niw.flatL), hyperparamsarray.niw.nu
+    else
+        return hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, hyperparamsarray.niw.flatL, hyperparamsarray.niw.nu
     end
 end

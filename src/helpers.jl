@@ -1,5 +1,5 @@
 function performance_statistics(scores_at_presences, scores_at_absences; threshold=nothing)
-    
+
     if threshold !== nothing
         scores_at_presences = scores_at_presences .>= threshold
         scores_at_absences = scores_at_absences .>= threshold
@@ -9,12 +9,12 @@ function performance_statistics(scores_at_presences, scores_at_absences; thresho
     tp = sum(scores_at_presences)
     # absence with score towards 1 is a false positive
     fp = sum(scores_at_absences)
-    
+
     # absence with a score towards 0 is a true negative
     tn = sum(1 .- scores_at_absences)
     # presence with score towards 0 is a false negative
     fn = sum(1 .- scores_at_presences)
-    
+
 
     sensitivity = tp/(tp + fn)
     specificity = tn/(tn + fp)
@@ -33,15 +33,14 @@ function performance_statistics(scores_at_presences, scores_at_absences; thresho
 
 end
 
-
 function best_score_threshold(scores_at_presences, scores_at_absences; statistic=:MCC, nbsteps=1000)
-    
+
     thresholds = LinRange(0.0, 1.0, nbsteps)
     best_score = -Inf
     best_thresh = 0.0
 
     statistic in [:J, :MCC, :kappa] || throw(ArgumentError("perfscore must be :J (Youden's J), :MCC (Matthew's correlation coefficient), or :kappa (Cohen's kappa)"))
-    
+
     for thresh in thresholds
         perfstats = performance_statistics(scores_at_presences, scores_at_absences, threshold=thresh)
         if perfstats[statistic] >= best_score
@@ -55,9 +54,15 @@ function best_score_threshold(scores_at_presences, scores_at_absences; statistic
 end
 
 
-sqrtsigmoid(x::T; a=1/2) where {T} = T(1/2) + T(a) * x / sqrt(T(1) + T(a)^2 * x^2) / T(2)
-sqrttanh(x::T) where {T} = T(2) * sqrtsigmoid(x, a=1) - T(1)
-sqrttanhgrow(x) = x + sqrttanh(x)
+function sqrtsigmoid(x::T; a=1/2) where T
+    E = eltype(T)
+    return E(1/2) .+ E(a) .* x ./ sqrt.(E(1) .+ E(a).^2 .* x.^2) ./ E(2)
+end
+function sqrttanh(x::T; a=1) where T
+    E = eltype(T)
+    return E(2) .* sqrtsigmoid.(x, a=E(a)) .- E(1)
+end
+sqrttanhgrow(x) = x .+ sqrttanh.(x)
 
 function chunkslices(sizes)
     boundaries = cumsum(vcat(1, sizes))
@@ -71,32 +76,26 @@ end
 
 # Quick and dirty but faster logdet
 # for (assumed) positive-definite matrix
-function logdetpsd(A::AbstractMatrix{Float64})
+function logdetpsd(A::AbstractMatrix{T})::T where T
     chol = cholesky(Symmetric(A), check=false)
     if issuccess(chol)
-        # marginally faster than
-        # 2 * sum(log.(diag(chol.U)))
-        acc = 0.0
-        for i in 1:size(A, 1)
-            acc += log(chol.U[i, i])
-        end
-        return 2 * acc
+        return logdet(chol)
     else
         return -Inf
     end
 end
 
-function logdetflatLL(flatL::Vector{Float64})
-    acc = 0.0
-    i = 1
-    delta = 2
-    while i <= length(flatL)
-        acc += log(flatL[i])
-        i += delta
-        delta += 1
-    end
-    return 2 * acc
-end
+# function logdetflatLL(flatL::Vector{Float64})
+#     acc = 0.0
+#     i = 1
+#     delta = 2
+#     while i <= length(flatL)
+#         acc += log(flatL[i])
+#         i += delta
+#         delta += 1
+#     end
+#     return 2 * acc
+# end
 
 
 function freedmandiaconis(x::AbstractArray)
@@ -116,20 +115,21 @@ function drawNIW(
     mu::AbstractVector{Float64},
     lambda::Float64,
     psi::AbstractMatrix{Float64},
-    nu::Float64)::Tuple{Vector{Float64}, Matrix{Float64}}
+    nu::Float64, rng::AbstractRNG=default_rng())::Tuple{Vector{Float64}, Matrix{Float64}}
 
     invWish = InverseWishart(nu, psi)
-    sigma = rand(invWish)
+    sigma = rand(rng, invWish)
 
     multNorm = MvNormal(mu, sigma/lambda)
-    mu = rand(multNorm)
+    mu = rand(rng, multNorm)
 
     return mu, sigma
 end
 
-# Used by plot() to determine the minimum size of clusters to include
-# when nb_clusters is given as a proportion 0 < p < 1
-function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
+
+# Used by plot() when nb_clusters given as a float 0 < p < 1.0
+# Find the minimum size of clusters to include at least a proportion of the data
+function minimum_size(clusters::AbstractVector{<:AbstractCluster}, proportion=0.05)
 
     N = sum(length.(clusters))
     include_up_to = N * (1 - proportion)
@@ -146,4 +146,86 @@ function minimum_size(clusters::Vector{Cluster}, proportion=0.05)
 
     return max(minsize, 0)
 
+end
+
+dims_to_proj(dims::AbstractVector{Int}, d::Int) = I(d)[dims, :]
+
+project_vec(vec::AbstractVector, proj::AbstractMatrix) = proj * vec
+project_vec(vec::AbstractVector, dims::AbstractVector{Int}) = dims_to_proj(dims, size(vec, 1)) * vec
+
+project_mat(mat::AbstractMatrix, proj::AbstractMatrix) = proj * mat * proj'
+
+function project_mat(mat::AbstractMatrix, dims::AbstractVector{Int})
+    d = size(mat, 1)
+    proj = dims_to_proj(dims, d)
+    return proj * mat * proj'
+end
+
+
+function generate_data(;D=6, T=Float64, K=10, N=100, muscale=0.5, sigmascale=0.3, seed=default_rng(), test=false)
+    if isnothing(seed)
+        rng = default_rng()
+    elseif seed isa AbstractRNG
+        rng = seed
+    elseif seed isa Int
+        rng = MersenneTwister(seed)
+    else
+        throw(ArgumentError("seed must be an AbstractRNG or an integer"))
+    end
+
+
+    base_matclusters = [Matrix{T}(rand(rng, MvNormal(T(muscale)*randn(rng, T, D), Diagonal(T(sigmascale)^2*rand(rng, D))), N)) for _ in 1:K]
+    orig_matclusters = [Matrix{T}(rand(rng, MvNormal(T(muscale)*randn(rng, T, D), Diagonal(T(sigmascale)^2*rand(rng, D))), N)) for _ in 1:K]
+
+    b2oset = Dict{SVector{D, T}, SVector{D, T}}(vb => vo for (clb, clo) in zip(base_matclusters, orig_matclusters) for (vb, vo) in zip(eachcol(clb), eachcol(clo)))
+    setclusters = [SetCluster(cl, b2oset, check=test) for cl in base_matclusters]
+
+    isvalid, offenders = isvalidpartition(setclusters, fullresult=true)
+    if !isvalid
+        # We are removing the offenders from the base2original dictionary
+        filter!(pair -> !(pair[1] in offenders), b2oset) # b2o is common to all
+        for cl in setclusters
+            filter!(el -> !(el in offenders), cl.elements)
+            _recalculate_sums!(cl)
+        end
+        filter!(!isempty, setclusters)
+        # @warn "There were collisions in the SetClusters, discarding offenders.\nYou won't get exactly $(K*N) elements in $K clusters in total, you'll get $(length(b2oset)) elements in $(length(setclusters)) instead.\nBet you were playing in low precision, low dimension, and with large N.\n\033[1;33mThis might fail a few tests in the test suite, that's fine.\033[0m"
+    end
+
+    b = reduce((b2o, x) -> hcat(b2o, Matrix(x)), setclusters, init=zeros(T, D, 0))
+    o = reduce((b2o, x) -> hcat(b2o, Matrix(x, orig=true)), setclusters, init=zeros(T, D, 0))
+    b2obit = cat(b, o, dims=3)
+    idxclusters = chunkslices(length.(setclusters))
+    bitclusters = [BitCluster(idx, b2obit, check=test) for idx in idxclusters]
+    _recalculate_sums!(bitclusters)
+    if test
+        return true
+    else
+        return bitclusters, setclusters
+    end
+end
+
+function Base.Array(b2o::Dict{SVector{D, T}, SVector{D, T}})::Array{T, 3} where {T, D}
+    basedata = reduce(hcat, collect.(keys(b2o)))
+    origdata = reduce(hcat, collect.(values(b2o)))
+    return cat(basedata, origdata, dims=3)
+end
+
+function idinit(mult::T, direction=:in) where T <: Real
+    function init(rng::AbstractRNG, dims...)
+        w = zeros(T, dims...)
+        outdim, indim = dims[1], dims[2]
+        if direction === :in
+            slices = chunkslices(fill(div(outdim, indim), indim))
+            for (i, slice) in enumerate(slices)
+                w[slice, i] .= T(mult)
+            end
+        elseif direction === :out
+            slices = chunkslices(fill(div(indim, outdim), outdim))
+            for (i, slice) in enumerate(slices)
+                w[i, slice] .= T(mult)
+            end
+        end
+        return w
+    end
 end

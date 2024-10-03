@@ -31,11 +31,7 @@ advance_chain!(presence_chain_, Inf; nb_splitmerge=100, nb_hyperparams=2, attemp
 els = elements(Matrix, presence_chain_)
 coords = hcat(rand(Uniform(0.9*minimum(els[1, :]), 1.1*maximum(els[1, :])), 2000), rand(Uniform(0.9*minimum(els[2, :]), 1.1*maximum(els[2, :])), 2000))'
 
-nn2d = Chain(
-        Dense(2, 16, tanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-        Dense(16, 2, tanh, init_bias=zeros32, init_weight=identity_init(gain=0.0)), 
-    )
-presence_chain = MNCRPChain(train_presences, ffjord_nn=nn2d, nb_samples=200)
+nn2presence_chain = MNCRPChain(train_presences, ffjord_nn=nn2d, nb_samples=200)
 advance_chain!(presence_chain, Inf; nb_splitmerge=100, nb_hyperparams=2, attempt_map=true, sample_every=:autocov)
 
 
