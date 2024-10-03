@@ -42,7 +42,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
         @error("Can't burn the whole chain, burn must be smaller than $N")
     end
 
-    map_idx = chain.map_idx - burn
+    map_idx = chain.map_idx
 
     function deco!(axis)
         hidespines!(axis, :t, :r)
