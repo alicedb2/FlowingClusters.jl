@@ -66,12 +66,26 @@ sqrttanhgrow(x) = x .+ sqrttanh.(x)
 
 function chunkslices(sizes)
     boundaries = cumsum(vcat(1, sizes))
-    return [boundaries[i]:boundaries[i+1]-1 for i in 1:length(sizes)]
+    return [boundaries[i]:(boundaries[i+1]-1) for i in 1:length(sizes)]
 end
 
 function chunk(data::T, sizes) where {T}
     sum(sizes) <= size(data, ndims(data)) || throw(ArgumentError("Sum of sizes ($(sum(sizes))) must be less than or equal to last dimension ($(size(data, ndims(data))))"))
     return [T(selectdim(data, ndims(data), slice)) for slice in chunkslices(sizes)]
+end
+
+function divide_into_parts(number::Int, n::Int)::Vector{Int}
+    quotient, remainder = divrem(number, n)
+    parts = fill(quotient, n)
+    for i in 1:remainder
+        parts[i] += 1
+    end
+    return parts
+end
+
+function chunkin(data, nchunks)
+    parts = divide_into_parts(size(data, ndims(data)), nchunks)
+    return chunk(data, parts)
 end
 
 # Quick and dirty but faster logdet
