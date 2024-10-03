@@ -30,11 +30,6 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     ###########################
 
-    delta_minusnn = 0.0
-    if hasnn(hp)
-        delta_minusnn = nn_prior(similar(hp._.nn.params) .= 0.0, hp._.nn.prior.alpha, hp._.nn.prior.scale)
-    end
-
     if pretty_progress === :repl
         progressio = stderr
     elseif pretty_progress === :file
@@ -191,9 +186,10 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             samples_convergence = (ess=0, rhat=0)
         end
 
-        _delta_minusnn_map = 0
+        delta_minusnn_map = 0.0
         if hasnn(chain.hyperparams)
-            _delta_minusnn_map = delta_minusnn + log_jeffreys_t(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
+            delta_minusnn_map += log_nn_prior(chain.map_hyperparams._.nn.params, chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
+            delta_minusnn_map += log_jeffreys_nn(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
         end
 
         if pretty_progress === :repl || pretty_progress === :file || pretty_progress
@@ -209,7 +205,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
             (:"MAP #attempts/#successes", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
             (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.map_clusters)), $(length(filter(c -> length(c) > 1, chain.map_clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.map_clusters)))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters]))"),
-            (:"last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(chain.map_logprob - _delta_minusnn_map, digits=1)))"),
+            (:"last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(chain.map_logprob - delta_minusnn_map, digits=1)))"),
             (:"last MAP at", last_map_idx),
             (:"last checkpoint at", last_checkpoint)
             ])
@@ -257,10 +253,12 @@ function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=fal
 
     map_clusters_attempt = deepcopy(chain.clusters)
     map_hyperparams = deepcopy(chain.hyperparams)
-
-    map_mll = logprobgenerative(map_clusters_attempt, chain.map_hyperparams, ignoreffjord=true)
-
+    
     # Greedy Gibbs!
+    # We only use Gibbs moves in the base space 
+    # to construct an approximate MAP state so both
+    # map_mll and test_mll use ignoreffjord=true
+    map_mll = logprobgenerative(map_clusters_attempt, chain.map_hyperparams, ignoreffjord=true)
     for p in 1:max_nb_pushes
         test_attempt = copy(map_clusters_attempt)
         advance_gibbs!(chain.rng, test_attempt, map_hyperparams; temperature=0.0)
@@ -278,11 +276,11 @@ function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=fal
         end
     end
 
-    if optimize_hyperparams
-        optimize_hyperparams!(map_clusters_attempt, map_hyperparams, verbose=verbose)
-    end
+    # if optimize_hyperparams
+    #     optimize_hyperparams!(map_clusters_attempt, map_hyperparams, verbose=verbose)
+    # end
 
-    attempt_logprob = logprobgenerative(chain.rng, map_clusters_attempt, map_hyperparams, ignorehyperpriors=false, ignoreffjord=false)
+    attempt_logprob = logprobgenerative(map_clusters_attempt, map_hyperparams, chain.rng, ignorehyperpriors=false, ignoreffjord=false)
     if attempt_logprob > chain.map_logprob || force
         chain.map_logprob = attempt_logprob
         chain.map_clusters = map_clusters_attempt

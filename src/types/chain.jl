@@ -141,10 +141,10 @@ function FCChain(
     end
     filter!(c -> !isempty(c), chain.clusters)
 
-    if optimize
-        println("    Initializing hyperparameters...")
-        optimize_hyperparams!(chain.clusters, chain.hyperparams, verbose=true)
-    end
+    # if optimize
+    #     println("    Initializing hyperparameters...")
+    #     optimize_hyperparams!(chain.clusters, chain.hyperparams, verbose=true)
+    # end
 
     push!(chain.hyperparams_chain, deepcopy(hyperparams))
     lp = logprobgenerative(chain.clusters, chain.hyperparams, ignorehyperpriors=false, ignoreffjord=false)

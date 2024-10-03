@@ -1,4 +1,4 @@
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D, E}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}; ignorehyperpriors=false, temperature::T=one(T)) where {T, D, E}
 
     sum(length.(clusters)) > 1 || return -Inf
 
@@ -32,22 +32,22 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     if !ignorehyperpriors
         # mu0 has a flat hyperpriors
         # alpha hyperprior
-        log_hyperpriors += log(jeffreys_crp_alpha(alpha, N))
+        log_hyperpriors += log_jeffreys_crp_alpha(alpha, N)
 
         # NIW hyperpriors
         log_hyperpriors += -log(lambda)
         log_hyperpriors += -D * logdetpsd(psi)
-        log_hyperpriors += log(jeffreys_nu(nu, D))
+        log_hyperpriors += log_jeffreys_nu(nu, D)
 
     end
 
-    log_p = log_crp + log_niw + log_hyperpriors
+    logprob = (log_crp + log_niw + log_hyperpriors) / temperature
 
-    return isfinite(log_p) ? log_p / temperature : -Inf
+    return isfinite(logprob) ? logprob : -Inf
 
 end
 
-function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; ignorehyperpriors=false, temperature::T=one(T))::T where {T, D, E}
+function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; ignorehyperpriors=false, temperature::T=one(T)) where {T, D, E}
 
     hpa = hyperparamsarray
 
@@ -57,27 +57,26 @@ function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:Abstract
         return -Inf
     end
     
-    logprob_noffjord = logprobgenerative(clusters, hyperparamsarray; ignorehyperpriors=ignorehyperpriors, temperature=temperature)
+    logprob_noffjord = logprobgenerative(clusters, hyperparamsarray; ignorehyperpriors=ignorehyperpriors)
 
-    logprob_ffjord = -sum(forwardffjord(rng, Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
-    logprob_ffjord += nn_prior(hpa.nn.params, hpa.nn.prior.alpha, hpa.nn.prior.scale)
-
-    if !ignorehyperpriors
-        # Independence Jeffreys prior
-        # logprob_ffjord += log(jeffreys_t_alpha(hpa.nn.prior.alpha))
-        # logprob_ffjord += log_jeffreys_t_scale(hpa.nn.prior.scale)
-
-        # Bivariate Jeffreys prior
-        # logprob_ffjord += log_jeffreys_t(hpa.nn.prior.alpha, hpa.nn.prior.scale)
+    if !isfinite(logprob_noffjord)
+        return -Inf
     end
 
-    logprob = logprob_noffjord + logprob_ffjord / temperature
+    logprob_ffjord = -sum(forwardffjord(rng, Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
+    logprob_ffjord += log_nn_prior(hpa.nn.params, hpa.nn.prior.alpha, hpa.nn.prior.scale)
+
+    if !ignorehyperpriors
+        logprob_ffjord += log_jeffreys_nn(hpa.nn.prior.alpha, hpa.nn.prior.scale)
+    end
+
+    logprob = (logprob_noffjord + logprob_ffjord) / temperature
 
     return isfinite(logprob) ? logprob : -Inf
 
 end
 
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, rng::Union{Nothing, AbstractRNG}=default_rng(); ignorehyperpriors=false, ignoreffjord=false, temperature::T=one(T))::T where {T, D, E}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, rng::Union{Nothing, AbstractRNG}=default_rng(); ignorehyperpriors::Bool=false, ignoreffjord::Bool=false, temperature::T=one(T)) where {T, D, E}
     if hasnn(hyperparams) && !ignoreffjord
         (rng isa AbstractRNG)|| throw(ArgumentError("You must provide a random number generator when using FFJORD"))
         return logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=ignorehyperpriors, temperature=temperature)

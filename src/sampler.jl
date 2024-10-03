@@ -67,7 +67,7 @@ function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClu
     log_acceptance += K * proposed_logalpha - loggamma(proposed_alpha + N) + loggamma(proposed_alpha)
     log_acceptance -= K * log_alpha - loggamma(alpha + N) + loggamma(alpha)
 
-    log_acceptance += log(jeffreys_crp_alpha(proposed_alpha, N)) - log(jeffreys_crp_alpha(alpha, N))
+    log_acceptance += log_jeffreys_crp_alpha(proposed_alpha, N) - log_jeffreys_crp_alpha(alpha, N)
 
     log_hastings = proposed_logalpha - log_alpha
     log_acceptance += log_hastings
@@ -130,11 +130,10 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
 
     log_acceptance = sum([log_Zniw(c, mu, proposed_lambda, psi, nu) - log_Zniw(EmptyCluster{T, D, E}(), mu, proposed_lambda, psi, nu) - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu) for c in clusters])
 
-    # We leave loghastings = 0 because the
     # Jeffreys prior over lambda is the logarithmic
-    # prior and moves are symmetric on the log scale.
-
-    # log_acceptance = min(zero(T), log_acceptance)
+    # prior and moves are symmetric on the log-scale
+    # so the Hastings factor and hyperprior on lambda
+    # cancel each others out.
 
     if log(rand(rng, T)) < log_acceptance
         hyperparams._.niw.lambda = proposed_lambda
@@ -165,12 +164,16 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
 
     for k in dim_order
 
+        # We need L for the Hastings factor
+        # so we don't use foldpsi()
         L = LowerTriangular(hyperparams._.niw.flatL)
         psi = L * L'
 
         proposed_flatL = hyperparams._.niw.flatL[:]
         proposed_flatL[k] = proposed_flatL[k] + steps[k]
 
+        # We need proposed_L for the Hastings factor
+        # so we don't use foldpsi()
         proposed_L = LowerTriangular(proposed_flatL)
         proposed_psi = proposed_L * proposed_L'
 
@@ -217,7 +220,7 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
     log_hastings = proposed_logx - current_logx
     log_acceptance += log_hastings
 
-    log_acceptance += log(jeffreys_nu(proposed_nu, D)) - log(jeffreys_nu(nu, D))
+    log_acceptance += log_jeffreys_nu(proposed_nu, D) - log_jeffreys_nu(nu, D)
 
     # log_acceptance = min(zero(T), log_acceptance)
 
@@ -247,15 +250,11 @@ function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     proposed_log_nn_alpha = log_nn_alpha + rand(rng, step_distrib)
     proposed_nn_alpha = exp(proposed_log_nn_alpha)
 
-    log_acceptance = nn_prior(nn_params, proposed_nn_alpha) - nn_prior(nn_params, nn_alpha)
-
     # Hastings factor on log-scale
-    log_acceptance += proposed_log_nn_alpha - log_nn_alpha
+    log_acceptance = proposed_log_nn_alpha - log_nn_alpha
 
-    # log_acceptance += log(jeffreys_t_alpha(proposed_nn_alpha)) - log(jeffreys_t_alpha(nn_alpha))
-    log_acceptance += log_jeffreys_t(proposed_nn_alpha, nn_scale) - log_jeffreys_t(nn_alpha, nn_scale)
-
-    # log_acceptance = min(zero(T), log_acceptance)
+    log_acceptance += log_nn_prior(nn_params, proposed_nn_alpha, nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
+    log_acceptance += log_jeffreys_nn(proposed_nn_alpha, nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
     if log(rand(rng, T)) < log_acceptance
         hyperparams._.nn.prior.alpha = proposed_nn_alpha
@@ -282,18 +281,11 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     proposed_log_nn_scale = log_nn_scale + rand(rng, step_distrib)
     proposed_nn_scale = exp(proposed_log_nn_scale)
 
-    log_acceptance = nn_prior(nn_params, nn_alpha, proposed_nn_scale) - nn_prior(nn_params, nn_alpha, nn_scale)
+    # Hastings factor for log-scale moves
+    log_acceptance = proposed_log_nn_scale - log_nn_scale
 
-    # Comment next two line for independence Jeffreys prior on nn_scale
-    log_acceptance += proposed_log_nn_scale - log_nn_scale # Hastings factor
-    
-    # Independence Jeffreys
-    # log_acceptance += log_jeffreys_t_scale(proposed_nn_scale) - log_jeffreys_t_scale(nn_scale)
-    
-    # Bivariate pi(alpha, scale) Jeffreys prior
-    log_acceptance += log_jeffreys_t(nn_alpha, proposed_nn_scale) - log_jeffreys_t(nn_alpha, nn_scale)
-
-    # log_acceptance = min(zero(T), log_acceptance)
+    log_acceptance += log_nn_prior(nn_params, nn_alpha, proposed_nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
+    log_acceptance += log_jeffreys_nn(nn_alpha, proposed_nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
     if log(rand(rng, T)) < log_acceptance
         hyperparams._.nn.prior.scale = proposed_nn_scale
@@ -471,8 +463,6 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
             log_acceptance -= log_q
         end
 
-        # log_acceptance = min(zero(T), log_acceptance)
-
     elseif temperature <= 0
        
         log_acceptance = zero(T)
@@ -506,7 +496,7 @@ function advance_ffjord!(
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    step_distrib=nothing) where {T, D, E}
+    step_distrib) where {T, D, E}
 
     hasnn(hyperparams) && !isnothing(step_distrib) || return hyperparams
 
@@ -515,17 +505,15 @@ function advance_ffjord!(
 
     proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
 
-    # ignoreffjord=true to avoid the ffjord logp
-    # which reflow already calculated
-    log_acceptance = logprobgenerative(rng, proposed_clusters, proposed_hparray, hyperparams.ffjord, 
-                        ignorehyperpriors=true, ignoreffjord=true
-                    )
+    # reflow() already computes the logprob coming
+    # from the jacobian of the FFJORD transformation
+    # so we do it here to avoid recomputing it
+    # in logprobgenerative()
+    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
     log_acceptance -= sum(proposed_delta_logps)
-    log_acceptance += nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior.alpha, proposed_hparray.nn.prior.scale)
+    log_acceptance += log_nn_prior(proposed_hparray.nn.params, hyperparams._.nn.prior.alpha, hyperparams._.nn.prior.scale)
 
-    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true, ignoreffjord=false)
-
-    # log_acceptance = min(zero(T), log_acceptance)
+    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
 
     if log(rand(rng, T)) < log_acceptance
         empty!(clusters)
@@ -634,7 +622,6 @@ end
 #     return advance_ffjord!(default_rng(), clusters, hyperparams, diagnostics, step_distrib=step_distrib)
 # end
 
-
 function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=one(T)e-10) where T
     sigma = (xx - x * x' / L) / (L - 1)
     if correction
@@ -651,7 +638,6 @@ function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptan
     contparams = hasnn(diagnostics) ? (:pyp, :niw, :nn) : (:pyp, :niw)
     acc_rates = diagnostics.accepted[contparams] ./ (diagnostics.accepted[contparams] .+ diagnostics.rejected[contparams])
     diagnostics.amwg.logscales .+= delta_n .* (acc_rates .> acceptance_target) .- delta_n .* (acc_rates .<= acceptance_target)
-
 
     # diagnostics.amwg_logscales[diagnostics.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
     # diagnostics.amwg_logscales[diagnostics.amwg_logscales .> minmax_logscale] .= minmax_logscale

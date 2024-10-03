@@ -66,7 +66,7 @@ module FlowingClusters
     include("sampler.jl")
     export advance_gibbs!, advance_splitmerge_seq!, advance_hyperparams_adaptive!
     export advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!
-    # export advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
+    export advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
 
     include("mcmc.jl")
     export advance_chain!, attempt_map!
