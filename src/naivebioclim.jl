@@ -1,10 +1,8 @@
 module NaiveBIOCLIM
 
-    using DataFrames: DataFrame
     using StatsBase: quantilerank
 
     export bioclim_predictor
-
 
     function bioclim_predictor(training_predictors::AbstractArray)
 

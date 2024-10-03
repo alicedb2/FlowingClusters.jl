@@ -127,12 +127,12 @@ function FCChain(
     if strategy == :hot
         push!(chain.clusters, cluster_type(initial_elements, base2original))
         for i in 1:10
-            advance_gibbs!(rng, chain.clusters, chain.hyperparams, temperature=1.6)
+            advance_gibbs!(rng, chain.clusters, chain.hyperparams, temperature=2.0)
         end
     elseif strategy == :N
         append!(chain.clusters, [cluster_type(el, base2original) for el in initial_elements])
-    elseif strategy == :1
-        push!(chain.clusters, cluster_type(initial_elements, base2original))
+    elseif strategy isa Int
+        append!(chain.clusters, [cluster_type(chunk, base2original) for chunk in chunkin(initial_elements, strategy)])
     elseif strategy == :sequential
         push!(chain.clusters, cluster_type(initial_elements[1], base2original))
         for (i, element) in enumerate(initial_elements[2:end])

@@ -528,23 +528,19 @@ function advance_ffjord!(
 
 end
 
-function advance_hyperparams_adaptive!(
+function advance_hyperparams_amwg!(
     rng::AbstractRNG,
     clusters::Vector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    amwg_batch_size=40, acceptance_target::T=T(0.44),
-    nb_ffjord_am=1, am_safety_probability::T=T(0.05), am_safety_sigma::T=T(0.3),
-    hyperparams_chain=nothing) where {T, D, E}
-
+    amwg_batch_size=50, acceptance_target::T=T(0.44)
+    ) where {T, D, E}
 
     di = diagnostics
     # by default only resets hyperparams acceptance rates
     clear_diagnostics!(di)
 
-    nn_D = hasnn(hyperparams) ? size(hyperparams._.nn.params, 1) : 0
-
-    for i in 1:amwg_batch_size
+    for j in 1:amwg_batch_size
         advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.pyp.alpha))
         advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.mu))
         advance_lambda!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.lambda))
@@ -555,12 +551,28 @@ function advance_hyperparams_adaptive!(
             # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
         end
     end
+    
     di.amwg.nbbatches += 1
 
     adjust_amwg_logscales!(di, acceptance_target=acceptance_target)
 
-    if hasnn(hyperparams) && nb_ffjord_am > 0
+    return hyperparams
 
+end
+
+function advance_ffjord_am!(
+    rng::AbstractRNG,
+    clusters::Vector{<:AbstractCluster{T, D, E}},
+    hyperparams::AbstractFCHyperparams{T, D},
+    diagnostics::AbstractDiagnostics{T, D};
+    nb_ffjord_am=1, am_safety_probability::T=T(0.05), am_safety_sigma::T=T(0.1),
+    hyperparams_chain=nothing) where {T, D, E}
+
+    
+    if hasnn(hyperparams) && nb_ffjord_am > 0
+        
+        nn_D = size(hyperparams._.nn.params, 1)
+        
         if length(hyperparams_chain) <= 2 * nn_D
 
             step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
@@ -576,7 +588,7 @@ function advance_hyperparams_adaptive!(
         end
 
         for i in 1:nb_ffjord_am
-            advance_ffjord!(rng, clusters, hyperparams, di, step_distrib=step_distrib)
+            advance_ffjord!(rng, clusters, hyperparams, diagnostics, step_distrib=step_distrib)
         end
 
         diagnostics.am.L += 1

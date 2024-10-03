@@ -13,8 +13,10 @@ module FlowingClusters
     using PDMats
     using SpecialFunctions: loggamma, polygamma, logbeta
 
-    using Makie: Figure, Axis, axislegend, lines!, vlines!, hlines!,
-                 hidespines!, hidedecorations!, Cycled, scatter!, hist!
+    using Makie: Figure, Axis, axislegend, Cycled,
+                 lines!, scatter, scatter!, vlines!, hlines!, hist!,
+                 xlims!, ylims!, hidespines!, hidedecorations!
+    import Makie: plot, plot!
 
     using JLD2: jldsave, load
     using ProgressMeter: Progress, ProgressUnknown, next!, finish!
@@ -27,7 +29,6 @@ module FlowingClusters
     using ComponentArrays: ComponentArray
 
     import MCMCDiagnosticTools: ess_rhat
-    import Makie: plot, plot!
 
     include("types/diagnostics.jl")
     export Diagnostics, DiagnosticsFFJORD
@@ -57,6 +58,7 @@ module FlowingClusters
     export log_Zniw, updated_niw_hyperparams, updated_mvstudent_params, log_cluster_weight
 
     include("model/hyperpriors.jl")
+
     include("model/modelprobabilities.jl")
     export logprobgenerative
 
@@ -64,15 +66,16 @@ module FlowingClusters
     export forwardffjord, backwardffjord, reflow
 
     include("sampler.jl")
-    export advance_gibbs!, advance_splitmerge_seq!, advance_hyperparams_adaptive!
-    export advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!
-    export advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
+    export advance_gibbs!, advance_splitmerge_seq!,
+           advance_hyperparams_amwg!, advance_ffjord_nn!,
+           advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!,
+           advance_ffjord!, advance_nn_alpha!, advance_nn_scale!
 
     include("mcmc.jl")
     export advance_chain!, attempt_map!
 
     include("plotting.jl")
-    export plot, plot!
+    export plot, plot!, deformation_figure_2d
 
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
@@ -86,7 +89,7 @@ module FlowingClusters
     export performance_statistics, best_score_threshold
     export drawNIW
     export sqrtsigmoid, sqrttanh, sqrttanhgrow
-    export chunk, chunkslices
+    export chunk, chunkslices, chunkin
     export logdetpsd, logdetflatLL
     export freedmandiaconis, doane
     export project_vec, project_mat
