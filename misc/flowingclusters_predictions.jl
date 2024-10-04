@@ -33,12 +33,12 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
     best_thresh = nothing
     validation_performances = (MCC=-Inf, J=-Inf, kappa=-Inf)
     validation_performances_atthresh = (MCC=-Inf, J=-Inf, kappa=-Inf)
-    best_scoring, best_scoring_atthresh = nothing, nothing
+    best_scoring_method, best_scoring_atthresh = nothing, nothing
     for scoring in [:mean, :median, :modefd, :modedoane]
         __validation_performances = map(x -> round(x, digits=5), performance_statistics(validation_presabs_tailprob_summaries[scoring][validation_presence_mask], validation_presabs_tailprob_summaries[scoring][validation_absence_mask]))
         if __validation_performances[perfstat] > validation_performances[perfstat]
             validation_performances = __validation_performances
-            best_scoring = scoring
+            best_scoring_method = scoring
         end
 
         __best_thresh = best_score_threshold(validation_presabs_tailprob_summaries[scoring][validation_presence_mask], validation_presabs_tailprob_summaries[scoring][validation_absence_mask], statistic=perfstat)
@@ -54,11 +54,11 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
     test_presabs_tailprob_summaries = chain_tailprob_fun(dataset.test.standardize(predictors...)(predictors...))
 
     # Performance of chain predictions
-    test_performances = map(x -> round(x, digits=5), performance_statistics(test_presabs_tailprob_summaries[best_scoring][test_presence_mask], test_presabs_tailprob_summaries[best_scoring][test_absence_mask]))
+    test_performances = map(x -> round(x, digits=5), performance_statistics(test_presabs_tailprob_summaries[best_scoring_method][test_presence_mask], test_presabs_tailprob_summaries[best_scoring_method][test_absence_mask]))
     test_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(test_presabs_tailprob_summaries[best_scoring_atthresh][test_presence_mask], test_presabs_tailprob_summaries[best_scoring_atthresh][test_absence_mask], threshold=best_thresh))
 
     println("FlowingClusters chain performances")
-    println("    Best without threshold: $best_scoring, $perfstat=$(getindex(test_performances, perfstat))")
+    println("    Best without threshold: $best_scoring_method, $perfstat=$(getindex(test_performances, perfstat))")
     println("       Best with threshold: $best_scoring_atthresh, $perfstat=$(getindex(test_performances_atthresh, perfstat))")
 
     return (
@@ -68,21 +68,13 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
         best_map_thresh
     ),
     chain=(;
-        test_performances, 
-        best_scoring,
-        test_performances_atthresh,
+        best_scoring_method,
+        best_scoring_atthresh,
         best_thresh, 
-        best_scoring_atthresh)
+        test_performances, 
+        test_performances_atthresh
+        )
     )
 end
 
-
-###########
-species = :sp1
-predictors = (:BIO1, :BIO12)
-perfstat = :MCC
-dataset = eb
-###########
-
 # fc_perfs = evaluate_flowingclusters(chain, dataset, species, predictors, perfstat, nb_rejection_samples=50_000);
-fc_perfs = evaluate_flowingclusters(chainnn, dataset, species, predictors, perfstat, nb_rejection_samples=50_000);
