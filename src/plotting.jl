@@ -42,6 +42,18 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
         @error("Can't burn the whole chain, burn must be smaller than $N")
     end
 
+    if burn >= 0
+        if 0 < burn < 1
+            burn = round(Int, burn * N)
+        end
+    else
+        if -1 < burn < 0
+            burn = round(Int, -burn * N)
+        else
+            burn = N + burn
+        end
+    end
+
     map_idx = chain.map_idx
 
     function deco!(axis)
@@ -190,7 +202,7 @@ function deformation_figure_2d(clusters, hyperparams, rng=default_rng())
         hidedecorations!(axis, grid=true, minorgrid=true, ticks=false, label=false, ticklabels=false)
         return axis
     end
-    
+
     basespace = Matrix(clusters, orig=false)
     realspace = Matrix(clusters, orig=true)
 
