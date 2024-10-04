@@ -44,6 +44,17 @@ function advance_gibbs!(rng::AbstractRNG, element::E, clusters::AbstractVector{C
     return clusters
 end
 
+function sequential_gibbs!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}; temperature::T=one(T)) where {C <: AbstractCluster{T, D, E}} where {T, D, E}
+    ClusterConstructor = C.name.wrapper
+    elements = shuffle!(rng, availableelements(clusters))
+    new_clusters = C[ClusterConstructor([first(elements)], first(clusters).b2o)]
+    for element in elements[2:end]
+        advance_gibbs!(rng, element, new_clusters, hyperparams, temperature=temperature)
+    end
+    empty!(clusters)
+    append!(clusters, new_clusters)
+    return clusters
+end
 
 function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
 
@@ -73,8 +84,10 @@ function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClu
     log_acceptance += log_hastings
 
     # log_acceptance = min(zero(T), log_acceptance)
+    acceptance = logistic(log_acceptance)
 
-    if log(rand(rng, T)) < log_acceptance
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         hyperparams._.pyp.alpha = proposed_alpha
         diagnostics.accepted.pyp.alpha += 1
     else
@@ -107,8 +120,10 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
         log_acceptance = sum([log_Zniw(c, proposed_mu, lambda, psi, nu) - log_Zniw(EmptyCluster{T, D, E}(), proposed_mu, lambda, psi, nu) - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu) for c in clusters])
 
         # log_acceptance = min(zero(T), log_acceptance)
+        acceptance = logistic(log_acceptance)
 
-        if log(rand(rng, T)) < log_acceptance
+        # if log(rand(rng, T)) < log_acceptance
+        if rand(rng, T) < acceptance
             hyperparams._.niw.mu = proposed_mu
             diagnostics.accepted.niw.mu[k] += 1
         else
@@ -130,12 +145,15 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
 
     log_acceptance = sum([log_Zniw(c, mu, proposed_lambda, psi, nu) - log_Zniw(EmptyCluster{T, D, E}(), mu, proposed_lambda, psi, nu) - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu) for c in clusters])
 
-    # Jeffreys prior over lambda is the logarithmic
-    # prior and moves are symmetric on the log-scale
-    # so the Hastings factor and hyperprior on lambda
-    # cancel each others out.
+    # Hastings factor on log-scale
+    log_acceptance += proposed_loglambda - log(lambda)
 
-    if log(rand(rng, T)) < log_acceptance
+    log_acceptance += log_jeffreys_lambda(proposed_lambda) - log_jeffreys_lambda(lambda)
+
+    acceptance = logistic(log_acceptance)
+
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         hyperparams._.niw.lambda = proposed_lambda
         diagnostics.accepted.niw.lambda += 1
     else
@@ -185,11 +203,13 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
         log_hastings = sum((D:-1:1) .* (log.(abs.(diag(proposed_L))) - log.(abs.(diag(L)))))
         log_acceptance += log_hastings
 
-        log_acceptance += D * (logdetpsd(psi) - logdetpsd(proposed_psi))
+        # log_acceptance += D * (logdetpsd(psi) - logdetpsd(proposed_psi))
+        log_acceptance += log_jeffreys_psi(proposed_psi) - log_jeffreys_psi(psi)
 
-        # log_acceptance = min(zero(T), log_acceptance)
+        acceptance = logistic(log_acceptance)
 
-        if log(rand(rng, T)) < log_acceptance
+        # if log(rand(rng, T)) < log_acceptance
+        if rand(rng, T) < acceptance
             hyperparams._.niw.flatL = proposed_flatL
             diagnostics.accepted.niw.flatL[k] += 1
         else
@@ -224,7 +244,10 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 
     # log_acceptance = min(zero(T), log_acceptance)
 
-    if log(rand(rng, T)) < log_acceptance
+    acceptance = logistic(log_acceptance)
+
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         hyperparams._.niw.nu = proposed_nu
         diagnostics.accepted.niw.nu += 1
     else
@@ -256,7 +279,10 @@ function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     log_acceptance += log_nn_prior(nn_params, proposed_nn_alpha, nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
     log_acceptance += log_jeffreys_nn(proposed_nn_alpha, nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
-    if log(rand(rng, T)) < log_acceptance
+    acceptance = logistic(log_acceptance)
+
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         hyperparams._.nn.prior.alpha = proposed_nn_alpha
         diagnostics.accepted.nn.prior.alpha += 1
     else
@@ -287,7 +313,10 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     log_acceptance += log_nn_prior(nn_params, nn_alpha, proposed_nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
     log_acceptance += log_jeffreys_nn(nn_alpha, proposed_nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
-    if log(rand(rng, T)) < log_acceptance
+    acceptance = logistic(log_acceptance)
+
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         hyperparams._.nn.prior.scale = proposed_nn_scale
         diagnostics.accepted.nn.prior.scale += 1
     else
@@ -323,7 +352,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
     cj = rand(rng, Categorical(clusterprob))
     ej = rand(rng, collect(clusters[cj]))
     @assert pop!(clusters[cj], ej) === ej
-    
+
     if ci == cj
 
         scheduled_elements = E[e for e in clusters[ci] if !(e === ei) && !(e === ej)]
@@ -336,7 +365,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
     elseif ci != cj
 
         scheduled_elements = E[e for cl in C[clusters[ci], clusters[cj]] for e in cl if !(e === ei) && !(e === ej)]
-        
+
         # Isolate the current split state
         current_state = C[push!(clusters[ci], ei), push!(clusters[cj], ej)]
         # and remove it from the current partition
@@ -383,7 +412,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
         #         # keep log_q as the transition probability
         #         # to the launch state, i.e.
         #         # q(launch|proposed) = q(launch|launch-1)
-                
+
         #         # launch_state = proposed_state
         #         append!(launch_state, proposed_state)
         #         break
@@ -391,7 +420,7 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
         # end
 
         log_q = zero(T)
- 
+
         for el in shuffle!(rng, scheduled_elements)
 
             # Does nothing during first, sequential step
@@ -410,10 +439,24 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
                             log_cluster_weight(el, split_state[2], alpha, mu, lambda, psi, nu)]
 
             if temperature > 0
-                unnorm_logp = log_weights / T(temperature)
-                norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
-                new_assignment = rand(rng, Categorical(exp.(norm_logp)))
-                log_q += norm_logp[new_assignment]
+                try
+                    unnorm_logp = log_weights / T(temperature)
+                    norm_logp = unnorm_logp .- logsumexp(unnorm_logp)
+                    new_assignment = rand(rng, Categorical(exp.(norm_logp)))
+                    log_q += norm_logp[new_assignment]
+                catch e
+                    println("el=$el")
+                    println("alpha=$alpha")
+                    println("mu=$mu")
+                    println("lambda=$lambda")
+                    println("psi=$psi")
+                    println("nu=$nu")
+                    println("cl1=$(length(split_state[1])) cl2=$(length(split_state[2]))")
+                    println("log_weights=$log_weights")
+                    println(unnorm_logp)
+                    println(norm_logp)
+                    throw(e)
+                end
             elseif temperature <= 0
                 _, new_assignment = findmax(log_weights)
                 log_q += 0 # symbolic, transition is certain
@@ -443,13 +486,13 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
         proposed_state = split_state
     end
 
-    
+
     if temperature > 0
 
         log_acceptance = (logprobgenerative(proposed_state, hyperparams, ignorehyperpriors=true, ignoreffjord=true)
                         - logprobgenerative(current_state, hyperparams, ignorehyperpriors=true, ignoreffjord=true))
         log_acceptance /= T(temperature)
-    
+
         # Hastings factor
         if ci != cj
             #   q(proposed | current) / q(current | proposed)
@@ -464,13 +507,15 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
         end
 
     elseif temperature <= 0
-       
-        log_acceptance = zero(T)
-    
+
+        log_acceptance = T(Inf)
+
     end
 
+    acceptance = logistic(log_acceptance)
 
-    if log(rand(rng, T)) < log_acceptance
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         append!(clusters, proposed_state)
         if ci != cj
             diagnostics.accepted.splitmerge.merge += 1
@@ -496,7 +541,8 @@ function advance_ffjord!(
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    step_distrib) where {T, D, E}
+    step_distrib::Distribution{Multivariate, Continuous},
+    temperature=one(T)) where {T, D, E}
 
     hasnn(hyperparams) && !isnothing(step_distrib) || return hyperparams
 
@@ -515,7 +561,12 @@ function advance_ffjord!(
 
     log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
 
-    if log(rand(rng, T)) < log_acceptance
+    log_acceptance /= T(temperature)
+    
+    acceptance = logistic(log_acceptance)
+
+    # if log(rand(rng, T)) < log_acceptance
+    if rand(rng, T) < acceptance
         empty!(clusters)
         append!(clusters, proposed_clusters)
         hyperparams._ .= proposed_hparray
@@ -547,11 +598,11 @@ function advance_hyperparams_amwg!(
         advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL))
         advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
         if hasnn(hyperparams)
-            # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
-            # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
+            advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
+            advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
         end
     end
-    
+
     di.amwg.nbbatches += 1
 
     adjust_amwg_logscales!(di, acceptance_target=acceptance_target)
@@ -560,19 +611,20 @@ function advance_hyperparams_amwg!(
 
 end
 
-function advance_ffjord_am!(
+function advance_adaptive!(
     rng::AbstractRNG,
     clusters::Vector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
     nb_ffjord_am=1, am_safety_probability::T=T(0.05), am_safety_sigma::T=T(0.1),
-    hyperparams_chain=nothing) where {T, D, E}
+    hyperparams_chain=nothing, 
+    temperature=one(T)) where {T, D, E}
 
-    
+
     if hasnn(hyperparams) && nb_ffjord_am > 0
-        
+
         nn_D = size(hyperparams._.nn.params, 1)
-        
+
         if length(hyperparams_chain) <= 2 * nn_D
 
             step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
@@ -588,7 +640,7 @@ function advance_ffjord_am!(
         end
 
         for i in 1:nb_ffjord_am
-            advance_ffjord!(rng, clusters, hyperparams, diagnostics, step_distrib=step_distrib)
+            advance_ffjord!(rng, clusters, hyperparams, diagnostics, step_distrib=step_distrib, temperature=temperature)
         end
 
         diagnostics.am.L += 1
@@ -600,39 +652,6 @@ function advance_ffjord_am!(
     return hyperparams
 
 end
-
-
-# function advance_gibbs!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}; temperature::T=one(T)) where {T, D, E}
-#     return advance_gibbs!(default_rng(), clusters, hyperparams, temperature=temperature)
-# end
-# function advance_splitmerge_seq!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T)) where {T, D, E}
-#     return advance_splitmerge_seq!(default_rng(), clusters, hyperparams, diagnostics, t=t, temperature=temperature)
-# end
-
-# function advance_alpha!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
-#     return advance_alpha!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
-# end
-# function advance_mu!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::Vector{T}=fill(1/10, D), random_order=true) where {T, D, E}
-#     return advance_mu!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize, random_order=random_order)
-# end
-# function advance_lambda!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)/10) where {T, D, E}
-#     return advance_lambda!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
-# end
-# function advance_psi!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::Vector{T}=fill(1/10, div(D * (D + 1), 2)), random_order=true) where {T, D, E}
-#     return advance_psi!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize, random_order=random_order)
-# end
-# function advance_nu!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
-#     return advance_nu!(default_rng(), clusters, hyperparams, diagnostics, stepsize=stepsize)
-# end
-# function advance_nn_alpha!(hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
-#     return advance_nn_alpha!(default_rng(), hyperparams, diagnostics, stepsize=stepsize)
-# end
-# function advance_nn_scale!(hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
-#     return advance_nn_scale!(default_rng(), hyperparams, diagnostics, stepsize=stepsize)
-# end
-# function advance_ffjord!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; step_distrib=nothing) where {T, D, E}
-#     return advance_ffjord!(default_rng(), clusters, hyperparams, diagnostics, step_distrib=step_distrib)
-# end
 
 function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=one(T)e-10) where T
     sigma = (xx - x * x' / L) / (L - 1)

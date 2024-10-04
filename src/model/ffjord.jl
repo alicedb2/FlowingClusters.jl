@@ -76,7 +76,7 @@ function backwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::A
 end
 
 function reflow(rng::AbstractRNG, clusters::AbstractVector{SetCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple) where {T, D, E}
-    
+
     cluster_sizes = length.(clusters)
     base2original = first(clusters).b2o
     @assert all([base2original === c.b2o for c in clusters])
@@ -93,10 +93,10 @@ end
 
 function reflow(rng::AbstractRNG, clusters::AbstractVector{BitCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple) where {T, D, E}
     base2original = first(clusters).b2o    
-    
+
     _, deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray, ffjord)
-    
+
     new_base2original = cat(new_basedata, base2original[:, :, O], dims=3)
-    
+
     return (clusters=[BitCluster(cluster.mask, new_base2original) for cluster in clusters], deltalogpxs=deltalogpxs)
 end

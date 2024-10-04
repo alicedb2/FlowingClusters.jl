@@ -6,10 +6,11 @@ module FlowingClusters
     using LinearAlgebra
     using StaticArrays: SVector
 
-    using Distributions: MvNormal, MvTDist, InverseWishart, Normal,
+    using Distributions: logpdf, Distribution, Multivariate, Continuous,
+                         MvNormal, MvTDist, InverseWishart, Normal,
                          Cauchy, Uniform, Exponential, Dirichlet,
                          Multinomial, Beta, MixtureModel, Categorical,
-                         Distribution, logpdf, InverseGamma
+                         InverseGamma
     using PDMats
     using SpecialFunctions: loggamma, polygamma, logbeta
 
@@ -47,7 +48,7 @@ module FlowingClusters
     export availableelements, allelements
 
     include("types/chain.jl")
-    export FCChain
+    export FCChain, burn!
     export logprob_chain, nbclusters_chain, largestcluster_chain
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain
     export nn_chain, nn_alpha_chain, nn_scale_chain
@@ -66,7 +67,7 @@ module FlowingClusters
     export forwardffjord, backwardffjord, reflow
 
     include("sampler.jl")
-    export advance_gibbs!, advance_splitmerge_seq!,
+    export advance_gibbs!, sequential_gibbs!, advance_splitmerge_seq!,
            advance_hyperparams_amwg!, advance_ffjord_nn!,
            advance_alpha!, advance_mu!, advance_lambda!, advance_psi!, advance_nu!,
            advance_ffjord!, advance_nn_alpha!, advance_nn_scale!

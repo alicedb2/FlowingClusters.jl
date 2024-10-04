@@ -41,7 +41,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
                             flatL=unfold(LowerTriangular{T}(I(D))),
                             nu=T(D + 1)),
                         nn=(params=nn_params,
-                            prior=(alpha=T(1), scale=T(10))
+                            prior=(alpha=T(1), scale=T(1))
                             )
                         ),
                     (nn=nn, nns=nn_state)

@@ -99,7 +99,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
     deco!(logprob_axis)
     lines!(logprob_axis, burn+1:N, lpc, label=nothing)
     hlines!(logprob_axis, [maximum(chain.logprob_chain)], label=nothing, color=:black)
-    hlines!(logprob_axis, [chain.map_logprob], label=nothing, color=:green)
+    # hlines!(logprob_axis, [chain.map_logprob], label=nothing, color=:green)
     if map_idx > 0
         vlines!(logprob_axis, [map_idx], label=nothing, color=:green)
     end

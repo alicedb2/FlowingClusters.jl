@@ -31,15 +31,17 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                                     splitper=0, mergeper=0
                                     )
                     )
+
         amwg = ComponentArray{T}(
-                    nbbatches=zero(T),
-                    logscales=(pyp=(alpha=zero(T),),# sigma=zero(T)),
-                               niw=(mu=zeros(T, D),
-                                    lambda=zero(T),
-                                    flatL=zeros(T, sizeflatL),
-                                    nu=zero(T))
-                              )
-                    )
+                nbbatches=zero(T),
+                logscales=(pyp=(alpha=zero(T),),# sigma=zero(T)),
+                            niw=(mu=zeros(T, D),
+                                lambda=zero(T),
+                                flatL=zeros(T, sizeflatL),
+                                nu=zero(T))
+                            )
+                )
+
         return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg)
     else
         am_x = zeros(T, size(nn_params, 1))
@@ -68,7 +70,8 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                                        ),
                                nn=(params=zero(T),
                                    prior=(alpha=zero(T),
-                                          scale=zero(T))
+                                          scale=zero(T)
+                                          )
                                 )
                             )
                     )

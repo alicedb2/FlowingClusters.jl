@@ -124,10 +124,15 @@ function FCChain(
         )
 
     println("    Initializing clusters...")
-    if strategy == :hot
+    if strategy == :hot || strategy isa Float64
         push!(chain.clusters, cluster_type(initial_elements, base2original))
+        if strategy == :hot
+            temperature = 1.6
+        else
+            temperature = strategy
+        end
         for i in 1:10
-            advance_gibbs!(rng, chain.clusters, chain.hyperparams, temperature=2.0)
+            advance_gibbs!(rng, chain.clusters, chain.hyperparams, temperature=temperature)
         end
     elseif strategy == :N
         append!(chain.clusters, [cluster_type(el, base2original) for el in initial_elements])
@@ -196,6 +201,10 @@ nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p
 
 function burn!(chain::FCChain, n::Int64=0; burn_map=false)
 
+    if n < 0
+        n = length(chain.logprob_chain) + n
+    end
+
     if n >= length(chain.logprob_chain)
         @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
     end
@@ -213,7 +222,7 @@ function burn!(chain::FCChain, n::Int64=0; burn_map=false)
             chain.map_clusters = deepcopy(chain.clusters)
             chain.map_hyperparams = deepcopy(chain.hyperparams)
             chain.map_base2original = deepcopy(chain.base2original)
-            chain.map_logprob = logprobgenerative(chain.map_clusters, chain.map_hyperparams, chain.map_base2original, ffjord=true)
+            chain.map_logprob = logprobgenerative(chain.map_clusters, chain.map_hyperparams, chain.rng)
             chain.map_idx = length(chain.logprob_chain)
         else
             chain.map_idx -= n

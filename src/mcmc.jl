@@ -1,7 +1,6 @@
 function advance_chain!(chain::FCChain, nb_steps=100;
     nb_gibbs=1, nb_splitmerge=30, splitmerge_t=3,
-    nb_hyperparams_amwg=1, amwg_batch_size=50,
-    nb_ffjord_am=1, 
+    nb_amwg=1, amwg_batch_size=50, nb_ffjord_am=1, ffjord_am_temperature=1.0,
     sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
     attempt_map=true, pretty_progress=:repl)
@@ -48,7 +47,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     for step in 1:_nb_steps
 
-        for i in 1:nb_hyperparams_amwg
+        for i in 1:nb_amwg
             advance_hyperparams_amwg!(
                 chain.rng, 
                 chain.clusters, 
@@ -58,12 +57,12 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         end
 
         for i in 1:nb_ffjord_am
-            advance_ffjord_am!(
+            advance_adaptive!(
                 chain.rng, 
                 chain.clusters,
                 chain.hyperparams,
                 chain.diagnostics,
-                nb_ffjord_am=nb_ffjord_am, 
+                nb_ffjord_am=nb_ffjord_am, temperature=ffjord_am_temperature,
                 hyperparams_chain=chain.hyperparams_chain
                 )
         end
@@ -123,16 +122,16 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         map_success = false # try block has its own scope
 
         if logprob > logp_quantile95 && attempt_map
-                nb_map_attemps += 1
-                try
-                    map_success = attempt_map!(chain, max_nb_pushes=20, verbose=false, optimize_hyperparams=false)
-                catch e
-                    throw(e)
-                    map_success = false
-                end
+            nb_map_attemps += 1
+            try
+                map_success = attempt_map!(chain, max_nb_pushes=20, verbose=false, optimize_hyperparams=false)
+            catch e
+                throw(e)
+                map_success = false
+            end
 
-                nb_map_successes += map_success
-                last_map_idx = chain.map_idx
+            nb_map_successes += map_success
+            last_map_idx = chain.map_idx
         end
 
         sample_eta = -1
@@ -203,11 +202,11 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if pretty_progress === :repl || pretty_progress === :file || pretty_progress
             next!(progbar;
             showvalues=[
-            (:"step (#gibbs, #splitmerge, #awmg, #ffjord_am)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_hyperparams_amwg, $nb_ffjord_am)"),
+            (:"step (#gibbs, #splitmerge, #amwg, #ffjordam)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $nb_ffjord_am)"),
             (:"chain length", "$(length(chain))"),
             (:"conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
             (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (trimmed if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
-            (:"logprob (max, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
+            (:"logprob (best, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
             (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
             (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
             (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
@@ -235,7 +234,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             flush(stdout)
         end
 
-        if stop_criterion === :sample_ess
+        if !isnothing(sample_every) && (stop_criterion === :sample_ess)
             if (chain.samples_idx.length >= chain.samples_idx.capacity
                 && samples_convergence.ess >= chain.samples_idx.capacity)
                 break
@@ -261,7 +260,7 @@ function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=fal
 
     map_clusters_attempt = deepcopy(chain.clusters)
     map_hyperparams = deepcopy(chain.hyperparams)
-    
+
     # Greedy Gibbs!
     # We only use Gibbs moves in the base space 
     # to construct an approximate MAP state so both

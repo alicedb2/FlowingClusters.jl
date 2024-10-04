@@ -56,7 +56,7 @@ function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:Abstract
     if hpa.nn.prior.alpha <= 0 || hpa.nn.prior.scale <= 0
         return -Inf
     end
-    
+
     logprob_noffjord = logprobgenerative(clusters, hyperparamsarray; ignorehyperpriors=ignorehyperpriors)
 
     if !isfinite(logprob_noffjord)

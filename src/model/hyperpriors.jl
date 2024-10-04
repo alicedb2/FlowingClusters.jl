@@ -5,6 +5,26 @@ function log_jeffreys_crp_alpha(alpha::T, n::Int) where T
 
 end
 
+# Funky stuff happens sometimes where lambda
+# shoots up to very large values when you have
+# clusters with only 1 element and it screws
+# up the computation of log_cluster_weight
+# and logprobgenerative. This is a quick fix,
+# I don't like it but it works. I don't think
+# it should be happening.
+function log_jeffreys_lambda(lambda::T) where T
+    loglambda = log(abs(lambda))
+    if loglambda > log(1000)
+        return -Inf
+    end
+    return -loglambda
+end
+
+function log_jeffreys_psi(psi::AbstractMatrix{T}) where T
+    D = size(psi, 1)
+    return -D * logdetpsd(psi)
+end
+
 # Very cute as well!
 function log_jeffreys_nu(nu::T, d::Int) where T
 
@@ -13,8 +33,9 @@ function log_jeffreys_nu(nu::T, d::Int) where T
 end
 
 function log_nn_prior(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
-    return zero(T)
-    
+
+    # return zero(T)
+
     # Stable t-distribution of index alpha on weights of last hidden layer.
     # (Neal - 1996 - Bayesian Learning for Neural Networks)
 
@@ -48,7 +69,7 @@ end
 # Bivariate Jeffreys prior of scaled t-distribution, how neat is that!
 function log_jeffreys_t(alpha::T, scale::T) where T
     # Otherwise weird stuff happens with polygamma
-    if alpha < 10000
+    if alpha < 10000# && scale < 10000
         # Just for fun the 2.0984 is the normalization 
         # constant of the alpha part of the Jeffreys
         # prior which is independent of the improper scale part
