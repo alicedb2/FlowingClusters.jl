@@ -4,7 +4,6 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
 
     # MAP and chain summary prediction functions
     map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams)
-    chain_tailprob_fun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
 
     # MAP predictions on validation set to find best threshold
     validation_map_presabs_tailprobs = map_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
@@ -28,6 +27,8 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
 
     if chain.clusters_samples.length >= 2
         # Chain predictions on validation set
+        chain_tailprob_fun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
+
         validation_presabs_tailprob_summaries = chain_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
 
         # Find best scoring and threshold using validation set
