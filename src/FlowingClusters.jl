@@ -41,7 +41,7 @@ module FlowingClusters
     export perturb!
 
     include("types/cluster.jl")
-    export BitCluster, SetCluster
+    export BitCluster, SetCluster, IndexCluster
     export project_cluster, project_clusters
     export isvalidpartition, iscompletepartition
     export pop!, push!, find

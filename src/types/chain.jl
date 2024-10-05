@@ -58,7 +58,7 @@ end
 
 function FCChain(
     data::AbstractVector{<:AbstractVector{T}},
-    cluster_type::Type{C}=BitCluster;
+    cluster_type::Type{C}=SetCluster;
     nb_samples=200,
     strategy=:sequential,
     optimize=false,
@@ -100,7 +100,8 @@ function FCChain(
         element_type = SVector{D, T}
         base2original = Dict{SVector{D, T}, SVector{D, T}}(collect.(base_data) .=> collect.(unique_data))
         initial_elements = [SVector{D, T}(el) for el in base_data]
-    elseif cluster_type === BitCluster
+    elseif (cluster_type === BitCluster) ||
+           (cluster_type === IndexCluster)
         element_type = Int
         base2original = cat(reduce(hcat, base_data), reduce(hcat, unique_data), dims=3)
         initial_elements = collect(1:length(base_data))
@@ -199,14 +200,21 @@ nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{FCHyperparams}}, burn=0) =
 nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
 nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
 
-function burn!(chain::FCChain, n::Int64=0; burn_map=false)
+function burn!(chain::FCChain, n=0; burn_map=false)
 
+    # n given as a proportion of the chain length
+    if (n isa Float) && (-1 < n < 1)
+        n = round(Int, n * length(chain))
+    end
+
+    # if n is negative, burn from the end
     if n < 0
         n = length(chain.logprob_chain) + n
     end
 
     if n >= length(chain.logprob_chain)
         @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
+        return chain
     end
 
     if n > 0
@@ -243,6 +251,7 @@ function ess_rhat(chain::FCChain, burn=0)
     N = length(chain.hyperparams_chain)
     if burn >= N
         @error("Can't burn the whole chain, n must be smaller than $N")
+        return nothing
     end
     N -= burn
 

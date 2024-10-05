@@ -40,6 +40,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
 
     if burn >= N
         @error("Can't burn the whole chain, burn must be smaller than $N")
+        return nothing
     end
 
     if burn >= 0
@@ -196,6 +197,11 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
 end
 
 function deformation_figure_2d(clusters, hyperparams, rng=default_rng())
+
+    if !hasnn(hyperparams)
+        @error("Hyperparameters do not contain a FFJORD neural network")
+        return nothing
+    end
 
     function _deco!(axis)
         hidespines!(axis, :t, :r)

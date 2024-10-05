@@ -41,7 +41,11 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
                             flatL=unfold(LowerTriangular{T}(I(D))),
                             nu=T(D + 1)),
                         nn=(params=nn_params,
-                            prior=(alpha=T(1), scale=T(1))
+                            # "Almost logarithmic" hyperprior
+                            # on the weights of the neural network
+                            # The effectice scale is sqrt(alpha)*scale
+                            # in this case ~ 9.5
+                            prior=(alpha=T(0.001), scale=T(300))
                             )
                         ),
                     (nn=nn, nns=nn_state)
@@ -50,6 +54,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
 end
 
 datadimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
+datadimension(::ComponentArray) = size(hyperparamsarray.niw.mu, 1)
 
 function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
     dim = size(hyperparams._, 1)
@@ -68,7 +73,7 @@ backtransform(transformedhparray::ComponentArray) = backtransform!(copy(transfor
 function transform!(hparray::ComponentArray)
     hparray.pyp.alpha = log(hparray.pyp.alpha)
     hparray.niw.lambda = log(hparray.niw.lambda)
-    hparray.niw.nu = log(hparray.niw.nu - size(hparray.niw.mu, 1) + 1)
+    hparray.niw.nu = log(hparray.niw.nu - datadimension(hparray) + 1)
     if hasnn(hparray)
         hparray.nn.prior.alpha = log(hparray.nn.prior.alpha)
         hparray.nn.prior.scale = log(hparray.nn.prior.scale)
@@ -79,7 +84,7 @@ end
 function backtransform!(transformedhparray::ComponentArray)
     transformedhparray.pyp.alpha = exp(transformedhparray.pyp.alpha)
     transformedhparray.niw.lambda = exp(transformedhparray.niw.lambda)
-    transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + size(transformedhparray.niw.mu, 1) - 1
+    transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + datadimension(transformedhparray) - 1
     if hasnn(transformedhparray)
         transformedhparray.nn.prior.alpha = exp(transformedhparray.nn.prior.alpha)
         transformedhparray.nn.prior.scale = exp(transformedhparray.nn.prior.scale)

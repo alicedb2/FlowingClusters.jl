@@ -141,11 +141,14 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if sample_every !== nothing
             if sample_every === :autocov
                 if length(chain) >= start_sampling_at
-                    convergence_burnt = ess_rhat(largestcluster_chain(chain)[div(end, 2):end])
-                    latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
                     curr_idx = length(chain)
-                    sample_eta = floor(Int64, latest_sample_idx + 2 * div(curr_idx, 2) / convergence_burnt.ess + 1 - curr_idx)
-                    if curr_idx - latest_sample_idx > 2 * div(curr_idx, 2) / convergence_burnt.ess
+                    # Consider only the last half of the chain
+                    burnt_starting_point = floor(Int, 0.5 * curr_idx)
+                    convergence_burnt = ess_rhat(largestcluster_chain(chain)[burnt_starting_point:end])
+                    latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
+                    next_sample_idx = ceil(Int64, latest_sample_idx + 2 * burnt_starting_point / convergence_burnt.ess)
+                    sample_eta = next_sample_idx + 1 - curr_idx
+                    if curr_idx > next_sample_idx
                         push!(chain.clusters_samples, deepcopy(chain.clusters))
                         push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
                         push!(chain.samples_idx, curr_idx)
