@@ -23,9 +23,11 @@ function performance_statistics(scores_at_presences, scores_at_absences; thresho
     kappa = 2 * (tp * tn - fn * fp)/((tp + fp) * (fp + tn) + (tp + fn) * (fn + tn))
     ppv = tp / (tp + fp)
     npv = tn / (tn + fn)
+    Jaccard = tp / (tp + fp + fn)
+    F1 = 2 * tp / (2 * tp + fp + fn)
 
     return (;
-            MCC, J, kappa,
+            MCC, J, kappa, Jaccard, F1,
             sensitivity, specificity,
             ppv, npv,
             tp, tn, fp, fn
@@ -39,7 +41,7 @@ function best_score_threshold(scores_at_presences, scores_at_absences; statistic
     best_score = -Inf
     best_thresh = 0.0
 
-    statistic in [:J, :MCC, :kappa] || throw(ArgumentError("perfscore must be :J (Youden's J), :MCC (Matthew's correlation coefficient), or :kappa (Cohen's kappa)"))
+    statistic in [:J, :MCC, :kappa, :jaccord] || throw(ArgumentError("perfscore must be :J (Youden's J), :MCC (Matthew's correlation coefficient), or :kappa (Cohen's kappa)"))
 
     for thresh in thresholds
         perfstats = performance_statistics(scores_at_presences, scores_at_absences, threshold=thresh)
