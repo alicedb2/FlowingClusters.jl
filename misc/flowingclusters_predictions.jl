@@ -25,7 +25,7 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
     println("       MAP with threshold: $perfstat=$(getindex(test_map_performances_atthresh, perfstat))")
     println()
 
-    if chain.clusters_samples.length >= 2
+    if chain.clusters_samples.length >= 3
         # Chain predictions on validation set
         chain_tailprob_fun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
 
@@ -77,6 +77,7 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
                 )
             )
     else
+        @info "Chain has less than 3 samples, can't evaluate its performance yet"
         return (
             MAP=(;
                 test_map_performances, 
