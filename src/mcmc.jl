@@ -57,13 +57,13 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         end
 
         for i in 1:nb_ffjord_am
-            advance_adaptive!(
+            advance_ffjord_am!(
                 chain.rng, 
                 chain.clusters,
                 chain.hyperparams,
                 chain.diagnostics,
-                nb_ffjord_am=nb_ffjord_am, temperature=ffjord_am_temperature,
-                hyperparams_chain=chain.hyperparams_chain
+                iteration=length(chain),
+                temperature=ffjord_am_temperature,
                 )
         end
 
@@ -205,10 +205,10 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if pretty_progress === :repl || pretty_progress === :file || pretty_progress
             next!(progbar;
             showvalues=[
-            (:"step (#gibbs, #splitmerge, #amwg, #ffjordam)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $nb_ffjord_am)"),
+            (:"step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $nb_ffjord_am@$(round(ffjord_am_temperature, digits=1)))"),
             (:"chain length", "$(length(chain))"),
             (:"conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
-            (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (trimmed if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
+            (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (drop if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
             (:"logprob (best, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
             (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
             (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
@@ -237,9 +237,13 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             flush(stdout)
         end
 
-        if !isnothing(sample_every) && (stop_criterion === :sample_ess)
-            if (chain.samples_idx.length >= chain.samples_idx.capacity
-                && samples_convergence.ess >= chain.samples_idx.capacity)
+        if !isnothing(sample_every) && 
+            (stop_criterion === :sample_ess)
+            # Once we have enough samples
+            # stop once the ess of the samples
+            # is high enough (90% of the buffer)
+            if (chain.samples_idx.length == chain.samples_idx.capacity) &&
+               (samples_convergence.ess >= 0.9 * chain.samples_idx.capacity)
                 break
             end
         end

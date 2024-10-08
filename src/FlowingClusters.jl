@@ -2,7 +2,7 @@ module FlowingClusters
 
     using Random: randperm, shuffle, shuffle!, seed!, MersenneTwister, Xoshiro, AbstractRNG, default_rng
     using StatsBase
-    using StatsFuns: logsumexp, logmvgamma, logit, logistic
+    using StatsFuns: logsumexp, logmvgamma, logit, logistic, log1pexp
     using LinearAlgebra
     using StaticArrays: SVector
 

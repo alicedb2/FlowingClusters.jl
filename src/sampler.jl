@@ -536,18 +536,31 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 end
 
 
-function advance_ffjord!(
+function advance_ffjord_am!(
     rng::AbstractRNG,
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    step_distrib::Distribution{Multivariate, Continuous},
+    am_safety_probability::T=T(0.05), 
+    am_safety_sigma::T=T(0.1),
+    iteration=0,
+    # step_distrib::Distribution{Multivariate, Continuous},
     temperature=one(T)) where {T, D, E}
 
-    hasnn(hyperparams) && !isnothing(step_distrib) || return hyperparams
+    !hasnn(hyperparams) && return hyperparams
+
+    nn_D = size(hyperparams._.nn.params, 1)
+
+    if iteration <= 2 * nn_D
+        step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
+    else
+        safety_component = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
+        empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma(diagnostics))
+        step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
+    end
 
     proposed_hparray = copy(hyperparams._)
-    proposed_hparray.nn.params .= proposed_hparray.nn.params .+ rand(rng, step_distrib)
+    proposed_hparray.nn.params .+= rand(rng, step_distrib)
 
     proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
 
@@ -574,6 +587,10 @@ function advance_ffjord!(
     else
         diagnostics.rejected.nn.params += 1
     end
+
+    diagnostics.am.L += 1
+    diagnostics.am.x .+= hyperparams._.nn.params
+    diagnostics.am.xx .+= hyperparams._.nn.params * hyperparams._.nn.params'
 
     return hyperparams
 
@@ -626,16 +643,10 @@ function advance_adaptive!(
         nn_D = size(hyperparams._.nn.params, 1)
 
         if length(hyperparams_chain) <= 2 * nn_D
-
             step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-
         else
-
-            nn_sigma = am_sigma(diagnostics)
-
             safety_component = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-            empirical_estimate_component = MvNormal(2.38^2 / nn_D * nn_sigma)
-
+            empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma(diagnostics))
             step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
         end
 
@@ -653,7 +664,7 @@ function advance_adaptive!(
 
 end
 
-function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=one(T)e-10) where T
+function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=T(1e-6)) where T
     sigma = (xx - x * x' / L) / (L - 1)
     if correction
         sigma = (sigma + sigma') / 2 + eps * I

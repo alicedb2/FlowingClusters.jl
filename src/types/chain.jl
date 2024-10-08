@@ -73,11 +73,15 @@ function FCChain(
     elseif seed isa Int
         rng = MersenneTwister(seed)
     else
-        throw(ArgumentError("seed must be an AbstractRNG, an Int, or nothing"))
+        @error("seed must be an AbstractRNG, an Int, or nothing")
+        return nothing
     end
 
     D = length(first(data))
-    all(length.(data) .== D) || throw(ArgumentError("All data points must have the same length"))
+    if !all(length.(data) .== D)
+        @error("All data points must have the same length")
+        return nothing
+    end
 
     hyperparams = FCHyperparams(T, D, ffjord_nn, rng=rng)
     hyperparams._.pyp.alpha = 10.0 / log(length(data))
@@ -106,7 +110,8 @@ function FCChain(
         base2original = cat(reduce(hcat, base_data), reduce(hcat, unique_data), dims=3)
         initial_elements = collect(1:length(base_data))
     else
-        throw(ArgumentError("Cluster must be of type SetCluster or BitCluster"))
+        @error("Cluster must be of type SetCluster, BitCluster, or IndexCluster")
+        return nothing
     end
 
     clusters_samples = CircularBuffer{Vector{cluster_type{T, D, element_type}}}(nb_samples)
@@ -141,7 +146,7 @@ function FCChain(
         append!(chain.clusters, [cluster_type(chunk, base2original) for chunk in chunkin(initial_elements, strategy)])
     elseif strategy == :sequential
         push!(chain.clusters, cluster_type(initial_elements[1], base2original))
-        for (i, element) in enumerate(initial_elements[2:end])
+        for element in initial_elements[2:end]
             advance_gibbs!(rng, element, chain.clusters, chain.hyperparams)
         end
     end
@@ -193,9 +198,9 @@ logprob_chain(chain::FCChain, burn=0) = chain.logprob_chain[burn+1:end]
 nbclusters_chain(chain::FCChain, burn=0) = chain.nbclusters_chain[burn+1:end]
 largestcluster_chain(chain::FCChain, burn=0) = chain.largestcluster_chain[burn+1:end]
 
-nn_chain(chain::Vector{FCHyperparams}, burn=0) = [p._.nn.params for p in chain[burn+1:end]]
+nn_chain(chain::Vector{FCHyperparamsFFJORD}, burn=0) = [p._.nn.params for p in chain[burn+1:end]]
 nn_chain(chain::FCChain, burn=0) = [p._.nn.params for p in chain.hyperparams_chain[burn+1:end]]
-nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{FCHyperparams}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
+nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{FCHyperparamsFFJORD}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
 
 nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
 nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
@@ -203,7 +208,7 @@ nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p
 function burn!(chain::FCChain, n=0; burn_map=false)
 
     # n given as a proportion of the chain length
-    if (n isa Float) && (-1 < n < 1)
+    if (n isa Float64) && (-1 < n < 1)
         n = round(Int, n * length(chain))
     end
 
@@ -256,8 +261,8 @@ function ess_rhat(chain::FCChain, burn=0)
     N -= burn
 
     d = datadimension(chain.hyperparams)
-    flatL_d = size(chain.hyperparams.flatL, 1)
-    nn_D = chain.hyperparams.nn_params !== nothing ? size(chain.hyperparams.nn_params, 1) : 0
+    flatL_d = size(chain.hyperparams._.niw.flatL, 1)
+    nn_D = hasnn(chain.hyperparams) ? size(chain.hyperparams._.nn.params, 1) : 0
 
     return (;
     alpha = ess_rhat(alpha_chain(chain, burn)),

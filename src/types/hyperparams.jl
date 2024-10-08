@@ -34,6 +34,9 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
         nn_params = ComponentArray{T}(nn_params)
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
 
+        nnalpha = 0.001
+        effscale = 30.0
+
         return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
                         pyp=(alpha=T(7.77),),# sigma=0.0),
                         niw=(mu=zeros(T, D),
@@ -45,7 +48,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
                             # on the weights of the neural network
                             # The effectice scale is sqrt(alpha)*scale
                             # in this case ~ 9.5
-                            prior=(alpha=T(0.001), scale=T(300))
+                            prior=(alpha=T(nnalpha), scale=T(effscale/sqrt(nnalpha)))
                             )
                         ),
                     (nn=nn, nns=nn_state)

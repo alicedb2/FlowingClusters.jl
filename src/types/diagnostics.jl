@@ -44,9 +44,12 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
 
         return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg)
     else
-        am_x = zeros(T, size(nn_params, 1))
-        am_xx = zeros(T, size(nn_params, 1), size(nn_params, 1))
-
+        nn_D = size(nn_params, 1)
+        am_x = zeros(T, nn_D)
+        am_xx = zeros(T, nn_D, nn_D)
+        # am_mu = zeros(T, nn_D)
+        # am_sigma = 
+        
         accepted = ComponentArray{Int}(
                         pyp=(alpha=0,),# , sigma=0),
                         niw=(mu=zeros(D),

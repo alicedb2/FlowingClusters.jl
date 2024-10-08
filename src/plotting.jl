@@ -196,7 +196,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
     return fig
 end
 
-function deformation_figure_2d(clusters, hyperparams, rng=default_rng())
+function deformation_figure_2d(clusters, hyperparams; rng=default_rng(), t=T(1))
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -225,8 +225,8 @@ function deformation_figure_2d(clusters, hyperparams, rng=default_rng())
     realprobgridxs = reduce(hcat, [[x, y] for y in LinRange(realylims..., 10), x in LinRange(realxlims..., _nbpoints)])
     realprobgrid = hcat(realprobgridxs, realprobgridys)
 
-    _, _, basespace = forwardffjord(rng, realprobgrid, hyperparams)
-    realspace = backwardffjord(rng, baseprobgrid, hyperparams)
+    _, _, basespace = forwardffjord(rng, realprobgrid, hyperparams, t=t)
+    realspace = backwardffjord(rng, baseprobgrid, hyperparams, t=t)
 
     fig = Figure(size=(900, 500));
     ax1 = Axis(fig[1, 1], xlabel="Real axis 1 -> Base axis 1", ylabel="Real axis 2 -> Base axis 2")

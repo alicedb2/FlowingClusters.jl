@@ -12,7 +12,31 @@ struct SetCluster{T, D, E <: SVector{D, T}} <: AbstractCluster{T, D, E}
     # Scratch arrays to avoid allocations
     mu_c_volatile::Vector{T}
     psi_c_volatile::Matrix{T}
+end
 
+const B = 1 # Base space elements in BitCluster b2o
+const O = 2 # Original space elements in BitCluster b2o
+
+struct BitCluster{T, D, E <: Int} <: AbstractCluster{T, D, E}
+    mask::BitVector
+    b2o::Array{T, 3}
+    sum_x::Vector{T}
+    sum_xx::Matrix{T}
+
+    # Scratch arrays to avoid allocations
+    mu_c_volatile::Vector{T}
+    psi_c_volatile::Matrix{T}
+end
+
+struct IndexCluster{T, D, E <: Int} <: AbstractCluster{T, D, E}
+    elements::Set{E}
+    b2o::Array{T, 3}
+    sum_x::Vector{T}
+    sum_xx::Matrix{T}
+
+    # Scratch arrays to avoid allocations
+    mu_c_volatile::Vector{T}
+    psi_c_volatile::Matrix{T}
 end
 
 function SetCluster(elements::AbstractVector{SVector{D, T}}, b2o::AbstractDict{SVector{D, T}, SVector{D, T}}; check=false) where {D, T}
@@ -59,20 +83,6 @@ function SetCluster(b2o::AbstractDict{SVector{D, T}, SVector{D, T}}; check=false
     return SetCluster{T, D, SVector{D, T}}(Set{SVector{D, T}}(), b2o, zeros(T, D), zeros(T, D, D), Array{T}(undef, D), Array{T}(undef, D, D))
 end
 
-const B = 1 # Base space elements in BitCluster b2o
-const O = 2 # Original space elements in BitCluster b2o
-
-struct BitCluster{T, D, E <: Int} <: AbstractCluster{T, D, E}
-    mask::BitVector
-    b2o::Array{T, 3}
-    sum_x::Vector{T}
-    sum_xx::Matrix{T}
-
-    # Scratch arrays to avoid allocations
-    mu_c_volatile::Vector{T}
-    psi_c_volatile::Matrix{T}
-end
-
 function BitCluster(mask::BitVector, b2o::AbstractArray{T, 3}; check=false) where T
     if check
         size(mask, 1) == size(b2o, 2) || throw(DimensionMismatch("Mask must have the same size as the dataset"))
@@ -109,15 +119,41 @@ function BitCluster(b2o::AbstractArray{T, 3}) where T
     return BitCluster{T, D, Int}(falses(N), b2o, zeros(T, D), zeros(T, D, D), Array{T}(undef, D), Array{T}(undef, D, D))
 end
 
-struct IndexCluster{T, D, E <: Int} <: AbstractCluster{T, D, E}
-    elements::Set{E}
-    b2o::Array{T, 3}
-    sum_x::Vector{T}
-    sum_xx::Matrix{T}
+function IndexCluster(indices::AbstractSet{Int}, b2o::AbstractArray{T, 3}; check=false) where T
+    if check
+        all(1 .<= indices .<= size(b2o, 2)) || throw(ArgumentError("One or more index out of bounds"))
+    end
+    D = size(b2o, 1)
+    idxvec = collect(indices)
+    sum_x = dropdims(sum(b2o[:, idxvec, B], dims=2), dims=2)
+    sum_xx = sum([x * x' for x in eachcol(b2o[:, idxvec, B])])
+    mucvol = Vector{T}(undef, D)
+    psicvol = Matrix{T}(undef, D, D)
+    return IndexCluster{T, D, Int}(Set{Int}(indices), b2o, sum_x, sum_xx, mucvol, psicvol)
+end
 
-    # Scratch arrays to avoid allocations
-    mu_c_volatile::Vector{T}
-    psi_c_volatile::Matrix{T}
+function IndexCluster(indices::AbstractVector{Int}, b2o::AbstractArray{T, 3}; check=false) where T
+    if check
+        all(1 .<= indices .<= size(b2o, 2)) || throw(ArgumentError("One or more index out of bounds"))
+    end
+    D = size(b2o, 1)
+    sum_x = dropdims(sum(b2o[:, indices, B], dims=2), dims=2)
+    sum_xx = sum([x * x' for x in eachcol(b2o[:, indices, B])])
+    mucvol = Vector{T}(undef, D)
+    psicvol = Matrix{T}(undef, D, D)
+    return IndexCluster{T, D, Int}(Set{Int}(indices), b2o, sum_x, sum_xx, mucvol, psicvol)
+end
+
+function IndexCluster(idx::Int, b2o::AbstractArray{T, 3}; check=false) where T
+    if check
+        1 <= idx <= size(b2o, 2) || throw(ArgumentError("Index out of bounds"))
+    end
+    return IndexCluster(Set{Int}([idx]), b2o)
+end
+
+function IndexCluster(b2o::AbstractArray{T, 3}) where T
+    D = size(b2o, 1)
+    return IndexCluster{T, D, Int}(Set{Int}(), b2o, zeros(T, D), zeros(T, D, D), Array{T}(undef, D), Array{T}(undef, D, D))
 end
 
 
@@ -230,24 +266,24 @@ Base.show(io::IO, cluster::AbstractCluster) = print(io, "$(typeof(cluster).name.
 ### out of a BitCluster you can use the Vector() function
 
 # Pop element from cluster
-function Base.pop!(cluster::BitCluster{T, D, E}, i::E)::E where {T, D, E}
+function Base.pop!(cluster::BitCluster{T, D, E}, i::E) where {T, D, E}
     cluster.mask[i] || throw(KeyError("Element $i is not in the cluster"))
     cluster.mask[i] = false
     _pop_update_sums!(cluster, i)
     return i
 end
-function Base.pop!(cluster::SetCluster{T, D, E}, x::E)::E where {T, D, E}
+function Base.pop!(cluster::SetCluster{T, D, E}, x::E) where {T, D, E}
     x = pop!(cluster.elements, x)
     _pop_update_sums!(cluster, x)
     return x
 end
-function Base.pop!(cluster::IndexCluster{T, D, E}, i::E)::E where {T, D, E}
-    i in cluster.elements || throw(KeyError("Element $i is not in the cluster"))
+function Base.pop!(cluster::IndexCluster{T, D, E}, i::E) where {T, D, E}
+    i = pop!(cluster.elements, i)
     _pop_update_sums!(cluster, i)
     return i
 end
 
-function Base.pop!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, x::E; deleteifempty=true)::E where {T, D, E}
+function Base.pop!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, x::E; deleteifempty=true) where {T, D, E}
     for (ci, cluster) in enumerate(clusters)
         if x in cluster
             x = pop!(cluster, x)
@@ -275,7 +311,7 @@ function Base.push!(cluster::SetCluster{T, D, E}, x::E) where {T, D, E}
     return cluster
 end
 function Base.push!(cluster::IndexCluster{T, D, E}, i::E) where {T, D, E}
-    if !i in cluster.elements
+    if !(i in cluster.elements)
         push!(cluster.elements, i)
         _push_update_sums!(cluster, i)
     end
@@ -295,12 +331,11 @@ function Base.delete!(cluster::BitCluster{T, D, E}, x::E) where {T, D, E}
     return cluster
 end
 function Base.delete!(cluster::IndexCluster{T, D, E}, i::E) where {T, D, E}
-    if x in cluster.elements
-        pop!(cluster, x)
+    if i in cluster.elements
+        pop!(cluster, i)
     end
     return cluster
 end
-
 
 function Base.delete!(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, x::E; deleteifempty=true) where {T, D, E}
     for (ci, cluster) in enumerate(clusters)
@@ -349,7 +384,6 @@ function Base.empty!(cluster::IndexCluster{T, D, E}) where {T, D, E}
     return cluster
 end
 
-Base.isempty(cluster::AbstractCluster) = isempty(cluster)
 Base.isempty(cluster::SetCluster) = isempty(cluster.elements)
 Base.isempty(cluster::BitCluster) = !any(cluster.mask)
 Base.isempty(cluster::IndexCluster) = isempty(cluster.elements)
@@ -358,7 +392,6 @@ Base.eltype(::AbstractCluster{T, D, E}) where {T, D, E} = E
 
 Base.iterate(cluster::SetCluster) = iterate(cluster.elements)
 Base.iterate(cluster::SetCluster, state) = iterate(cluster.elements, state)
-
 function Base.iterate(cluster::BitCluster{T, D, E}) where {T, D, E}
     idx = findall(cluster.mask)
     return isempty(idx) ? nothing : (idx[1], (idx, 2))
@@ -367,16 +400,8 @@ function Base.iterate(::BitCluster{T, D, E}, state::Tuple{Vector{Int}, E}) where
     idx, i = state
     return i > lastindex(idx) ? nothing : (idx[i], (idx, i + 1))
 end
-
-function Base.iterate(cluster::IndexCluster{T, D, E}) where {T, D, E}
-    idx = collect(cluster)
-    return isempty(idx) ? nothing : (idx[1], (idx, 2))
-end
-function Base.iterate(::IndexCluster{T, D, E}, state::Tuple{Vector{Int}, E}) where {T, D, E}
-    idx, i = state
-    return i > lastindex(idx) ? nothing : (idx[i], (idx, i + 1))
-end
-
+Base.iterate(cluster::IndexCluster) = iterate(cluster.elements)
+Base.iterate(cluster::IndexCluster, state) = iterate(cluster.elements, state)
 
 Base.first(cluster::SetCluster) = first(cluster.elements)
 Base.first(cluster::BitCluster) = findfirst(cluster.mask)
@@ -388,13 +413,13 @@ Base.length(cluster::BitCluster) = sum(cluster.mask)
 Base.length(cluster::SetCluster) = length(cluster.elements)
 Base.length(cluster::IndexCluster) = length(cluster.elements)
 
-Base.in(element, cluster::AbstractCluster) = in(element, cluster)
 Base.in(element, cluster::EmptyCluster) = false
 Base.in(element::AbstractVector{T}, cluster::SetCluster{T, D, E}) where {T, D, E} = in(element, cluster.elements)
 Base.in(element::Int, cluster::BitCluster) = cluster.mask[element]
 Base.in(elements::BitVector, cluster::BitCluster) = all(cluster.mask[elements])
 Base.in(element::Int, cluster::IndexCluster) = in(element, cluster.elements)
-Base.in(element, clusters::AbstractVector{<:AbstractCluster}) = any([(element in cluster) for cluster in clusters])
+
+Base.in(element, clusters::AbstractVector{<:AbstractCluster}) = any([in(element, cluster) for cluster in clusters])
 
 Base.copy(::EmptyCluster{T, D, E}) where {T, D, E} = EmptyCluster{T, D, E}()
 Base.copy(cluster::SetCluster{T, D, E}) where {T, D, E} = SetCluster{T, D, E}(copy(cluster.elements), copy(cluster.b2o), copy(cluster.sum_x), copy(cluster.sum_xx), copy(cluster.mu_c_volatile), copy(cluster.psi_c_volatile))
@@ -522,26 +547,14 @@ function find(x::E, clusters::AbstractVector{SetCluster{T, D, E}}) where {T, D, 
     end
     error(KeyError, ": key $x not found")
 end
-function find(x::E, clusters::AbstractVector{IndexCluster{T, D, E}}) where {T, D, E}
+function find(i::E, clusters::AbstractVector{IndexCluster{T, D, E}}) where {T, D, E}
     for (ci, cl) in enumerate(clusters)
-        if in(x, cl)
+        if in(i, cl)
             return (cl, ci)
         end
     end
-    error(KeyError, ": key $x not found")
+    error(KeyError, ": key $i not found")
 end
-
-# function find(bitvector::BitVector, clusters::AbstractVector{BitCluster{T, D, E}}) where {T, D, E}
-#     length(bitvector) == length(first(clusters).mask) || error("BitVector must have the same length as the dataset")
-#     sum(bitvector) == 1 || error("BitVector must have exactly one true value/element")
-#     for (ci, cl) in enumerate(clusters)
-#         if in(bitvector, cl)
-#             return (cl, ci)
-#         end
-#     end
-#     error(KeyError, ": element $(findfirst(bitvector)) not found")
-# end
-
 
 function project_cluster(cluster::SetCluster{T, D, E}, proj=[1, 2]; orig=false) where {T, D, E}
     if orig

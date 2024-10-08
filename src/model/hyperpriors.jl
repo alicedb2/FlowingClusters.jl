@@ -32,8 +32,29 @@ function log_jeffreys_nu(nu::T, d::Int) where T
 
 end
 
+# The Cauchy distribution integrated over the Jeffreys prior
+# for its scale parameter leads to the symmetric
+# logarithmic prior. Terrible mixing for some reason,
+# much worse than the product of univariate t-distribrutions
+# with very small alpha and large scale such that
+# sqrt(alpha) * scale = 1. The two should in theory
+# be roughtly equivalent but for some reason they are not.
+# I blame maybe the singularity at zero.
+function log_nn_prior_logarithmic(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
+
+    # return zero(T)
+
+    weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
+
+    any(iszero.(weights)) && return -Inf
+
+    # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
+    return -sum(log.(abs.(weights)))
+
+end
+
 # Product of univariate Student t-distributions
-function log_nn_prior(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
+function log_nn_prior_univariate_tdists(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
 
     # return zero(T)
 
@@ -46,12 +67,13 @@ function log_nn_prior(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T
     # When alpha=1 this becomes the Cauchy distribution
     weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
 
-    return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
+    # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
+    return sum(-(1 + alpha)/2 * log1pexp.(2 * log.(abs.(weights)) .- 2 * log(abs(scale)) .- log(alpha)) .- 1/2 * log(pi * alpha) .- log(scale) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
 
 end
 
 # Isotropic multivariate Student t-distribution
-function _log_nn_prior(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
+function log_nn_prior_multivariate_tdist(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
 
     # return zero(T)
 
@@ -61,6 +83,8 @@ function _log_nn_prior(nn_params::ComponentArray{T}, alpha::T, scale::T) where {
     return -(alpha + p)/2 * log(1 + 1/alpha * sum(last_weights.^2 ./ scale^2)) - p/2 * log(pi * alpha) - p * log(scale) - loggamma(alpha/2) + loggamma((p + alpha)/2)
 
 end
+
+log_nn_prior(args...; kwargs...) = log_nn_prior_univariate_tdists(args...; kwargs...)
 
 # Neat!
 function log_jeffreys_t_alpha(alpha::T) where T
