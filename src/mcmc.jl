@@ -202,8 +202,10 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             delta_minusnn_map += log_jeffreys_nn(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
         end
 
+        pretraining = nb_gibbs == 0 && nb_splitmerge == 0 && nb_amwg == 0 && nb_ffjord_am > 0
+
         if progressoutput === :repl || progressoutput === :file || progressoutput
-            next!(progbar;
+            next!(progbar; desc=(pretraining ? "Pre-training: " : "Sampling: "),
             showvalues=[
             ("step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $nb_ffjord_am@$(round(ffjord_am_temperature, digits=1)))"),
             ("chain length", "$(length(chain))"),

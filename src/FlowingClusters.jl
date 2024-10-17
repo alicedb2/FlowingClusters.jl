@@ -25,7 +25,10 @@ module FlowingClusters
     using DataStructures: CircularBuffer
 
     using DifferentialEquations: Tsit5
-    using DiffEqFlux: Lux, Chain, Dense, FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff
+    using DiffEqFlux: Lux, Chain, Dense, 
+                      FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff,
+                      kaiming_uniform, zeros64, softsign
+    export Chain, Dense, kaiming_uniform, zeros64, softsign
 
     using ComponentArrays: ComponentArray
 
