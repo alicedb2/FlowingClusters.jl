@@ -67,7 +67,9 @@ function evaluate_brt(training_predictors, training_presabs, dataset::SMSDataset
     println("    BRT stats without thresh: $perfstat=$(getindex(brt_test_performances, perfstat))")
     println("    BRT stats at best thresh: $perfstat=$(getindex(brt_test_performances_atthresh, perfstat))")
 
-    return (;brt_test_performances, brt_test_performances_atthresh, brt_best_thresh)
+    return (; brt_test_performances, 
+              brt_test_performances_atthresh, 
+              brt_best_thresh)
 end
 
 # brt_perfs = evaluate_brt(dataset, species, predictors, perfstat);

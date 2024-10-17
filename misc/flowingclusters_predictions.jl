@@ -4,6 +4,7 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
 
     # MAP and chain summary prediction functions
     map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams)
+    map_nb_clusters = length(chain.map_clusters)
 
     # MAP predictions on validation set to find best threshold
     validation_map_presabs_tailprobs = map_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
@@ -63,28 +64,30 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
         println("    Best without threshold: $best_scoring_method, $perfstat=$(getindex(test_performances, perfstat))")
         println("       Best with threshold: $best_scoring_atthresh, $perfstat=$(getindex(test_performances_atthresh, perfstat))")
         return (
-            MAP=(;
+            fc_MAP=(;
+                nb_clusters=map_nb_clusters,
                 test_map_performances, 
                 test_map_performances_atthresh, 
                 best_map_thresh
             ),
-            chain=(;
-                best_scoring_method,
-                best_scoring_atthresh,
-                best_thresh, 
+            fc_chain=(;
                 test_performances, 
-                test_performances_atthresh
+                test_performances_atthresh,
+                best_thresh, 
+                best_scoring_method,
+                best_scoring_atthresh
                 )
             )
     else
         @info "Chain has less than 3 samples, can't evaluate its performance yet"
         return (
-            MAP=(;
+            fc_MAP=(;
+                nb_clusters=map_nb_clusters,
                 test_map_performances, 
                 test_map_performances_atthresh, 
                 best_map_thresh
             ),
-            chain=nothing
+            fc_chain=nothing
         )
     end
 end

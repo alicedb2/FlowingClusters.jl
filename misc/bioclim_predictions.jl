@@ -56,7 +56,9 @@ function evaluate_bioclim(training_presence_predictors, dataset, species, predic
     println("    BIOCLIM stats without thresh: $perfstat=$(getindex(bioclim_test_performances, perfstat))")
     println("    BIOCLIM stats at best thresh: $perfstat=$(getindex(bioclim_test_performances_atthresh, perfstat))")
 
-    return (test_performances=bioclim_test_performances, test_performances_atthresh=bioclim_test_performances_atthresh, best_thresh=best_thresh)
+    return (; bioclim_test_performances, 
+              bioclim_test_performances_atthresh, 
+              best_thresh)
 end
 
 # bioclim_perfs = evaluate_bioclim(dataset, species, predictors, perfstat);
