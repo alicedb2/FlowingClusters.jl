@@ -35,7 +35,7 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
 
         nnalpha = 0.001
-        effscale = 30.0
+        effscale = 10.0
 
         return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
                         pyp=(alpha=T(7.77),),# sigma=0.0),

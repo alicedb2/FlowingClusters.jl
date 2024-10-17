@@ -3,7 +3,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
     nb_amwg=1, amwg_batch_size=50, nb_ffjord_am=1, ffjord_am_temperature=1.0,
     sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
-    attempt_map=true, pretty_progress=:repl)
+    attempt_map=true, progressoutput=:repl)
 
     checkpoint_every == -1 || typeof(checkpoint_prefix) == String || throw("Must specify a checkpoint prefix string")
 
@@ -28,14 +28,14 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     ###########################
 
-    if pretty_progress === :repl
+    if progressoutput === :repl
         progressio = stderr
-    elseif pretty_progress === :file
+    elseif progressoutput === :file
         progressio = open("progress_pid$(getpid()).txt", "w")
     end
 
-    if pretty_progress === :repl || pretty_progress === :file || pretty_progress
-        if isnothing(nb_steps) || !isfinite(nb_steps) || nb_steps < 0
+    if progressoutput === :repl || progressoutput === :file || progressoutput
+        if isnothing(nb_steps) || !isfinite(nb_steps) || nb_steps <= 0
             progbar = ProgressUnknown(showspeed=true, output=progressio)
             nb_steps = Inf
             _nb_steps = typemax(Int64)
@@ -62,7 +62,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
                 chain.clusters,
                 chain.hyperparams,
                 chain.diagnostics,
-                iteration=length(chain),
+                iteration=length(chain), hpchain=chain.hyperparams_chain,
                 temperature=ffjord_am_temperature,
                 )
         end
@@ -202,22 +202,22 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             delta_minusnn_map += log_jeffreys_nn(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
         end
 
-        if pretty_progress === :repl || pretty_progress === :file || pretty_progress
+        if progressoutput === :repl || progressoutput === :file || progressoutput
             next!(progbar;
             showvalues=[
-            (:"step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $nb_ffjord_am@$(round(ffjord_am_temperature, digits=1)))"),
-            (:"chain length", "$(length(chain))"),
-            (:"conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
-            (:"#chain samples (oldest, latest, eta) convergence", "$(pretty_progress === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (drop if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(pretty_progress === :repl ? "\033[0m" : "")"),
-            (:"logprob (best, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
-            (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
-            (:"split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
-            (:"split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
-            (:"MAP #attempts/#successes", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
-            (:"nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.map_clusters)), $(length(filter(c -> length(c) > 1, chain.map_clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.map_clusters)))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters]))"),
-            (:"last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(chain.map_logprob - delta_minusnn_map, digits=1)))"),
-            (:"last MAP at", last_map_idx),
-            (:"last checkpoint at", last_checkpoint)
+            ("step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $nb_ffjord_am@$(round(ffjord_am_temperature, digits=1)))"),
+            ("chain length", "$(length(chain))"),
+            ("conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
+            ("#chain samples (oldest, latest, eta) convergence", "$(progressoutput === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (drop if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(progressoutput === :repl ? "\033[0m" : "")"),
+            ("logprob (best, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
+            ("nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
+            ("split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
+            ("split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
+            ("MAP #attempts/#successes", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
+            ("nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.map_clusters)), $(length(filter(c -> length(c) > 1, chain.map_clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.map_clusters)))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters]))"),
+            ("last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(chain.map_logprob - delta_minusnn_map, digits=1)))"),
+            ("last MAP at", last_map_idx),
+            ("last checkpoint at", last_checkpoint)
             ])
         else
             print("\r$(step)/$(nb_steps)")
@@ -252,9 +252,9 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     end
 
-    finish!(progbar)
+    # finish!(progbar)
 
-    if pretty_progress === :file
+    if progressoutput === :file
         close(progressio)
     end
 

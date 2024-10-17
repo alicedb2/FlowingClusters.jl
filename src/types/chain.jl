@@ -52,8 +52,8 @@ end
 
 # load_chain(filename::AbstractString) = JLD2.load(filename)["chain"]
 
-function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing, seed=default_rng()) where T
-    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn, seed=seed)
+function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing, perturb=false, seed=default_rng()) where T
+    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn, perturb=perturb, seed=seed)
 end
 
 function FCChain(
@@ -62,6 +62,7 @@ function FCChain(
     nb_samples=200,
     strategy=:sequential,
     optimize=false,
+    perturb=false,
     ffjord_nn=nothing,
     seed=default_rng()
     ) where {T, C <: AbstractCluster}
@@ -87,6 +88,10 @@ function FCChain(
     hyperparams._.pyp.alpha = 10.0 / log(length(data))
 
     # Keep unique observations only
+    if perturb
+        println("    Perturbing data...")
+        data = [el .+ Vector{T}(1e-6 * randn(rng, D)) for el in data]
+    end
     unique_data = unique(deepcopy(data))
     println("    Loaded $(length(unique_data)) unique data points into chain (found $(length(data) - length(unique_data)) duplicates)")
 
@@ -119,6 +124,9 @@ function FCChain(
     samples_idx = CircularBuffer{Int}(nb_samples)
 
     diagnostics = Diagnostics(T, D, hasnn(hyperparams) ? hyperparams._.nn.params : nothing)
+    if hasnn(hyperparams)
+        diagnostics.am.algo4.mu .= hyperparams._.nn.params
+    end
 
     chain = FCChain{T, D, element_type, cluster_type{T, D, element_type}, typeof(hyperparams), typeof(diagnostics)}(
         cluster_type{T, D, element_type}[], hyperparams, diagnostics,
@@ -198,9 +206,9 @@ logprob_chain(chain::FCChain, burn=0) = chain.logprob_chain[burn+1:end]
 nbclusters_chain(chain::FCChain, burn=0) = chain.nbclusters_chain[burn+1:end]
 largestcluster_chain(chain::FCChain, burn=0) = chain.largestcluster_chain[burn+1:end]
 
-nn_chain(chain::Vector{FCHyperparamsFFJORD}, burn=0) = [p._.nn.params for p in chain[burn+1:end]]
+nn_chain(chain::Vector{<:FCHyperparamsFFJORD}, burn=0) = [p._.nn.params for p in chain[burn+1:end]]
 nn_chain(chain::FCChain, burn=0) = [p._.nn.params for p in chain.hyperparams_chain[burn+1:end]]
-nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{FCHyperparamsFFJORD}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
+nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{<:FCHyperparamsFFJORD}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
 
 nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
 nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
@@ -249,6 +257,13 @@ end
 
 function Base.length(chain::FCChain)
     return length(chain.logprob_chain)
+end
+
+function Base.empty!(chain::FCChain)
+    empty!(chain.samples_idx)
+    empty!(chain.clusters_samples)
+    empty!(chain.hyperparams_samples)
+    return chain
 end
 
 function ess_rhat(chain::FCChain, burn=0)

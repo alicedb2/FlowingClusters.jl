@@ -20,6 +20,7 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
     sizeflatL = div(D * (D + 1), 2)
 
     if nn_params === nothing
+
         accepted = ComponentArray{Int}(
                         pyp=(alpha=0,),#, sigma=0),
                         niw=(mu=zeros(D),
@@ -43,13 +44,9 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                 )
 
         return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg)
+
     else
-        nn_D = size(nn_params, 1)
-        am_x = zeros(T, nn_D)
-        am_xx = zeros(T, nn_D, nn_D)
-        # am_mu = zeros(T, nn_D)
-        # am_sigma = 
-        
+
         accepted = ComponentArray{Int}(
                         pyp=(alpha=0,),# , sigma=0),
                         niw=(mu=zeros(D),
@@ -79,9 +76,29 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                             )
                     )
 
-        am = ComponentArray{T}(L=0.0, x=am_x, xx=am_xx)
+        nn_D = size(nn_params, 1)
+        am_x = zeros(T, nn_D)
+        am_xx = zeros(T, nn_D, nn_D)
+        
+        am_mu = zeros(T, nn_D)
+        am_sigma = Matrix{T}(I(nn_D))
+        # logscale0 = 2 * log(2.38) - log(nn_D)
+        logscale0 = 2 * log(0.1) - log(nn_D)
+
+        am = ComponentArray{T}(algo0=(L=0.0, 
+                                      x=am_x, 
+                                      xx=am_xx, 
+                                      safetyprob=0.5, 
+                                      safetysigma=0.1), 
+                              algo4=(i=0.0, 
+                                     target=0.44,
+                                     lambda=0.0,
+                                     logscale=logscale0, 
+                                     mu=am_mu, 
+                                     sigma=am_sigma))
 
         return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am)
+
     end
 end
 

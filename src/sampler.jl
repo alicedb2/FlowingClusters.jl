@@ -541,26 +541,47 @@ function advance_ffjord_am!(
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    am_safety_probability::T=T(0.05), 
-    am_safety_sigma::T=T(0.1),
-    iteration=0,
-    # step_distrib::Distribution{Multivariate, Continuous},
+    iteration=0, algo=:algo0, hpchain=nothing,
     temperature=one(T)) where {T, D, E}
 
     !hasnn(hyperparams) && return hyperparams
 
+    di = diagnostics
+
     nn_D = size(hyperparams._.nn.params, 1)
 
-    if iteration <= 2 * nn_D
-        step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-    else
-        safety_component = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-        empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma(diagnostics))
-        step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
-    end
+    if algo === :algo0
 
-    proposed_hparray = copy(hyperparams._)
-    proposed_hparray.nn.params .+= rand(rng, step_distrib)
+        if iteration <= 4 * nn_D
+            step_distrib = MvNormal(di.am.algo0.safetysigma^2 / nn_D * I(nn_D))
+        else
+            safety_component = MvNormal(di.am.algo0.safetysigma^2 / nn_D * I(nn_D))
+            
+            # try
+            empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma_algo0(diagnostics))
+            # catch e
+            #     if e isa PosDefException
+            #         nnc = nn_chain(Matrix, hpchain)
+            #         diagnostics.am.algo0.x .= sum(nnc, dims=2)
+            #         diagnostics.am.algo0.xx .= sum(eachslice(nnc, dims=2) .* transpose(eachslice(nnc, dims=2)))
+            #         diagnostics.am.algo0.xx .= (diagnostics.am.algo0.xx + diagnostics.am.algo0.xx') / 2
+            #         empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma_algo0(diagnostics))
+            #     end
+            # end
+            step_distrib = MixtureModel([safety_component, empirical_estimate_component], [di.am.algo0.safetyprob, 1 - di.am.algo0.safetyprob])
+        end
+
+        proposed_hparray = copy(hyperparams._)
+        proposed_hparray.nn.params .+= rand(rng, step_distrib)
+
+    elseif algo === :algo4
+
+        step_distrib = MvNormal(exp(di.am.algo4.logscale) * di.am.algo4.sigma)
+
+        proposed_hparray = copy(hyperparams._)
+        proposed_hparray.nn.params .+= rand(rng, step_distrib)
+
+    end
 
     proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
 
@@ -576,6 +597,7 @@ function advance_ffjord_am!(
 
     log_acceptance /= T(temperature)
     
+    # acceptance = min(1, exp(log_acceptance))
     acceptance = logistic(log_acceptance)
 
     # if log(rand(rng, T)) < log_acceptance
@@ -588,9 +610,28 @@ function advance_ffjord_am!(
         diagnostics.rejected.nn.params += 1
     end
 
-    diagnostics.am.L += 1
-    diagnostics.am.x .+= hyperparams._.nn.params
-    diagnostics.am.xx .+= hyperparams._.nn.params * hyperparams._.nn.params'
+    if algo === :algo0
+
+        diagnostics.am.algo0.L += 1
+        diagnostics.am.algo0.x .+= hyperparams._.nn.params
+        diagnostics.am.algo0.xx .+= hyperparams._.nn.params * hyperparams._.nn.params'
+
+    elseif algo === :algo4
+
+        di.am.algo4.i += 1
+        i = di.am.algo4.i
+        gamma = (i+1)^-(1/(1 + di.am.algo4.lambda))
+        
+        di.am.algo4.logscale += gamma * (acceptance - di.am.algo4.target)
+        
+        mu = di.am.algo4.mu[:]
+        dX = hyperparams._.nn.params - mu
+        di.am.algo4.mu .+= gamma * dX
+        
+        sigma = dX * dX'
+        di.am.algo4.sigma .+= gamma * (sigma - di.am.algo4.sigma)
+        di.am.algo4.sigma .= (di.am.algo4.sigma + di.am.algo4.sigma') / 2
+    end
 
     return hyperparams
 
@@ -628,43 +669,7 @@ function advance_hyperparams_amwg!(
 
 end
 
-function advance_adaptive!(
-    rng::AbstractRNG,
-    clusters::Vector{<:AbstractCluster{T, D, E}},
-    hyperparams::AbstractFCHyperparams{T, D},
-    diagnostics::AbstractDiagnostics{T, D};
-    nb_ffjord_am=1, am_safety_probability::T=T(0.05), am_safety_sigma::T=T(0.1),
-    hyperparams_chain=nothing, 
-    temperature=one(T)) where {T, D, E}
-
-
-    if hasnn(hyperparams) && nb_ffjord_am > 0
-
-        nn_D = size(hyperparams._.nn.params, 1)
-
-        if length(hyperparams_chain) <= 2 * nn_D
-            step_distrib = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-        else
-            safety_component = MvNormal(am_safety_sigma^2 / nn_D * I(nn_D))
-            empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma(diagnostics))
-            step_distrib = MixtureModel([safety_component, empirical_estimate_component], [am_safety_probability, 1 - am_safety_probability])
-        end
-
-        for i in 1:nb_ffjord_am
-            advance_ffjord!(rng, clusters, hyperparams, diagnostics, step_distrib=step_distrib, temperature=temperature)
-        end
-
-        diagnostics.am.L += 1
-        diagnostics.am.x .+= hyperparams._.nn.params
-        diagnostics.am.xx .+= hyperparams._.nn.params * hyperparams._.nn.params'
-
-    end
-
-    return hyperparams
-
-end
-
-function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=T(1e-6)) where T
+function am_sigma_algo0(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=T(1e-4)) where T
     sigma = (xx - x * x' / L) / (L - 1)
     if correction
         sigma = (sigma + sigma') / 2 + eps * I
@@ -672,7 +677,7 @@ function am_sigma(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correcti
     return sigma
 end
 
-am_sigma(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=T(1e-10)) where {T, D} = am_sigma(diagnostics.am.L, diagnostics.am.x, diagnostics.am.xx, correction=correction, eps=eps) #: zeros(Float64, 0, 0)
+am_sigma_algo0(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=T(1e-4)) where {T, D} = am_sigma_algo0(diagnostics.am.algo0.L, diagnostics.am.algo0.x, diagnostics.am.algo0.xx, correction=correction, eps=eps)
 
 function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptance_target::T=0.44, min_delta::T=0.01) where {T, D} #, minmax_logscale::T=one(T)0.0)
     delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))

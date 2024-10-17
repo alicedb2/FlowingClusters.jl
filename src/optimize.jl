@@ -1,10 +1,10 @@
 # function optimize_hyperparams(
-#     clusters::Vector{Cluster},
-#     hyperparams0::MNCRPHyperparams;
-#     jacobian=false, verbose=false
+#     clusters::AbstractVector{<:AbstractCluster},
+#     hyperparams0::AbstractFCHyperparams;
+#     verbose=false
 #     )
 
-#     objfun(x) = -logprobgenerative(clusters, x, jacobian=jacobian)
+#     objfun(x) = -logprobgenerative(clusters, x)
 
 #     x0 = unpack(hyperparams0)
 
@@ -34,18 +34,18 @@
 
 # end
 
-# function optimize_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; jacobian=false, verbose=false)
+# # function optimize_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; jacobian=false, verbose=false)
 
-#     opt_res = optimize_hyperparams(clusters, hyperparams, jacobian=jacobian, verbose=verbose)
+# #     opt_res = optimize_hyperparams(clusters, hyperparams, jacobian=jacobian, verbose=verbose)
 
-#     hyperparams.alpha = opt_res.alpha
-#     hyperparams.mu = opt_res.mu
-#     hyperparams.lambda = opt_res.lambda
-#     hyperparams.flatL = opt_res.flatL
-#     hyperparams.L = opt_res.L
-#     hyperparams.psi = opt_res.psi
-#     hyperparams.nu = opt_res.nu
+# #     hyperparams.alpha = opt_res.alpha
+# #     hyperparams.mu = opt_res.mu
+# #     hyperparams.lambda = opt_res.lambda
+# #     hyperparams.flatL = opt_res.flatL
+# #     hyperparams.L = opt_res.L
+# #     hyperparams.psi = opt_res.psi
+# #     hyperparams.nu = opt_res.nu
 
-#     return hyperparams
+# #     return hyperparams
 
-# end
+# # end
