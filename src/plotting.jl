@@ -1,4 +1,10 @@
-function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D, E}}; proj=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...) where {T, D, E}
+function deco!(axis)
+    hidespines!(axis, :t, :r, :l, :b)
+    hidedecorations!(axis, grid=true, minorgrid=true, ticks=true, label=true, ticklabels=true)
+    return axis
+end
+
+function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D, E}}; proj=[1, 2], rev=false, nbclusters=nothing, orig=false, plot_kw...) where {T, D, E}
 
     if D >= 2
         size(proj, 1) == 2 || error("Can only support plotting 1 or 2 dimensions for now")
@@ -7,11 +13,11 @@ function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D, E}}; proj=[1
         clusters = [[first(el) for el in cl] for cl in Vector.(sort(clusters, by=length, rev=!rev), orig=orig)]
     end
 
-    if nb_clusters === nothing || nb_clusters < 0
-        nb_clusters = length(clusters)
+    if nbclusters === nothing || nbclusters < 0
+        nbclusters = length(clusters)
     end
 
-    for (cluster, i) in zip(clusters, 1:nb_clusters)
+    for (cluster, i) in zip(clusters, 1:nbclusters)
         if !isempty(cluster)
             if D >= 2
                 x = getindex.(clusters[i], 1)
@@ -27,14 +33,14 @@ function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D, E}}; proj=[1
     return ax
 end
 
-function plot(clusters::AbstractVector{<:AbstractCluster}; proj=[1, 2], rev=false, nb_clusters=nothing, orig=false, plot_kw...)
+function plot(clusters::AbstractVector{<:AbstractCluster}; proj=[1, 2], rev=false, nbclusters=nothing, orig=false, plot_kw...)
     fig = Figure()
     ax = Axis(fig[1, 1])
-    plot!(ax, clusters, proj=proj, rev=rev, nb_clusters=nb_clusters, orig=orig, plot_kw...)
+    plot!(ax, clusters, proj=proj, rev=rev, nbclusters=nbclusters, orig=orig, plot_kw...)
     return fig
 end
 
-function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothing)
+function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing)
 
     N = length(chain)
 
@@ -73,12 +79,12 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
 
     p_map_axis = Axis(fig[1:2, 1], title="MAP state ($(length(chain.map_clusters)) clusters)")
     deco!(p_map_axis)
-    plot!(p_map_axis, chain.map_clusters; proj=proj, orig=true, rev=rev, nb_clusters=nb_clusters)
+    plot!(p_map_axis, chain.map_clusters; proj=proj, orig=true, rev=rev, nbclusters=nbclusters)
     axislegend(p_map_axis)
 
     p_current_axis = Axis(fig[1:2, 2], title="Current state ($(length(chain.clusters)) clusters)")
     deco!(p_current_axis)
-    plot!(p_current_axis, chain.clusters; proj=proj, orig=true, rev=rev, nb_clusters=nb_clusters)
+    plot!(p_current_axis, chain.clusters; proj=proj, orig=true, rev=rev, nbclusters=nbclusters)
     # axislegend(p_current_axis, framecolor=:white)
 
     offset = 0
@@ -86,12 +92,12 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
         offset = 2
         p_basemap_axis = Axis(fig[3:4, 1], title="MAP base state ($(length(chain.map_clusters)) clusters)")
         deco!(p_basemap_axis)
-        plot!(p_basemap_axis, chain.map_clusters; proj=proj, orig=false, rev=rev, nb_clusters=nb_clusters)
+        plot!(p_basemap_axis, chain.map_clusters; proj=proj, orig=false, rev=rev, nbclusters=nbclusters)
         # axislegend(p_basemap_axis, framecolor=:white)
 
         p_basecurrent_axis = Axis(fig[3:4, 2], title="Current base state ($(length(chain.clusters)) clusters)")
         deco!(p_basecurrent_axis)
-        plot!(p_basecurrent_axis, chain.clusters; proj=proj, orig=false, rev=rev, nb_clusters=nb_clusters)
+        plot!(p_basecurrent_axis, chain.clusters; proj=proj, orig=false, rev=rev, nbclusters=nbclusters)
         # axislegend(p_basecurrent_axis, framecolor=:white)
     end
 
@@ -196,12 +202,18 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nb_clusters=nothin
     return fig
 end
 
-function deformation_figure_2d(clusters, hyperparams; rng=default_rng(), t=T(1))
+function deformation_figure_2d(hyperparams; lims=((-4, 4), (-4, 4)), proj=[1, 2], realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=300, nblines=10)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
         return nothing
     end
+
+    d = datadimension(hyperparams)
+
+    @assert length(Set(proj)) == 2 "Specify at least 2 different dimensions"
+    @assert length(proj) + (isnothing(realzs) ? 0 : length(realzs)) == d "You must specify as many (real) z values as the number of dimensions minus 2"
+    @assert length(proj) + (isnothing(basezs) ? 0 : length(basezs)) == d "You must specify as many (base) z values as the number of dimensions minus 2"
 
     function _deco!(axis)
         hidespines!(axis, :t, :r)
@@ -209,41 +221,51 @@ function deformation_figure_2d(clusters, hyperparams; rng=default_rng(), t=T(1))
         return axis
     end
 
-    basespace = Matrix(clusters, orig=false)
-    realspace = Matrix(clusters, orig=true)
+    baseprobgridhoriz = reduce(hcat, [[x, y] for y in LinRange(lims[2]..., nblines), x in LinRange(lims[1]..., nbpoints)])
+    baseprobgridvert = reduce(hcat, [[x, y] for x in LinRange(lims[1]..., nblines), y in LinRange(lims[2]..., nbpoints)])
+    baseprobgrid = hcat(baseprobgridhoriz, baseprobgridvert)
 
-    basexlims, baseylims = extrema(basespace, dims=2)
-    realxlims, realylims = extrema(realspace, dims=2)
+    realprobgridhoriz = reduce(hcat, [[x, y] for y in LinRange(lims[2]..., nblines), x in LinRange(lims[1]..., nbpoints)])
+    realprobgridvert = reduce(hcat, [[x, y] for x in LinRange(lims[1]..., nblines), y in LinRange(lims[2]..., nbpoints)])
+    realprobgrid = hcat(realprobgridhoriz, realprobgridvert)
 
-    _nbpoints = 300
-
-    baseprobgridxs = reduce(hcat, [[x, y] for y in LinRange(baseylims..., 10), x in LinRange(basexlims..., _nbpoints)])
-    baseprobgridys = reduce(hcat, [[x, y] for x in LinRange(basexlims..., 10), y in LinRange(baseylims..., _nbpoints)])
-    baseprobgrid = hcat(baseprobgridxs, baseprobgridys)
-
-    realprobgridys = reduce(hcat, [[x, y] for x in LinRange(realxlims..., 10), y in LinRange(realylims..., _nbpoints)])
-    realprobgridxs = reduce(hcat, [[x, y] for y in LinRange(realylims..., 10), x in LinRange(realxlims..., _nbpoints)])
-    realprobgrid = hcat(realprobgridxs, realprobgridys)
+    if !isnothing(realzs)
+        zsproj = setdiff(1:d, proj)
+        _realprobgrid = zeros(d, 2 * nblines * nbpoints)
+        _realprobgrid[proj, :] .= realprobgrid
+        _realprobgrid[zsproj, :] .= realzs        
+        realprobgrid = _realprobgrid
+    end
+    if !isnothing(realzs)
+        zsproj = setdiff(1:d, proj)
+        _baseprobgrid = zeros(d, 2 * nblines * nbpoints)
+        _baseprobgrid[proj, :] .= baseprobgrid
+        _baseprobgrid[zsproj, :] .= realzs        
+        baseprobgrid = _baseprobgrid
+    end
 
     _, _, basespace = forwardffjord(rng, realprobgrid, hyperparams, t=t)
     realspace = backwardffjord(rng, baseprobgrid, hyperparams, t=t)
 
     fig = Figure(size=(900, 500));
     ax1 = Axis(fig[1, 1], xlabel="Real axis 1 -> Base axis 1", ylabel="Real axis 2 -> Base axis 2")
-    scatter!(ax1, basespace[1, :], basespace[2, :], markersize=2, label=nothing); 
-    scatter!(ax1, realprobgrid[1, :], realprobgrid[2, :], color=:grey, alpha=0.5, markersize=2, label=nothing);
+    scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=2, label=nothing); 
+    scatter!(ax1, realprobgrid[proj[1], :], realprobgrid[proj[2], :], color=:grey, alpha=0.5, markersize=2, label=nothing);
 
     scatter!(ax1, Float64[], Float64[], color=:grey, markersize=15, label="Real/environmental space"); 
     scatter!(ax1, Float64[], Float64[], color=Cycled(1), markersize=15, label="Base space"); 
-    ylims!(ax1, nothing, 7); axislegend(ax1, framecolor=:white); 
+    
+    ylims!(ax1, nothing, 7);
+    axislegend(ax1, framecolor=:white); 
     _deco!(ax1)
 
     ax2 = Axis(fig[1, 2], xlabel="Base axis 1 -> Real axis 1", ylabel="Base axis 2 -> Real axis 2")
-    scatter!(ax2, realspace[1, :], realspace[2, :], markersize=2, label=nothing); 
-    scatter!(ax2, baseprobgrid[1, :], baseprobgrid[2, :], color=:grey, alpha=0.5, markersize=2, label=nothing);
+    scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=2, label=nothing); 
+    scatter!(ax2, baseprobgrid[proj[1], :], baseprobgrid[proj[2], :], color=:grey, alpha=0.5, markersize=2, label=nothing);
     scatter!(ax2, Float64[], Float64[], color=:grey, markersize=15, label="Base space");
     scatter!(ax2, Float64[], Float64[], color=Cycled(1), markersize=15, label="Real/environmental space");
-    ylims!(ax2, nothing, 7); axislegend(ax2, framecolor=:white);
+    ylims!(ax2, nothing, 7);
+    axislegend(ax2, framecolor=:white);
     _deco!(ax2);
 
     return fig
