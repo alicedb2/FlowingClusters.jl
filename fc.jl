@@ -144,6 +144,8 @@ function main()
     brt_eval = evaluate_brt(dataset, species, predictors)
     bioclim_eval = evaluate_bioclim(dataset, species, predictors)
 
+    mkpath(output_dir)
+
     if isnothing(nn)
         chain = FCChain(training_dataset, SetCluster, nb_samples=nb_mcmc_samples, strategy=:sequential, seed=seed)
     else
@@ -151,7 +153,8 @@ function main()
         # Pre-training neural network
         advance_chain!(chain, nb_pretraining, 
             nb_ffjord_am=1, nb_amwg=0, nb_gibbs=0, nb_splitmerge=0,
-            attempt_map=false, sample_every=nothing)
+            attempt_map=false, sample_every=nothing,
+            progressoutput=joinpath(output_dir, output_prefix))
         burn!(chain, nb_pretraining)
     end
     println(chain)
@@ -161,11 +164,10 @@ function main()
         nb_gibbs=parsed_args["nb-gibbs"],
         nb_amwg=parsed_args["nb-amwg"],
         nb_splitmerge=parsed_args["nb-splitmerge"],
-        attempt_map=true, sample_every=:autocov, stop_criterion=:sample_ess)
+        attempt_map=true, sample_every=:autocov, stop_criterion=:sample_ess,
+        progressoutput=output_prefix)
 
     fc_eval = evaluate_flowingclusters(chain, dataset, species, predictors)
-
-    mkpath(output_dir)
     
     result_file = joinpath(output_dir, "$(output_prefix)_pid$(getpid())_result.json")
     chain_file = joinpath(output_dir, "$(output_prefix)_pid$(getpid())_chain.jld2")
