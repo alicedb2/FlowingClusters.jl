@@ -156,6 +156,7 @@ function main()
             attempt_map=false, sample_every=nothing,
             progressoutput=joinpath(output_dir, output_prefix))
         burn!(chain, nb_pretraining)
+        sequential_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
     end
     println(chain)
 
@@ -165,7 +166,7 @@ function main()
         nb_amwg=parsed_args["nb-amwg"],
         nb_splitmerge=parsed_args["nb-splitmerge"],
         attempt_map=true, sample_every=:autocov, stop_criterion=:sample_ess,
-        progressoutput=output_prefix)
+        progressoutput=joinpath(output_dir, output_prefix))
 
     fc_eval = evaluate_flowingclusters(chain, dataset, species, predictors)
     
