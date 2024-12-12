@@ -84,6 +84,7 @@ function log_nn_prior_multivariate_tdist(nn_params::ComponentArray{T}, alpha::T,
 
 end
 
+# log_nn_prior(args...; kwargs...) = log_nn_prior_logarithmic(args...; kwargs...)
 log_nn_prior(args...; kwargs...) = log_nn_prior_univariate_tdists(args...; kwargs...)
 
 # Neat!
@@ -104,7 +105,8 @@ end
 # as P(scale) in the indenpendce prior
 # P(scale, alpha) = P(scale)P(alpha)
 function log_jeffreys_t_scale(scale::T, alpha::T=T(3)) where T
-    return -log(abs(scale)) + log(2 * alpha) - log(3 + alpha)
+    return -log(abs(scale))
+    # return -log(abs(scale)) + log(2 * alpha) - log(3 + alpha)
 end
 
 # Bivariate Jeffreys prior of
@@ -122,7 +124,7 @@ function log_jeffreys_t(alpha::T, scale::T) where T
     end
 end
 
-function log_jeffreys_nn(alpha::T, scale::T; independence=false) where T
+function log_jeffreys_nn(alpha::T, scale::T; independence=true) where T
     if independence
         return log_jeffreys_t_alpha(alpha) + log_jeffreys_t_scale(scale)
     else

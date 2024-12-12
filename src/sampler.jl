@@ -83,10 +83,9 @@ function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClu
     log_hastings = proposed_logalpha - log_alpha
     log_acceptance += log_hastings
 
-    # log_acceptance = min(zero(T), log_acceptance)
-    acceptance = logistic(log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         hyperparams._.pyp.alpha = proposed_alpha
         diagnostics.accepted.pyp.alpha += 1
@@ -119,10 +118,9 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 
         log_acceptance = sum([log_Zniw(c, proposed_mu, lambda, psi, nu) - log_Zniw(EmptyCluster{T, D, E}(), proposed_mu, lambda, psi, nu) - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu) for c in clusters])
 
-        # log_acceptance = min(zero(T), log_acceptance)
-        acceptance = logistic(log_acceptance)
+        acceptance = min(one(T), exp(log_acceptance))
+        # acceptance = logistic(log_acceptance)
 
-        # if log(rand(rng, T)) < log_acceptance
         if rand(rng, T) < acceptance
             hyperparams._.niw.mu = proposed_mu
             diagnostics.accepted.niw.mu[k] += 1
@@ -150,9 +148,9 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
 
     log_acceptance += log_jeffreys_lambda(proposed_lambda) - log_jeffreys_lambda(lambda)
 
-    acceptance = logistic(log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         hyperparams._.niw.lambda = proposed_lambda
         diagnostics.accepted.niw.lambda += 1
@@ -206,9 +204,9 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
         # log_acceptance += D * (logdetpsd(psi) - logdetpsd(proposed_psi))
         log_acceptance += log_jeffreys_psi(proposed_psi) - log_jeffreys_psi(psi)
 
-        acceptance = logistic(log_acceptance)
+        acceptance = min(one(T), exp(log_acceptance))
+        # acceptance = logistic(log_acceptance)
 
-        # if log(rand(rng, T)) < log_acceptance
         if rand(rng, T) < acceptance
             hyperparams._.niw.flatL = proposed_flatL
             diagnostics.accepted.niw.flatL[k] += 1
@@ -242,11 +240,9 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 
     log_acceptance += log_jeffreys_nu(proposed_nu, D) - log_jeffreys_nu(nu, D)
 
-    # log_acceptance = min(zero(T), log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    acceptance = logistic(log_acceptance)
-
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         hyperparams._.niw.nu = proposed_nu
         diagnostics.accepted.niw.nu += 1
@@ -279,9 +275,9 @@ function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     log_acceptance += log_nn_prior(nn_params, proposed_nn_alpha, nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
     log_acceptance += log_jeffreys_nn(proposed_nn_alpha, nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
-    acceptance = logistic(log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         hyperparams._.nn.prior.alpha = proposed_nn_alpha
         diagnostics.accepted.nn.prior.alpha += 1
@@ -313,9 +309,9 @@ function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{
     log_acceptance += log_nn_prior(nn_params, nn_alpha, proposed_nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
     log_acceptance += log_jeffreys_nn(nn_alpha, proposed_nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
-    acceptance = logistic(log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         hyperparams._.nn.prior.scale = proposed_nn_scale
         diagnostics.accepted.nn.prior.scale += 1
@@ -512,9 +508,9 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 
     end
 
-    acceptance = logistic(log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         append!(clusters, proposed_state)
         if ci != cj
@@ -541,7 +537,7 @@ function advance_ffjord_am!(
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    iteration=0, algo=:algo0, hpchain=nothing,
+    iteration=0, algo=:algo4, hpchain=nothing,
     temperature=one(T)) where {T, D, E}
 
     !hasnn(hyperparams) && return hyperparams
@@ -597,10 +593,9 @@ function advance_ffjord_am!(
 
     log_acceptance /= T(temperature)
     
-    # acceptance = min(1, exp(log_acceptance))
-    acceptance = logistic(log_acceptance)
+    acceptance = min(one(T), exp(log_acceptance))
+    # acceptance = logistic(log_acceptance)
 
-    # if log(rand(rng, T)) < log_acceptance
     if rand(rng, T) < acceptance
         empty!(clusters)
         append!(clusters, proposed_clusters)
@@ -622,15 +617,15 @@ function advance_ffjord_am!(
         i = di.am.algo4.i
         gamma = (i+1)^-(1/(1 + di.am.algo4.lambda))
         
-        di.am.algo4.logscale += gamma * (acceptance - di.am.algo4.target)
+        di.am.algo4.logscale = di.am.algo4.logscale + gamma * (acceptance - di.am.algo4.acceptance_target)
         
-        mu = di.am.algo4.mu[:]
-        dX = hyperparams._.nn.params - mu
-        di.am.algo4.mu .+= gamma * dX
+        dX = hyperparams._.nn.params - di.am.algo4.mu
+        dXdX = dX * dX'
         
-        sigma = dX * dX'
-        di.am.algo4.sigma .+= gamma * (sigma - di.am.algo4.sigma)
+        di.am.algo4.mu .= (1 - gamma) * di.am.algo4.mu + gamma * hyperparams._.nn.params
+        di.am.algo4.sigma .= (1 - gamma) * di.am.algo4.sigma + gamma * dXdX
         di.am.algo4.sigma .= (di.am.algo4.sigma + di.am.algo4.sigma') / 2
+
     end
 
     return hyperparams
@@ -642,7 +637,7 @@ function advance_hyperparams_amwg!(
     clusters::Vector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    amwg_batch_size=50, acceptance_target::T=T(0.44)
+    amwg_batch_size=30, acceptance_target::T=T(0.44)
     ) where {T, D, E}
 
     di = diagnostics

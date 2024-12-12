@@ -27,7 +27,7 @@ module FlowingClusters
     using DifferentialEquations: Tsit5
     using DiffEqFlux: Lux, Chain, Dense, 
                       FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff,
-                      kaiming_uniform, zeros64, softsign
+                      kaiming_uniform, zeros64, randn64, softsign
     export Chain, Dense, kaiming_uniform, zeros64, softsign
 
     using ComponentArrays: ComponentArray
@@ -67,7 +67,7 @@ module FlowingClusters
     export logprobgenerative
 
     include("model/ffjord.jl")
-    export forwardffjord, backwardffjord, reflow
+    export forwardffjord, backwardffjord, reflow, uniformbias, dense_nn
 
     include("sampler.jl")
     export advance_gibbs!, sequential_gibbs!, advance_splitmerge_seq!,

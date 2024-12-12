@@ -122,3 +122,20 @@ function reflow(rng::AbstractRNG, clusters::AbstractVector{IndexCluster{T, D, E}
 
     return (clusters=[IndexCluster(cluster.elements, new_base2original) for cluster in clusters], deltalogpxs=deltalogpxs)
 end
+
+function uniformbias(lower, upper)
+    fun(rng, outdims, _) = rand(rng, Uniform(lower, upper), outdims, 1)
+    return fun
+end
+
+function dense_nn(nbnodes::Int...; act=softsign)
+    nn = Chain(
+        [Dense(nbnodes[i], nbnodes[i+1], 
+            act, 
+            # init_bias=randn64, 
+            # init_bias=(i + 1 == length(nbnodes) ? zeros64 : uniformbias(-4, 4)), 
+            init_weight=kaiming_uniform(gain=0.1)
+            ) for i in 1:length(nbnodes)-1]...
+    )
+    return nn
+end

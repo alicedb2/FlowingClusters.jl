@@ -82,8 +82,8 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
         
         am_mu = zeros(T, nn_D)
         am_sigma = Matrix{T}(I(nn_D))
-        # logscale0 = 2 * log(2.38) - log(nn_D)
-        logscale0 = 2 * log(0.1) - log(nn_D)
+        logscale0 = 2 * log(2.38) - log(nn_D)
+        # logscale0 = 2 * log(0.1) - log(nn_D)
 
         am = ComponentArray{T}(algo0=(L=0.0, 
                                       x=am_x, 
@@ -91,7 +91,7 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                                       safetyprob=0.5, 
                                       safetysigma=0.1), 
                               algo4=(i=0.0, 
-                                     target=0.44,
+                                     acceptance_target=0.234,
                                      lambda=0.0,
                                      logscale=logscale0, 
                                      mu=am_mu, 
