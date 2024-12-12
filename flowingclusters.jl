@@ -1,26 +1,23 @@
 #!/usr/bin/env -S julia --color=yes --startup-file=no
 
-using ArgParse, Term
-using SplitMaskStandardize
-using Distributions: Uniform
-using JSON, JLD2
 using Pkg
+using ArgParse
+using Term
 
-Pkg.activate(".")
-using FlowingClusters
+Pkg.activate(@__DIR__, io=devnull)
 
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--input"
+        "--input", "-i"
             help="Data file"
             arg_type=String
             required=true
-        "--species"
+        "--species", "-s"
             help="Species to analyze"
             arg_type=String
             required=true
-        "--predictors"
+        "--predictors", "-p"
             help="Predictors to use"
             nargs='+'
             arg_type=String
@@ -29,7 +26,7 @@ function parse_commandline()
             help="Number of MCMC samples"
             arg_type=Int
             default=200
-        "--nb-iter"
+        "--nb-iter", "-n"
             help="Number of iterations"
             arg_type=Int
             default=-1
@@ -75,12 +72,24 @@ function parse_commandline()
             help="Prefix for output files"
             arg_type=String
             default="output"
-        "--output-dir"
+        "--output-dir", "-o"
             help="Output directory"
             arg_type=String
             default="."
         "--progress-output"
             help="Output progress"
+            arg_type=String
+            default="repl"
+        # "--evaluate-fc"
+        #     help="Evaluate FlowingClusters model on data"
+        #     arg_type=Bool
+        #     default=true
+        "--evaluate-bioclim"
+            help="Evaluate BIOCLIM model on data"
+            arg_type=Bool
+            default=false
+        "--evaluate-brt"
+            help="Evaluate BRT model on data"
             arg_type=Bool
             default=false
     end
@@ -88,8 +97,13 @@ function parse_commandline()
     return parse_args(s)
 end
 
-function main()
-    parsed_args = parse_commandline()
+parsed_args = parse_commandline()
+
+print("Initializing FlowingClusters.jl...")
+using FlowingClusters
+println("done!")
+
+function main(parsed_args)
     
     dataset_file = abspath(parsed_args["input"])
     dataset = SMSDataset(dataset_file, seed=parsed_args["seed"], subsample=parsed_args["subsample"], splits=parsed_args["splits"])
@@ -108,6 +122,14 @@ function main()
     end
     if isnothing(dataset_seed)
         dataset_seed = rand(1:10^6)
+    end
+
+    if parsed_args["progress-output"] == "repl"
+        progressoutput = :repl
+    elseif parsed_args["progress-output"] == "file"
+        progressoutput = :file
+    else
+        progressoutput = joinpath(output_dir, parsed_args["progress-output"])
     end
 
     println(@green @bold "Flowing Cluster analysis")
@@ -141,8 +163,8 @@ function main()
 
     training_dataset = dataset.training.presence(species).standardize(predictors...)(predictors...)
 
-    brt_eval = evaluate_brt(dataset, species, predictors)
-    bioclim_eval = evaluate_bioclim(dataset, species, predictors)
+    bioclim_eval = parsed_args["evaluate-bioclim"] ? evaluate_bioclim(dataset, species, predictors) : nothing
+    brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors) : nothing
 
     mkpath(output_dir)
 
@@ -154,8 +176,8 @@ function main()
         advance_chain!(chain, nb_pretraining, 
             nb_ffjord_am=1, nb_amwg=0, nb_gibbs=0, nb_splitmerge=0,
             attempt_map=false, sample_every=nothing,
-            progressoutput=joinpath(output_dir, output_prefix))
-        burn!(chain, nb_pretraining)
+            progressoutput=progressoutput)
+        burn!(chain, nb_pretraining-10)
         sequential_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
     end
     println(chain)
@@ -166,7 +188,7 @@ function main()
         nb_amwg=parsed_args["nb-amwg"],
         nb_splitmerge=parsed_args["nb-splitmerge"],
         attempt_map=true, sample_every=:autocov, stop_criterion=:sample_ess,
-        progressoutput=joinpath(output_dir, output_prefix))
+        progressoutput=progressoutput)
 
     fc_eval = evaluate_flowingclusters(chain, dataset, species, predictors)
     
@@ -193,13 +215,12 @@ function main()
     return results
 end
 
-include("$(pwd())/misc/bioclim_predictions.jl")
-include("$(pwd())/misc/brt_predictions.jl")
-include("$(pwd())/misc/flowingclusters_predictions.jl")
-
-function initbias(lower, upper)
-    fun(rng, outdims, _) = rand(rng, Uniform(lower, upper), outdims, 1)
-    return fun
+if parsed_args["evaluate-bioclim"]
+    include(joinpath(@__DIR__, "misc", "bioclim_predictions.jl"))
 end
+if parsed_args["evaluate-brt"]
+    include(joinpath(@__DIR__, "misc", "brt_predictions.jl"))
+end
+include(joinpath(@__DIR__, "misc", "flowingclusters_predictions.jl"))
         
-main()
+main(parsed_args)
