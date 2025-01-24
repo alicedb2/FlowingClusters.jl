@@ -245,3 +245,12 @@ function idinit(mult::T, direction=:in) where T <: Real
         return w
     end
 end
+
+function dswish(x)
+    # return sigmoid.(x) .* (1 .+ x .* exp.(-x) .* sigmoid.(x))
+    return sigmoid(x) * (1 + x * exp(-x) * sigmoid(x))
+end
+
+function softswish(x)
+    return x * (1 + softsign(x)) / 2
+end

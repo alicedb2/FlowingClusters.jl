@@ -34,21 +34,23 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
         nn_params = ComponentArray{T}(nn_params)
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
 
+        # nnalpha = 1.0
         nnalpha = 0.001
-        effscale = 10.0
+        scale = 1.0
 
         return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
                         pyp=(alpha=T(7.77),),# sigma=0.0),
                         niw=(mu=zeros(T, D),
-                            lambda=one(T),
+                            lambda=T(1.0),
                             flatL=unfold(LowerTriangular{T}(I(D))),
-                            nu=T(D + 1)),
+                            nu=T(D - 0)),
                         nn=(params=nn_params,
                             # "Almost logarithmic" hyperprior
                             # on the weights of the neural network
                             # The effectice scale is sqrt(alpha)*scale
                             # in this case ~ 9.5
-                            prior=(alpha=T(nnalpha), scale=T(effscale/sqrt(nnalpha)))
+                            # prior=(alpha=T(nnalpha), scale=T(effscale/sqrt(nnalpha)))
+                            prior=(alpha=T(nnalpha), scale=T(scale))
                             )
                         ),
                     (nn=nn, nns=nn_state)
@@ -57,15 +59,17 @@ function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng
 end
 
 datadimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
-datadimension(::ComponentArray) = size(hyperparamsarray.niw.mu, 1)
+datadimension(hyperparamsarray::ComponentArray) = size(hyperparamsarray.niw.mu, 1)
 
+modeldimension(hpparams::ComponentArray) = size(hpparams, 1)
+modeldimension(hyperparams::FCHyperparams) = size(hyperparams._, 1)
 function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
     dim = size(hyperparams._, 1)
-    dim -= !include_nn ? 0 : size(hyperparams._.nn, 1)
+    if !include_nn
+        dim -= size(hyperparams._.nn, 1)
+    end
     return dim
 end
-
-modeldimension(hyperparams::FCHyperparams) = size(hyperparams._, 1)
 
 hasnn(hyperparams::AbstractFCHyperparams) = hyperparams isa FCHyperparamsFFJORD
 hasnn(hyperparamsarray::ComponentArray) = :nn in keys(hyperparamsarray)

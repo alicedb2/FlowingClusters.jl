@@ -1,7 +1,8 @@
 function predictive_distribution(
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D};
-    ignore_weights=false
+    ignore_weights=false,
+    ignore_empty=false
     ) where {T, D, E}
 
     alpha = hyperparams._.pyp.alpha
@@ -10,15 +11,22 @@ function predictive_distribution(
 
     if ignore_weights
         weights = ones(T, length(clusters) + 1)
-        weights ./= sum(weights)
+        if ignore_empty
+            weights[end] = zero(T)
+        end
     else
         weights = T.(length.(clusters))
-        push!(weights, alpha)
-        weights ./= sum(weights)
+        if ignore_empty
+            push!(weights, zero(T))
+        else
+            push!(weights, alpha)
+        end
     end
 
-    updated_mvstudent_degs_mus_sigs = updated_mvstudent_params(clusters, mu, lambda, psi, nu, add_empty=true)
+    weights ./= sum(weights)
 
+    updated_mvstudent_degs_mus_sigs = updated_mvstudent_params(clusters, mu, lambda, psi, nu, add_empty=true)
+    # println("in predictive_distribution(clusters, hyperparams):    #cluster=$(length(updated_mvstudent_degs_mus_sigs))")
     return predictive_distribution(weights, updated_mvstudent_degs_mus_sigs)
 end
 
@@ -31,6 +39,8 @@ function predictive_distribution(
 
     d = length(first(mvstudent_degs_mus_sigs).mu_c)
 
+    # println("in predictive_distribution(weights, mvparams):    #weights=$(length(component_weights)) #mvstclusters=$(length(mvstudent_degs_mus_sigs))")
+
     return MixtureModel(
             [MvTDist(df, d, mu, PDMat((sig + sig')/2)) for (df, mu, sig) in mvstudent_degs_mus_sigs],
             Categorical(component_weights)
@@ -41,33 +51,51 @@ end
 function tail_probability(
     component_weights::AbstractVector{T},
     mvstudent_degs_mus_sigs::AbstractVector{@NamedTuple{df_c::T, mu_c::Vector{T}, sigma_c::Matrix{T}}};
-    nb_rejection_samples=10000, rng=default_rng()
+    nb_rejection_samples=10000,
+    per_cluster=false,
+    rng=default_rng()
     ) where T
 
-    @assert isapprox(sum(component_weights), one(T)) "sum(component_weights) = $(sum(component_weights)) !~= 1"
+    if !per_cluster
+        dist = predictive_distribution(component_weights, mvstudent_degs_mus_sigs)
 
-    dist = predictive_distribution(component_weights, mvstudent_degs_mus_sigs)
+        sample_draw = rand(rng, dist, nb_rejection_samples)
+        logpdf_samples = logpdf(dist, sample_draw)
 
-    sample_draw = rand(rng, dist, nb_rejection_samples)
-    logpdf_samples = logpdf(dist, sample_draw)
-
-    function tailprob_func(coordinates::AbstractArray{T, D}) where D
-        isocontours = logpdf(dist, coordinates)
-        if size(isocontours) === ()
-            # if a single coordinate is passed return a single tail probability
-            in_tail = logpdf_samples .<= isocontours
-            return mean(in_tail)
-        else
-            # else if an array of coordinates is passed
-            # we assume the first axis is the dimension of coordinates
-            # and we return an array of tail probabilities of
-            # the same shape as the trailing dimensions
-            in_tail = logpdf_samples .<= reshape(isocontours, 1, size(isocontours)...)
-            return dropdims(mean(in_tail, dims=1), dims=1)
+        function tailprob_func(coordinate::AbstractVector{T})
+            return tailprob_func(reshape(coordinate, :, 1))[1]
         end
+
+        function tailprob_func(coordinates::AbstractArray{T})
+            isocontours = logpdf(dist, coordinates)
+            in_tail = logpdf_samples .<= reshape(isocontours, 1, size(isocontours)...)
+            tail_probs = dropdims(mean(in_tail, dims=1), dims=1)
+            return tail_probs
+        end
+
+        return tailprob_func
+    else
+
+        cluster_dists = predictive_distribution.(fill([1.0], length(component_weights)), (x->[x]).(mvstudent_degs_mus_sigs))
+        cluster_draws = rand.(rng, cluster_dists, nb_rejection_samples)
+        cluster_logpdf_samples = logpdf.(cluster_dists, cluster_draws)
+
+        function clusters_tailprob_func(coordinate::AbstractVector{T})
+            return clusters_tailprob_func(reshape(coordinate, :, 1))[1]
+        end
+
+        function clusters_tailprob_func(coordinates::AbstractArray{T, D}) where D
+            cluster_isocontours = logpdf.(cluster_dists, Ref(coordinates))
+            cluster_in_tails = [logpdf_samples .<= reshape(isocontours, 1, size(isocontours)...) for (isocontours, logpdf_samples) in zip(cluster_isocontours, cluster_logpdf_samples)]
+            cluster_tail_probs = [mean(in_tail, dims=1) for in_tail in cluster_in_tails]
+            max_cluster_tail_probs = dropdims(maximum(cat(cluster_tail_probs..., dims=1), dims=1), dims=1)
+            return max_cluster_tail_probs
+        end
+
+        return clusters_tailprob_func
+
     end
 
-    return tailprob_func
 
 end
 
@@ -76,7 +104,10 @@ function tail_probability(
     hyperparams::AbstractFCHyperparams{T, D};
     nb_rejection_samples=10000,
     rng=default_rng(),
-    ignore_weights=false) where {T, D, E}
+    per_cluster=false,
+    ignore_weights=false,
+    ignore_empty=false
+    ) where {T, D, E}
 
     alpha = hyperparams._.pyp.alpha
     mu, lambda, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.nu
@@ -84,34 +115,48 @@ function tail_probability(
 
     if ignore_weights
         weights = ones(T, length(clusters) + 1)
+        if ignore_empty
+            weights[end] = zero(T)
+        end
     else
         weights = T.(length.(clusters))
-        push!(weights, alpha)
+        if ignore_empty
+            push!(weights, zero(T))
+        else
+            push!(weights, T(alpha))
+        end
     end
 
     weights ./= sum(weights)
 
     updated_mvstudent_degs_mus_sigs = updated_mvstudent_params(clusters, mu, lambda, psi, nu, add_empty=true)
+    # println("in tail_probability(clusters, hyperparams):       #clusters=$(length(clusters)) #mvstclusters=$(length(updated_mvstudent_degs_mus_sigs))")
 
     if hasnn(hyperparams)
-        basetailprob_func = tail_probability(weights, updated_mvstudent_degs_mus_sigs, nb_rejection_samples=nb_rejection_samples, rng=rng)
-        # ffjord_mdl = FFJORD(hyperparams.nn, (0.0f0, 1.0f0), (datadimension(hyperparams),), Tsit5(), basedist=nothing, ad=AutoForwardDiff())
+        basetailprob_func = tail_probability(weights, updated_mvstudent_degs_mus_sigs, nb_rejection_samples=nb_rejection_samples, per_cluster=per_cluster, rng=rng)
         function tailprob_func(coordinates::AbstractArray)
-            # ret, _ = ffjord_mdl(coordinates isa AbstractVector ? reshape(coordinates, :, 1) : reshape(coordinates, first(size(coordinates)), :), hyperparams.nn_params, hyperparams.nn_state)
-            # base_elements = reshape(ret.z, size(coordinates)...)
+            # Project elements to the base space
             _, _, base_elements = forwardffjord(rng, coordinates, hyperparams)
             return basetailprob_func(base_elements)
         end
         return tailprob_func
     else
-        return tail_probability(weights, updated_mvstudent_degs_mus_sigs, nb_rejection_samples=nb_rejection_samples, rng=rng)
+        return tail_probability(weights, updated_mvstudent_degs_mus_sigs, nb_rejection_samples=nb_rejection_samples, per_cluster=per_cluster, rng=rng)
     end
 
 end
 
-function tail_probability(clusters_samples::AbstractVector{<:AbstractVector{<:AbstractCluster{T, D, E}}}, hyperparams_samples::AbstractVector{<:AbstractFCHyperparams{T, D}}; nb_rejection_samples=10000, rng=default_rng()) where {T, D, E}
+function tail_probability(
+    clusters_samples::AbstractVector{<:AbstractVector{<:AbstractCluster{T, D, E}}},
+    hyperparams_samples::AbstractVector{<:AbstractFCHyperparams{T, D}};
+    nb_rejection_samples=10000,
+    rng=default_rng(),
+    per_cluster=false,
+    ignore_weights=false,
+    ignore_empty=false
+    ) where {T, D, E}
 
-    tailprob_funcs = tail_probability.(clusters_samples, hyperparams_samples, nb_rejection_samples=nb_rejection_samples, rng=rng)
+    tailprob_funcs = tail_probability.(clusters_samples, hyperparams_samples, nb_rejection_samples=nb_rejection_samples, rng=rng, per_cluster=per_cluster, ignore_weights=ignore_weights, ignore_empty=ignore_empty)
 
     function tailprob(coordinates::AbstractArray)
         tailprob_samples = [tailprob_func(coordinates) for tailprob_func in tailprob_funcs]
@@ -126,8 +171,17 @@ function tail_probability(clusters_samples::AbstractVector{<:AbstractVector{<:Ab
 
 end
 
-function tail_probability_summary(clusters_samples::AbstractVector{<:AbstractVector{<:AbstractCluster{T, D, E}}}, hyperparams_samples::AbstractVector{<:AbstractFCHyperparams{T, D}}; nb_rejection_samples=10000) where {T, D, E}
-    tailprob_func = tail_probability(clusters_samples, hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
+function tail_probability_summary(
+    clusters_samples::AbstractVector{<:AbstractVector{<:AbstractCluster{T, D, E}}},
+    hyperparams_samples::AbstractVector{<:AbstractFCHyperparams{T, D}};
+    nb_rejection_samples=10000,
+    rng=default_rng(),
+    per_cluster=false,
+    ignore_weights=false,
+    ignore_empty=false
+    ) where {T, D, E}
+
+    tailprob_func = tail_probability(clusters_samples, hyperparams_samples, nb_rejection_samples=nb_rejection_samples, rng=rng, per_cluster=per_cluster, ignore_weights=ignore_weights, ignore_empty=ignore_empty)
 
     function _CI95(x::AbstractArray)
         return quantile(x, 0.975) - quantile(x, 0.025)

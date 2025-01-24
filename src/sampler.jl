@@ -552,7 +552,7 @@ function advance_ffjord_am!(
             step_distrib = MvNormal(di.am.algo0.safetysigma^2 / nn_D * I(nn_D))
         else
             safety_component = MvNormal(di.am.algo0.safetysigma^2 / nn_D * I(nn_D))
-            
+
             # try
             empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma_algo0(diagnostics))
             # catch e
@@ -592,7 +592,7 @@ function advance_ffjord_am!(
     log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
 
     log_acceptance /= T(temperature)
-    
+
     acceptance = min(one(T), exp(log_acceptance))
     # acceptance = logistic(log_acceptance)
 
@@ -613,18 +613,20 @@ function advance_ffjord_am!(
 
     elseif algo === :algo4
 
-        di.am.algo4.i += 1
-        i = di.am.algo4.i
+        i = (di.am.algo4.i += 1)
         gamma = (i+1)^-(1/(1 + di.am.algo4.lambda))
-        
+        # gamma *= rand(rng)
+
         di.am.algo4.logscale = di.am.algo4.logscale + gamma * (acceptance - di.am.algo4.acceptance_target)
-        
+
         dX = hyperparams._.nn.params - di.am.algo4.mu
         dXdX = dX * dX'
-        
+
         di.am.algo4.mu .= (1 - gamma) * di.am.algo4.mu + gamma * hyperparams._.nn.params
         di.am.algo4.sigma .= (1 - gamma) * di.am.algo4.sigma + gamma * dXdX
         di.am.algo4.sigma .= (di.am.algo4.sigma + di.am.algo4.sigma') / 2
+        # Prevent collapse
+        di.am.algo4.sigma .+= di.am.algo4.eps * I(length(dX))
 
     end
 
@@ -637,7 +639,7 @@ function advance_hyperparams_amwg!(
     clusters::Vector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    amwg_batch_size=30, acceptance_target::T=T(0.44)
+    amwg_batch_size=30, acceptance_target::T=T(0.234)
     ) where {T, D, E}
 
     di = diagnostics
@@ -651,7 +653,7 @@ function advance_hyperparams_amwg!(
         advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL))
         advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
         if hasnn(hyperparams)
-            # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
+            advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
             # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
         end
     end

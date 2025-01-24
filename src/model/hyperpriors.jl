@@ -65,7 +65,14 @@ function log_nn_prior_univariate_tdists(nn_params::ComponentArray{T}, alpha::T, 
 
     # Stable t-distribution of index alpha on all weights.
     # When alpha=1 this becomes the Cauchy distribution
-    weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
+
+    # weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
+
+    # Last layer
+    # weights = nn_params[keys(nn_params)[end]].weight
+
+    # Last layer mean
+    weights = [mean(nn_params[keys(nn_params)[end]].weight)]
 
     # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
     return sum(-(1 + alpha)/2 * log1pexp.(2 * log.(abs.(weights)) .- 2 * log(abs(scale)) .- log(alpha)) .- 1/2 * log(pi * alpha) .- log(scale) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
@@ -86,6 +93,7 @@ end
 
 # log_nn_prior(args...; kwargs...) = log_nn_prior_logarithmic(args...; kwargs...)
 log_nn_prior(args...; kwargs...) = log_nn_prior_univariate_tdists(args...; kwargs...)
+# log_nn_prior(args...; kwargs...) = 0
 
 # Neat!
 function log_jeffreys_t_alpha(alpha::T) where T
@@ -115,7 +123,7 @@ end
 function log_jeffreys_t(alpha::T, scale::T) where T
     # Otherwise weird stuff happens with polygamma
     if alpha < 10000# && scale < 10000
-        # Just for fun the 2.0984 is the normalization 
+        # Just for fun the 2.0984 is the normalization
         # constant of the alpha part of the Jeffreys
         # prior which is independent of the improper scale part
         return -log(2.0984) - log(abs(scale)) + 1/2 * log(alpha / 2 / (3 + alpha) * (polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2)) - 1 / (1 + alpha)^2)

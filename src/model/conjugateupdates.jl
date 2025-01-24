@@ -130,6 +130,6 @@ function updated_mvstudent_params(
     return updated_mvstudent_degs_mus_sigs
 end
 
-function updated_mvstudent_params(clusters::Vector{<:AbstractCluster}, hyperparams::AbstractFCHyperparams; add_empty=true)
+function updated_mvstudent_params(clusters::AbstractVector{<:AbstractCluster}, hyperparams::AbstractFCHyperparams; add_empty=true)
     return updated_mvstudent_params(clusters, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu, add_empty=add_empty)
 end

@@ -52,8 +52,8 @@ end
 
 # load_chain(filename::AbstractString) = JLD2.load(filename)["chain"]
 
-function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing, perturb=false, seed=default_rng()) where T
-    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn, perturb=perturb, seed=seed)
+function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing, perturb_data=false, seed=default_rng()) where T
+    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn, perturb_data=perturb_data, seed=seed)
 end
 
 function FCChain(
@@ -62,7 +62,7 @@ function FCChain(
     nb_samples=200,
     strategy=:sequential,
     optimize=false,
-    perturb=false,
+    perturb_data=false,
     ffjord_nn=nothing,
     seed=default_rng()
     ) where {T, C <: AbstractCluster}
@@ -88,7 +88,7 @@ function FCChain(
     hyperparams._.pyp.alpha = 10.0 / log(length(data))
 
     # Keep unique observations only
-    if perturb
+    if perturb_data
         println("    Perturbing data...")
         data = [el .+ Vector{T}(1e-6 * randn(rng, D)) for el in data]
     end
@@ -213,7 +213,7 @@ nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{<:FCHyperparamsFFJORD}}, b
 nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
 nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
 
-function burn!(chain::FCChain, n=0; burn_map=false)
+function burn!(chain::FCChain, n=0; burn_map=false, burn_samples=false)
 
     # n given as a proportion of the chain length
     if (n isa Float64) && (-1 < n < 1)
@@ -247,6 +247,14 @@ function burn!(chain::FCChain, n=0; burn_map=false)
             chain.map_idx = length(chain.logprob_chain)
         else
             chain.map_idx -= n
+        end
+
+        if burn_samples
+            while !isempty(chain.samples_idx) && first(chain.samples_idx) <= 0
+                popfirst!(chain.clusters_samples)
+                popfirst!(chain.hyperparams_samples)
+                popfirst!(chain.samples_idx)
+            end
         end
 
     end

@@ -169,7 +169,7 @@ function SetCluster(clusters::AbstractVector{BitCluster{T, D, E}}; check=false):
 end
 
 # No real way to do that efficiently
-# other than by repeatedly traversing 
+# other than by repeatedly traversing
 # b2o and testing vector equalities.
 # Unfortunately this means the masks
 # are not guaranteed to be the same between

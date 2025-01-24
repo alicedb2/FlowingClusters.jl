@@ -79,23 +79,34 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
         nn_D = size(nn_params, 1)
         am_x = zeros(T, nn_D)
         am_xx = zeros(T, nn_D, nn_D)
-        
+
         am_mu = zeros(T, nn_D)
         am_sigma = Matrix{T}(I(nn_D))
         logscale0 = 2 * log(2.38) - log(nn_D)
-        # logscale0 = 2 * log(0.1) - log(nn_D)
 
-        am = ComponentArray{T}(algo0=(L=0.0, 
-                                      x=am_x, 
-                                      xx=am_xx, 
-                                      safetyprob=0.5, 
-                                      safetysigma=0.1), 
-                              algo4=(i=0.0, 
-                                     acceptance_target=0.234,
-                                     lambda=0.0,
-                                     logscale=logscale0, 
-                                     mu=am_mu, 
-                                     sigma=am_sigma))
+        # small lambda adapts the global scale and
+        # proposal distribution more quickly in the
+        # beginning and then the speed of adaptation
+        # decays much slower. This is a good thing
+        # because the global scale and proposal
+        # distribution should be adapted quickly
+        # in the beginning to avoid getting stuck
+        # in a local minimum slowly later on
+        # to avoid overfitting.
+        algo4_lambda = 0.1
+
+        am = ComponentArray{T}(algo0=(L=0.0,
+                                      x=am_x,
+                                      xx=am_xx,
+                                      safetyprob=0.5,
+                                      safetysigma=0.1),
+                               algo4=(i=0.0,
+                                      acceptance_target=0.234,
+                                      lambda=algo4_lambda,
+                                      logscale=logscale0,
+                                      mu=am_mu,
+                                      sigma=am_sigma,
+                                      eps=1e-8))
 
         return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am)
 

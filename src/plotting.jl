@@ -28,7 +28,7 @@ function plot!(ax, clusters::AbstractVector{<:AbstractCluster{T, D, E}}; proj=[1
             end
         end
     end
-    axislegend(ax)
+    axislegend(ax, nbanks=2)
 
     return ax
 end
@@ -80,7 +80,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     p_map_axis = Axis(fig[1:2, 1], title="MAP state ($(length(chain.map_clusters)) clusters)")
     deco!(p_map_axis)
     plot!(p_map_axis, chain.map_clusters; proj=proj, orig=true, rev=rev, nbclusters=nbclusters)
-    axislegend(p_map_axis)
+    # axislegend(p_map_axis)
 
     p_current_axis = Axis(fig[1:2, 2], title="Current state ($(length(chain.clusters)) clusters)")
     deco!(p_current_axis)
@@ -191,9 +191,9 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
         end
 
         nnscalec = nn_scale_chain(chain, burn)
-        nnscale_axis = Axis(fig[10, 2], title="FFJORD hyperprior scale")
+        nnscale_axis = Axis(fig[10, 2], title="FFJORD hyperprior log scale")
         deco!(nnscale_axis)
-        lines!(nnscale_axis, burn+1:N, nnscalec, label=nothing)
+        lines!(nnscale_axis, burn+1:N, log.(nnscalec), label=nothing)
         if map_idx > 0
             vlines!(nnscale_axis, [map_idx], label=nothing, color=:black)
         end
@@ -233,14 +233,14 @@ function deformation_figure_2d(hyperparams; lims=((-4, 4), (-4, 4)), proj=[1, 2]
         zsproj = setdiff(1:d, proj)
         _realprobgrid = zeros(d, 2 * nblines * nbpoints)
         _realprobgrid[proj, :] .= realprobgrid
-        _realprobgrid[zsproj, :] .= realzs        
+        _realprobgrid[zsproj, :] .= realzs
         realprobgrid = _realprobgrid
     end
     if !isnothing(realzs)
         zsproj = setdiff(1:d, proj)
         _baseprobgrid = zeros(d, 2 * nblines * nbpoints)
         _baseprobgrid[proj, :] .= baseprobgrid
-        _baseprobgrid[zsproj, :] .= realzs        
+        _baseprobgrid[zsproj, :] .= realzs
         baseprobgrid = _baseprobgrid
     end
 
@@ -249,18 +249,18 @@ function deformation_figure_2d(hyperparams; lims=((-4, 4), (-4, 4)), proj=[1, 2]
 
     fig = Figure(size=(900, 500));
     ax1 = Axis(fig[1, 1], xlabel="Real axis 1 -> Base axis 1", ylabel="Real axis 2 -> Base axis 2")
-    scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=2, label=nothing); 
+    scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=2, label=nothing);
     scatter!(ax1, realprobgrid[proj[1], :], realprobgrid[proj[2], :], color=:grey, alpha=0.5, markersize=2, label=nothing);
 
-    scatter!(ax1, Float64[], Float64[], color=:grey, markersize=15, label="Real/environmental space"); 
-    scatter!(ax1, Float64[], Float64[], color=Cycled(1), markersize=15, label="Base space"); 
-    
+    scatter!(ax1, Float64[], Float64[], color=:grey, markersize=15, label="Real/environmental space");
+    scatter!(ax1, Float64[], Float64[], color=Cycled(1), markersize=15, label="Base space");
+
     ylims!(ax1, nothing, 7);
-    axislegend(ax1, framecolor=:white); 
+    axislegend(ax1, framecolor=:white);
     _deco!(ax1)
 
     ax2 = Axis(fig[1, 2], xlabel="Base axis 1 -> Real axis 1", ylabel="Base axis 2 -> Real axis 2")
-    scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=2, label=nothing); 
+    scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=2, label=nothing);
     scatter!(ax2, baseprobgrid[proj[1], :], baseprobgrid[proj[2], :], color=:grey, alpha=0.5, markersize=2, label=nothing);
     scatter!(ax2, Float64[], Float64[], color=:grey, markersize=15, label="Base space");
     scatter!(ax2, Float64[], Float64[], color=Cycled(1), markersize=15, label="Real/environmental space");

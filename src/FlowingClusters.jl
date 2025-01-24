@@ -25,10 +25,12 @@ module FlowingClusters
     using DataStructures: CircularBuffer
 
     using DifferentialEquations: Tsit5
-    using DiffEqFlux: Lux, Chain, Dense, 
+    using DiffEqFlux: Lux, Chain, Dense,
                       FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff,
-                      kaiming_uniform, zeros64, randn64, softsign
-    export Chain, Dense, kaiming_uniform, zeros64, softsign
+                      kaiming_uniform, zeros64, rand64, randn64,
+                      softsign, tanh_fast, sigmoid, relu,
+                      swish, mish, sigmoid_fast
+    export Chain, Dense, kaiming_uniform, zeros64, softsign, swish, sigmoid, tanh_fast, dswish
 
     using ComponentArrays: ComponentArray
 
@@ -88,6 +90,9 @@ module FlowingClusters
     include("prediction.jl")
     export predictive_distribution, tail_probability, tail_probability_summary
 
+    include("optimize.jl")
+    export optimize_hyperparams, optimize_hyperparams!
+
     include("helpers.jl")
     export generate_data
     export performance_statistics, best_score_threshold
@@ -97,6 +102,6 @@ module FlowingClusters
     export logdetpsd, logdetflatLL
     export freedmandiaconis, doane
     export project_vec, project_mat
-    export idinit
+    export idinit, dswish, softswish
 
 end

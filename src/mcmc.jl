@@ -51,16 +51,16 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
         for i in 1:nb_amwg
             advance_hyperparams_amwg!(
-                chain.rng, 
-                chain.clusters, 
-                chain.hyperparams, 
-                chain.diagnostics, 
+                chain.rng,
+                chain.clusters,
+                chain.hyperparams,
+                chain.diagnostics,
                 amwg_batch_size=amwg_batch_size)
         end
 
         for i in 1:nb_ffjord_am
             advance_ffjord_am!(
-                chain.rng, 
+                chain.rng,
                 chain.clusters,
                 chain.hyperparams,
                 chain.diagnostics,
@@ -138,7 +138,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
         sample_eta = -1
 
-        start_sampling_at = 5 * modeldimension(chain.hyperparams)
+        start_sampling_at = 2 * modeldimension(chain.hyperparams)
 
         if sample_every !== nothing
             if sample_every === :autocov
@@ -146,9 +146,16 @@ function advance_chain!(chain::FCChain, nb_steps=100;
                     curr_idx = length(chain)
                     # Consider only the last half of the chain
                     burnt_starting_point = floor(Int, 0.5 * curr_idx)
+
                     convergence_burnt = ess_rhat(largestcluster_chain(chain)[burnt_starting_point:end])
+                    # convergence_burnt = ess_rhat(alpha_chain(chain)[burnt_starting_point:end])
+
                     latest_sample_idx = length(chain.samples_idx) > 0 ? chain.samples_idx[end] : 0
-                    next_sample_idx = ceil(Int64, latest_sample_idx + 2 * burnt_starting_point / convergence_burnt.ess)
+                    if isfinite(convergence_burnt.ess)
+                        next_sample_idx = ceil(Int64, latest_sample_idx + 2 * burnt_starting_point / convergence_burnt.ess)
+                    else
+                        next_sample_idx = Inf
+                    end
                     sample_eta = next_sample_idx + 1 - curr_idx
                     if curr_idx > next_sample_idx
                         push!(chain.clusters_samples, deepcopy(chain.clusters))
@@ -195,14 +202,15 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if length(chain.samples_idx) >= 20
             samples_convergence = ess_rhat([maximum(length.(s)) for s in chain.clusters_samples])
         else
-            samples_convergence = (ess=0, rhat=0)
+            samples_convergence = (ess=0.0, rhat=0.0)
         end
 
-        delta_minusnn_map = 0.0
-        if hasnn(chain.hyperparams)
-            delta_minusnn_map += log_nn_prior(chain.map_hyperparams._.nn.params, chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
-            delta_minusnn_map += log_jeffreys_nn(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
-        end
+        # delta_minusnn_map = 0.0
+        # if hasnn(chain.hyperparams)
+        #     delta_minusnn_map += log_nn_prior(chain.map_hyperparams._.nn.params, chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
+        #     delta_minusnn_map += log_jeffreys_nn(chain.map_hyperparams._.nn.prior.alpha, chain.map_hyperparams._.nn.prior.scale)
+        # end
+        logprob_map_noffjord = logprobgenerative(chain.map_clusters, chain.map_hyperparams, chain.rng, ignoreffjord=true)
 
         pretraining = nb_gibbs == 0 && nb_splitmerge == 0 && nb_amwg == 0 && nb_ffjord_am > 0
 
@@ -219,7 +227,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         ("split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
         ("MAP #attempts/#successes", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
         ("nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.map_clusters)), $(length(filter(c -> length(c) > 1, chain.map_clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.map_clusters)))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters]))"),
-        ("last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(chain.map_logprob - delta_minusnn_map, digits=1)))"),
+        ("last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(logprob_map_noffjord, digits=1)))"),
         ("last MAP at", last_map_idx),
         ("last checkpoint at", last_checkpoint)
         ])
@@ -241,7 +249,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         #     flush(stdout)
         # end
 
-        if !isnothing(sample_every) && 
+        if !isnothing(sample_every) &&
             (stop_criterion === :sample_ess)
             # Once we have enough samples
             # stop once the ess of the samples
@@ -274,7 +282,7 @@ function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=fal
     map_hyperparams = deepcopy(chain.hyperparams)
 
     # Greedy Gibbs!
-    # We only use Gibbs moves in the base space 
+    # We only use Gibbs moves in the base space
     # to construct an approximate MAP state so both
     # map_mll and test_mll use ignoreffjord=true
     map_mll = logprobgenerative(map_clusters_attempt, chain.map_hyperparams, ignoreffjord=true)

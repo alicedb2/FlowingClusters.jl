@@ -13,8 +13,8 @@ function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparams::Abst
     if hasnn(hyperparams)
         return forwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
     else
-        return (;logpx=zero(T), 
-                 deltalogpxs=zero(T), 
+        return (;logpx=zero(T),
+                 deltalogpxs=zero(T),
                  z=x)
     end
 end
@@ -24,16 +24,16 @@ function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::Ab
     if hasnn(hyperparams)
         return forwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
     else
-        return (;logpx=zeros(T, size(x)[2:end]), 
-                 deltalogpxs=zeros(T, size(x)[2:end]), 
+        return (;logpx=zeros(T, size(x)[2:end]),
+                 deltalogpxs=zeros(T, size(x)[2:end]),
                  z=x)
     end
 end
 
 function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{logpx::T, deltalogpxs::T, z::Vector{T}} where {T}
     ret = forwardffjord(rng, reshape(x, :, 1), hyperparamsarray, ffjord, t=t)
-    return (; logpx=first(ret.logpx), 
-              deltalogpxs=first(ret.deltalogpxs), 
+    return (; logpx=first(ret.logpx),
+              deltalogpxs=first(ret.deltalogpxs),
               z=reshape(ret.z, :))
 end
 
@@ -52,8 +52,8 @@ function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarra
     ffjord_mdl = FFJORD(ffjord.nn, (zero(T), t), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = first(ffjord_mdl(_x, hyperparamsarray.nn.params, ffjord.nns, rng))
 
-    return (; logpx=reshape(ret.logpx, size(x)[2:end]...), 
-              deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...), 
+    return (; logpx=reshape(ret.logpx, size(x)[2:end]...),
+              deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...),
               z=reshape(ret.z, size(x)...))
 end
 
@@ -128,12 +128,11 @@ function uniformbias(lower, upper)
     return fun
 end
 
-function dense_nn(nbnodes::Int...; act=softsign)
+function dense_nn(nbnodes::Int...; act=tanh_fast)
     nn = Chain(
-        [Dense(nbnodes[i], nbnodes[i+1], 
-            act, 
-            # init_bias=randn64, 
-            # init_bias=(i + 1 == length(nbnodes) ? zeros64 : uniformbias(-4, 4)), 
+        [Dense(nbnodes[i], nbnodes[i+1],
+            act,
+            init_bias=(args...; kwargs...) -> rand64(args...; kwargs...),
             init_weight=kaiming_uniform(gain=0.1)
             ) for i in 1:length(nbnodes)-1]...
     )

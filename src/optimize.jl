@@ -1,51 +1,57 @@
-# function optimize_hyperparams(
-#     clusters::AbstractVector{<:AbstractCluster},
-#     hyperparams0::AbstractFCHyperparams;
-#     verbose=false
-#     )
+function optimize_hyperparams(
+    clusters::AbstractVector{<:AbstractCluster{T, D, E}},
+    hyperparams0::AbstractFCHyperparams{T, D};
+    verbose=true
+    ) where {T, D, E}
 
-#     objfun(x) = -logprobgenerative(clusters, x)
+    ax = getfield(hyperparams0._, :axes)
+    opt_options = Options(iterations=1000, show_trace=verbose)
 
-#     x0 = unpack(hyperparams0)
+    # We do not include nn_scale in the optimization
+    if hasnn(hyperparams0) && hyperparams0.nn.prior.scale == one(T)
+        x0 = transform(hyperparams0._)[1:end-1]
+    else
+        x0 = transform(hyperparams0._)
+    end
 
-#     if verbose
-#         function callback(x)
-#             print(" * Iter $(x.iteration),   objfun $(-round(x.value, digits=2)),   g_norm $(round(x.g_norm, digits=8))\r")
-#             return false
-#         end
-#     else
-#         callback =  nothing
-#     end
-#     opt_options = Options(iterations=50000,
-#                           x_tol=1e-8,
-#                           f_tol=1e-6,
-#                           g_tol=2e-2,
-#                           callback=callback)
+    function objfun(x)
+        if hasnn(hyperparams0) && hyperparams0.nn.prior.scale == one(T)
+            transformed_hparray = ComponentArray([x[:]; 0.0], ax)
+        else
+            transformed_hparray = ComponentArray(x[:], ax)
+        end
+        params = backtransform!(transformed_hparray)
+        logprob = -logprobgenerative(clusters, params)
+        if !isfinite(logprob)
+            @warn println(params)
+        end
+        return logprob
+    end
 
-#     optres = optimize(objfun, x0, NelderMead(), opt_options)
+    optres = optimize(objfun, x0, LBFGS(), opt_options)
 
-#     if verbose
-#         println()
-#     end
+    if hasnn(hyperparams0) && hyperparams0.nn.prior.scale == one(T)
+        opt_hp = backtransform(ComponentArray([minimizer(optres)[:]; 0.0], ax))
+    else
+        opt_hp = backtransform(ComponentArray(minimizer(optres)[:], ax))
+    end
 
-#     opt_hp = pack(minimizer(optres))
+    hyperparams = deepcopy(hyperparams0)
+    hyperparams._ .= opt_hp
 
-#     return MNCRPHyperparams(opt_hp..., deepcopy(hyperparams0.diagnostics), hyperparams0.nn, hyperparams0.nn_params, hyperparams0.nn_state)
+    return (optres=optres, hyperparams=hyperparams)
 
-# end
+end
 
-# # function optimize_hyperparams!(clusters::Vector{Cluster}, hyperparams::MNCRPHyperparams; jacobian=false, verbose=false)
+function optimize_hyperparams!(
+    clusters::AbstractVector{<:AbstractCluster{T, D, E}},
+    hyperparams0::AbstractFCHyperparams{T, D};
+    verbose=true
+    ) where {T, D, E}
 
-# #     opt_res = optimize_hyperparams(clusters, hyperparams, jacobian=jacobian, verbose=verbose)
+    optres, hyperparams = optimize_hyperparams(clusters, hyperparams0, verbose=verbose)
+    hyperparams0._ .= hyperparams._
 
-# #     hyperparams.alpha = opt_res.alpha
-# #     hyperparams.mu = opt_res.mu
-# #     hyperparams.lambda = opt_res.lambda
-# #     hyperparams.flatL = opt_res.flatL
-# #     hyperparams.L = opt_res.L
-# #     hyperparams.psi = opt_res.psi
-# #     hyperparams.nu = opt_res.nu
+    return hyperparams0
 
-# #     return hyperparams
-
-# # end
+end
