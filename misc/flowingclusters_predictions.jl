@@ -1,9 +1,9 @@
-function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, predictors, perfstat=:MCC; nb_rejection_samples=50_000)
+function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, predictors, perfstat=:MCC; nb_rejection_samples=50_000, per_cluster=false)
 
     # Chain has already been trained on the training set
 
     # MAP and chain summary prediction functions
-    map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams)
+    map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams, per_cluster=per_cluster)
     map_nb_clusters = length(chain.map_clusters)
 
     # MAP predictions on validation set to find best threshold
@@ -28,7 +28,7 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
 
     if chain.clusters_samples.length >= 3
         # Chain predictions on validation set
-        chain_tailprob_fun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples)
+        chain_tailprob_fun = tail_probability_summary(chain.clusters_samples, chain.hyperparams_samples, nb_rejection_samples=nb_rejection_samples, per_cluster=per_cluster)
 
         validation_presabs_tailprob_summaries = chain_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
 
@@ -66,14 +66,14 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
         return (
             fc_MAP=(;
                 nb_clusters=map_nb_clusters,
-                test_map_performances, 
-                test_map_performances_atthresh, 
-                best_map_thresh
+                test_performances=test_map_performances,
+                test_performances_atthresh=test_map_performances_atthresh,
+                best_thresh=best_map_thresh
             ),
             fc_chain=(;
-                test_performances, 
+                test_performances,
                 test_performances_atthresh,
-                best_thresh, 
+                best_thresh,
                 best_scoring_method,
                 best_scoring_atthresh
                 )
@@ -83,8 +83,8 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
         return (
             fc_MAP=(;
                 nb_clusters=map_nb_clusters,
-                test_map_performances, 
-                test_map_performances_atthresh, 
+                test_map_performances,
+                test_map_performances_atthresh,
                 best_map_thresh
             ),
             fc_chain=nothing

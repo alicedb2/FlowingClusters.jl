@@ -38,9 +38,14 @@ function evaluate_bioclim(training_presence_predictors, dataset, species, predic
     bioclim = bioclim_predictor(training_presence_predictors)
 
     ####### Determine best threshold with validation set
-    validation_predictors = dataset.validation.standardize(predictors...)(predictors...)
-    validation_pres_mask = dataset.validation.presmask(species)
-    validation_abs_mask = dataset.validation.absmask(species)
+    if length(dataset) == 2
+        validation_dataset = dataset.training
+    else
+        validation_dataset = dataset.validation
+    end
+    validation_predictors = validation_dataset.standardize(predictors...)(predictors...)
+    validation_pres_mask = validation_dataset.presmask(species)
+    validation_abs_mask = validation_dataset.absmask(species)
     bioclim_validation_scores = bioclim(validation_predictors)
     best_thresh = best_score_threshold(bioclim_validation_scores[validation_pres_mask], bioclim_validation_scores[validation_abs_mask], statistic=perfstat)
 
@@ -50,14 +55,14 @@ function evaluate_bioclim(training_presence_predictors, dataset, species, predic
     test_abs_mask = dataset.test.absmask(species)
 
     bioclim_test_scores = bioclim(test_predictors)
-    bioclim_test_performances = map(x -> round(x, digits=5), performance_statistics(bioclim_test_scores[test_pres_mask], bioclim_test_scores[test_abs_mask]))
-    bioclim_test_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(bioclim_test_scores[test_pres_mask], bioclim_test_scores[test_abs_mask], threshold=best_thresh))
+    test_performances = map(x -> round(x, digits=5), performance_statistics(bioclim_test_scores[test_pres_mask], bioclim_test_scores[test_abs_mask]))
+    test_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(bioclim_test_scores[test_pres_mask], bioclim_test_scores[test_abs_mask], threshold=best_thresh))
     println("#####################")
-    println("    BIOCLIM stats without thresh: $perfstat=$(getindex(bioclim_test_performances, perfstat))")
-    println("    BIOCLIM stats at best thresh: $perfstat=$(getindex(bioclim_test_performances_atthresh, perfstat))")
+    println("    BIOCLIM stats without thresh: $perfstat=$(getindex(test_performances, perfstat))")
+    println("    BIOCLIM stats at best thresh: $perfstat=$(getindex(test_performances_atthresh, perfstat))")
 
-    return (; bioclim_test_performances, 
-              bioclim_test_performances_atthresh, 
+    return (; test_performances,
+              test_performances_atthresh,
               best_thresh)
 end
 
