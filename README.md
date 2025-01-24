@@ -18,7 +18,7 @@ z_j~\vert~ & \omega, \mu_\omega, \Sigma_\omega & \quad\sim\quad & \text{MvNormal
 ```
 If a neural network $f(z)$ with input and output dimension $d$ is provided, the generative model is modified according to the FFJORD
 ```math
-\log p_\mathbf{x}(\mathbf{x}) = \log p_\mathbf{z}(\mathbf{z}) - \sum_{i=1}^N \int_0^1 \text{tr}\frac{\partial f(z_j(t))}{z_j(t)}dt
+\log p_\mathbf{x}(\mathbf{x}) = \log p_\mathbf{z}(\mathbf{z}) - \sum_{i=1}^N \int_0^1 \text{tr}\frac{\partial f(z_j(t))}{\partial z_j(t)}dt
 ```
 where $x_j = z_j(1)$ and $z_j = z_j(0)$. The generative model $p(\mathbf{x})$ of the data in real space becomes a deformation of the unsupervised clustering generative model $p(\mathbf{z})$ in the base space. We choose an isotropic location-scale $t$ distribution prior over the weights of the last hidden layer (Neal 1996 _Bayesian Learning for Neural Networks_)
 ```math
