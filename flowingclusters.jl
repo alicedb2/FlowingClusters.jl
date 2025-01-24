@@ -101,9 +101,8 @@ end
 parsed_args = parse_commandline()
 
 print("Initializing FlowingClusters.jl...")
+using JSON, JLD2
 using SplitMaskStandardize
-using JSON
-using JLD2
 using FlowingClusters
 println("done!")
 
