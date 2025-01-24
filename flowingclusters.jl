@@ -1,4 +1,4 @@
-#!/usr/bin/env -S julia --color=yes --startup-file=no
+#!/usr/bin/env -S julia +1.10 --color=yes --startup-file=no
 
 using Pkg
 using ArgParse
@@ -22,7 +22,7 @@ function parse_commandline()
             nargs='+'
             arg_type=String
             required=true
-        "--nb-mcmc-samples"
+        "--nb-mcmc-samples", "-m"
             help="Number of MCMC samples"
             arg_type=Int
             default=200
@@ -30,30 +30,34 @@ function parse_commandline()
             help="Number of iterations"
             arg_type=Int
             default=-1
-        "--nb-gibbs"
+        "--nb-gibbs", "-g"
             help="Number of Gibbs sweep per iteration"
             arg_type=Int
             default=1
-        "--nb-splitmerge"
+        "--nb-splitmerge", "-c"
             help="Number of split-merge attempts per iteration"
             arg_type=Int
             default=350
-        "--nb-amwg"
+        "--nb-amwg", "-w"
             help="Number of adaptive Metropolis within Gibbs per iteration"
             arg_type=Int
             default=1
-        "--hidden-nodes"
+        "--hidden-nodes", "-H"
             help="Activate FFJORD, hidden layer sizes (off by default)"
             nargs='*'
             arg_type=Int
-        "--nb-ffjord-am"
+        "--activation-function", "-f"
+            help="Activation function (tanh_fast, softsign, relu, sigmoid_fast, swish, etc.)"
+            arg_type=String
+            default="tanh_fast"
+        "--nb-ffjord-am", "-a"
             help="Number of adaptive Metropolis per iteration"
             arg_type=Int
             default=1
         "--pre-training"
-            help="Pre-training neural network"
+            help="Number of iteration of pre-training over neural network"
             arg_type=Int
-            default=6000
+            default=0
         "--seed"
             help="Seed for MCMC"
             arg_type=Int
@@ -82,16 +86,13 @@ function parse_commandline()
             default="repl"
         # "--evaluate-fc"
         #     help="Evaluate FlowingClusters model on data"
-        #     arg_type=Bool
-        #     default=true
+        #     action=:store_true
         "--evaluate-bioclim"
             help="Evaluate BIOCLIM model on data"
-            arg_type=Bool
-            default=false
+            action=:store_true
         "--evaluate-brt"
             help="Evaluate BRT model on data"
-            arg_type=Bool
-            default=false
+            action=:store_true
     end
 
     return parse_args(s)
@@ -100,29 +101,34 @@ end
 parsed_args = parse_commandline()
 
 print("Initializing FlowingClusters.jl...")
+using SplitMaskStandardize
+using JSON
+using JLD2
 using FlowingClusters
 println("done!")
 
 function main(parsed_args)
-    
+
     dataset_file = abspath(parsed_args["input"])
-    dataset = SMSDataset(dataset_file, seed=parsed_args["seed"], subsample=parsed_args["subsample"], splits=parsed_args["splits"])
     output_prefix = parsed_args["output-prefix"]
     output_dir = abspath(parsed_args["output-dir"])
-    
+
     seed = parsed_args["seed"]
     dataset_seed = parsed_args["dataset-seed"]
-    
+
     species = Symbol(parsed_args["species"])
     predictors = Tuple(Symbol.(parsed_args["predictors"]))
+
     nb_mcmc_samples = parsed_args["nb-mcmc-samples"]
 
     if isnothing(seed)
-        seed = rand(1:10^6)
+        seed = rand(1:10^8)
     end
     if isnothing(dataset_seed)
-        dataset_seed = rand(1:10^6)
+        dataset_seed = rand(1:10^8)
     end
+
+    dataset = SMSDataset(dataset_file, seed=dataset_seed, subsample=parsed_args["subsample"], splits=parsed_args["splits"])
 
     if parsed_args["progress-output"] == "repl"
         progressoutput = :repl
@@ -139,32 +145,37 @@ function main(parsed_args)
     println(@blue("            Splits:  "), parsed_args["splits"])
     println(@blue("     Output prefix:  "), output_prefix)
     println(@blue("  Output directory:  "), output_dir)
-    println()    
+    println()
     println(@blue("           Species:  "), species)
     println(@blue("        Predictors:  "), predictors)
     println(@blue("    # MCMC samples:  "), nb_mcmc_samples)
-    
+
     nn = nothing
     hn = parsed_args["hidden-nodes"]
+    _act = parsed_args["activation-function"]
     nb_pretraining = parsed_args["pre-training"]
     if !isempty(hn)
         println(@blue("     Pre-training:  "), nb_pretraining)
         println(@blue("     Hidden nodes:  "), hn)
+        println(@blue("   Activation fun:  "), _act)
+
+        if hasproperty(FlowingClusters, Symbol(_act))
+            act = getproperty(FlowingClusters, Symbol(_act))
+        elseif hasproperty(FlowingClusters.Lux, Symbol(_act))
+            act = getproperty(FlowingClusters.Lux, Symbol(_act))
+        else
+            error("Activation function $_act not found. Available functions can be found here: https://lux.csail.mit.edu/stable/api/NN_Primitives/ActivationFunctions")
+        end
 
         hn = [length(predictors), hn..., length(predictors)]
-        nn = Chain(
-            [Dense(hn[i], hn[i+1], 
-                   softsign, 
-                   init_bias=(i + 1 == length(hn) ? zeros64 : initbias(-4, 4)), 
-                   init_weight=kaiming_uniform(gain=0.1)
-                ) for i in 1:length(hn)-1]...
-        )
+        nn = dense_nn(hn...; act=act)
     end
 
     training_dataset = dataset.training.presence(species).standardize(predictors...)(predictors...)
 
     bioclim_eval = parsed_args["evaluate-bioclim"] ? evaluate_bioclim(dataset, species, predictors) : nothing
-    brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors) : nothing
+    brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=false) : nothing
+    brt_eval_halftraining = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=true) : nothing
 
     mkpath(output_dir)
 
@@ -172,15 +183,19 @@ function main(parsed_args)
         chain = FCChain(training_dataset, SetCluster, nb_samples=nb_mcmc_samples, strategy=:sequential, seed=seed)
     else
         chain = FCChain(training_dataset, SetCluster, nb_samples=nb_mcmc_samples, strategy=:1, ffjord_nn=nn, seed=seed)
+        if nb_pretraining > 0
         # Pre-training neural network
-        advance_chain!(chain, nb_pretraining, 
-            nb_ffjord_am=1, nb_amwg=0, nb_gibbs=0, nb_splitmerge=0,
-            attempt_map=false, sample_every=nothing,
-            progressoutput=progressoutput)
-        burn!(chain, nb_pretraining-10)
-        sequential_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
+            advance_chain!(chain, nb_pretraining,
+                nb_ffjord_am=1, nb_amwg=0, nb_gibbs=0, nb_splitmerge=0,
+                attempt_map=false, sample_every=nothing,
+                progressoutput=progressoutput)
+            burn!(chain, nb_pretraining)
+            sequential_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
+        end
     end
     println(chain)
+
+    fc_eval_init = evaluate_flowingclusters(chain, dataset, species, predictors)
 
     advance_chain!(chain, parsed_args["nb-iter"],
         nb_ffjord_am=parsed_args["nb-ffjord-am"],
@@ -191,7 +206,7 @@ function main(parsed_args)
         progressoutput=progressoutput)
 
     fc_eval = evaluate_flowingclusters(chain, dataset, species, predictors)
-    
+
     result_file = joinpath(output_dir, "$(output_prefix)_pid$(getpid())_result.json")
     chain_file = joinpath(output_dir, "$(output_prefix)_pid$(getpid())_chain.jld2")
 
@@ -199,7 +214,9 @@ function main(parsed_args)
         parsed_args=parsed_args,
         dataset=dataset_file,
         brt_eval=brt_eval,
+        brt_eval_halftraining=brt_eval_halftraining,
         bioclim_eval=bioclim_eval,
+        fc_eval_init=fc_eval_init,
         fc_eval=fc_eval,
         trainingsize=(presence=size(dataset.training.presence(species).__df, 1), absence=size(dataset.training.absence(species).__df, 1)),
         chain_file=chain_file
@@ -222,5 +239,5 @@ if parsed_args["evaluate-brt"]
     include(joinpath(@__DIR__, "misc", "brt_predictions.jl"))
 end
 include(joinpath(@__DIR__, "misc", "flowingclusters_predictions.jl"))
-        
+
 main(parsed_args)
