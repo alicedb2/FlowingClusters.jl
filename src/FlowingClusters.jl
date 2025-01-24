@@ -59,7 +59,6 @@ module FlowingClusters
     export nn_chain, nn_alpha_chain, nn_scale_chain
     export ess_rhat, stats
 
-
     include("model/conjugateupdates.jl")
     export log_Zniw, updated_niw_hyperparams, updated_mvstudent_params, log_cluster_weight
 

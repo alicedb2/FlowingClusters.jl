@@ -53,10 +53,6 @@ function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:Abstract
 
     hasnn(hpa) || throw(ArgumentError("You must provide a neural network when using FFJORD"))
 
-    if hpa.nn.prior.alpha <= 0 || hpa.nn.prior.scale <= 0
-        return -Inf
-    end
-
     logprob_noffjord = logprobgenerative(clusters, hyperparamsarray; ignorehyperpriors=ignorehyperpriors)
 
     if !isfinite(logprob_noffjord)

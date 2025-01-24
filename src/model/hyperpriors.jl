@@ -54,6 +54,7 @@ function log_nn_prior_logarithmic(nn_params::ComponentArray{T}, alpha::T, scale:
 end
 
 # Product of univariate Student t-distributions
+# Converges to the normal distribution when α -> ∞
 function log_nn_prior_univariate_tdists(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
 
     # return zero(T)
@@ -72,7 +73,7 @@ function log_nn_prior_univariate_tdists(nn_params::ComponentArray{T}, alpha::T, 
     # weights = nn_params[keys(nn_params)[end]].weight
 
     # Last layer mean
-    weights = [mean(nn_params[keys(nn_params)[end]].weight)]
+    weights = mean(nn_params[keys(nn_params)[end]].weight)
 
     # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
     return sum(-(1 + alpha)/2 * log1pexp.(2 * log.(abs.(weights)) .- 2 * log(abs(scale)) .- log(alpha)) .- 1/2 * log(pi * alpha) .- log(scale) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
