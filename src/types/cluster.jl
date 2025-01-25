@@ -668,7 +668,7 @@ function _recalculate_sums!(cluster::AbstractCluster)
 end
 function _recalculate_sums!(clusters::AbstractVector{<:AbstractCluster})
     _recalculate_sums!.(clusters)
-    return cluster.sum_x, cluster.sum_xx
+    return clusters
 end
 
 ## _pop/_push functions do not perform any check

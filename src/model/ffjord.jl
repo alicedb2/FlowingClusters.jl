@@ -129,9 +129,16 @@ function uniformbias(lower, upper)
 end
 
 function dense_nn(nbnodes::Int...; act=tanh_fast)
+    
+    if act isa Tuple || act isa AbstractVector
+        @assert length(act) == length(nbnodes)-1
+    elseif act isa Function
+        act = fill(act, length(nbnodes)-1)
+    end
+
     nn = Chain(
         [Dense(nbnodes[i], nbnodes[i+1],
-            act,
+            act[i],
             init_bias=(args...; kwargs...) -> rand64(args...; kwargs...),
             init_weight=kaiming_uniform(gain=0.1)
             ) for i in 1:length(nbnodes)-1]...
