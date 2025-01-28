@@ -226,7 +226,7 @@ function main(parsed_args)
         nb_gibbs=parse_intfloat(parsed_args["nb-gibbs"]),
         nb_amwg=parse_intfloat(parsed_args["nb-amwg"]),
         nb_splitmerge=parse_intfloat(parsed_args["nb-splitmerge"]),
-        attempt_map=parsed_args["disable-map"], sample_every=:autocov, stop_criterion=:sample_ess,
+        attempt_map=!parsed_args["disable-map"], sample_every=:autocov, stop_criterion=:sample_ess,
         progressoutput=progressoutput)
 
     fc_eval = evaluate_flowingclusters(chain, dataset, species, predictors)
