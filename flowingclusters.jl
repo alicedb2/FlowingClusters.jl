@@ -1,4 +1,4 @@
-#!/usr/bin/env -S julia +1.10 --color=yes --startup-file=no
+#!/usr/bin/env -S julia --color=yes --startup-file=no
 
 using Pkg
 using ArgParse
