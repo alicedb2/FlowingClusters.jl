@@ -58,6 +58,9 @@ function parse_commandline()
             help="Number of iteration of pre-training over neural network"
             arg_type=Int
             default=0
+        "--disable-map"
+            help="Disable MAP estimation"
+            action=:store_true
         "--seed"
             help="Seed for MCMC"
             arg_type=Int
@@ -165,7 +168,9 @@ function main(parsed_args)
         end
         act = Function[]
         for __act in _act
-            if hasproperty(FlowingClusters, Symbol(__act))
+            if hasproperty(Base, Symbol(__act))
+                push!(act, getproperty(Base, Symbol(__act)))
+            elseif hasproperty(FlowingClusters, Symbol(__act))
                 push!(act, getproperty(FlowingClusters, Symbol(__act)))
             elseif hasproperty(FlowingClusters.Lux, Symbol(__act))
                 push!(act, getproperty(FlowingClusters.Lux, Symbol(__act)))
@@ -220,8 +225,8 @@ function main(parsed_args)
         nb_ffjord_am=parse_intfloat(parsed_args["nb-ffjord-am"]),
         nb_gibbs=parse_intfloat(parsed_args["nb-gibbs"]),
         nb_amwg=parse_intfloat(parsed_args["nb-amwg"]),
-        nb_splitmerge=parsed_argsparse_intfloat(["nb-splitmerge"]),
-        attempt_map=true, sample_every=:autocov, stop_criterion=:sample_ess,
+        nb_splitmerge=parse_intfloat(parsed_args["nb-splitmerge"]),
+        attempt_map=parsed_args["disable-map"], sample_every=:autocov, stop_criterion=:sample_ess,
         progressoutput=progressoutput)
 
     fc_eval = evaluate_flowingclusters(chain, dataset, species, predictors)
@@ -237,7 +242,10 @@ function main(parsed_args)
         bioclim_eval=bioclim_eval,
         fc_eval_init=fc_eval_init,
         fc_eval=fc_eval,
-        trainingsize=(presence=size(dataset.training.presence(species).__df, 1), absence=size(dataset.training.absence(species).__df, 1)),
+        datasetsize=(training=(presence=size(dataset.training.presence(species).__df, 1), absence=size(dataset.training.absence(species).__df, 1)),
+                     validation=(presence=size(dataset.validation.presence(species).__df, 1), absence=size(dataset.validation.absence(species).__df, 1)),
+                     test=(presence=size(dataset.test.presence(species).__df, 1), absence=size(dataset.test.absence(species).__df, 1))
+        ),
         chain_file=chain_file
     )
 
