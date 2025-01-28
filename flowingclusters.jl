@@ -9,48 +9,48 @@ using Term
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
-        "--input", "-i"
+        "--input"
             help="Data file"
             arg_type=String
             required=true
-        "--species", "-s"
+        "--species"
             help="Species to analyze"
             arg_type=String
             required=true
-        "--predictors", "-p"
+        "--predictors"
             help="Predictors to use"
             nargs='+'
             arg_type=String
             required=true
-        "--nb-mcmc-samples", "-m"
+        "--nb-mcmc-samples"
             help="Number of MCMC samples"
             arg_type=Int
             default=200
-        "--nb-iter", "-n"
+        "--nb-iter"
             help="Number of iterations"
             arg_type=Int
             default=-1
-        "--nb-gibbs", "-g"
+        "--nb-gibbs"
             help="Number or probability of Gibbs sweep per iteration"
             arg_type=String
             default="1"
-        "--nb-splitmerge", "-c"
+        "--nb-splitmerge"
             help="Number of split-merge attempts or average number of successful split-merges moves per iteration"
             arg_type=String
             default="100"
-        "--nb-amwg", "-w"
+        "--nb-amwg"
             help="Number or probability of adaptive Metropolis within Gibbs per iteration"
             arg_type=String
             default="1"
-        "--hidden-nodes", "-H"
+        "--hidden-nodes"
             help="Activate FFJORD, hidden layer sizes (off by default)"
             nargs='*'
             arg_type=Int
-        "--activation-function", "-f"
+        "--activation-function"
             help="Activation function (tanh_fast, softsign, relu, sigmoid_fast, swish, etc.)"
             arg_type=String
             default="tanh_fast"
-        "--nb-ffjord-am", "-a"
+        "--nb-ffjord-am"
             help="Number of adaptive Metropolis per iteration"
             arg_type=String
             default="1"
@@ -76,7 +76,7 @@ function parse_commandline()
             help="Prefix for output files"
             arg_type=String
             default="output"
-        "--output-dir", "-o"
+        "--output-dir"
             help="Output directory"
             arg_type=String
             default="."
