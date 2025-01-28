@@ -5,9 +5,9 @@ function _burnlength(len, burnin)
         end
     elseif burnin < 0
         if -1 < burnin < 0
-            burnin = round(Int, -burnin * len)
+            burnin = round(Int, burnin * len)
         end
-        burnin = len - burnin
+        burnin = len + burnin
     elseif iszero(burnin)
         return 0
     end
