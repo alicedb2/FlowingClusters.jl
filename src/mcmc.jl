@@ -296,7 +296,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             end
         end
 
-        if isfile("stop")
+        if isfile("stop") && progressoutput === :repl
             rm("stop")
             break
         end
