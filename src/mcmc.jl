@@ -58,8 +58,8 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 
     for step in 1:_nb_steps
 
-        if 0 < nb_amwg < 1 && rand(chain.rng) < nb_amwg
-            _nb_amwg = 1
+        if 0 < nb_amwg < 1
+            _nb_amwg = rand(chain.rng) < nb_amwg ? 1 : 0
         else
             _nb_amwg = nb_amwg
         end
@@ -106,11 +106,13 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         merge_per_step = (diagnostics.accepted.splitmerge.merge - current_accepted_merge) # /nb_merge_attempts
 
         # Gibbs sweep
+        gibbs_sweep = false
         if nb_gibbs isa Int64
             for i in 1:nb_gibbs
                 advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
             end
         elseif (0 < nb_gibbs < 1) && (rand(chain.rng) < nb_gibbs)
+            gibbs_sweep = true
             advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
         end
 
@@ -140,7 +142,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             # diagnostics.splitmerge.nb_splitmerge = (1 - alpha * rel_error) * diagnostics.splitmerge.nb_splitmerge + alpha * rel_error * (diagnostics.splitmerge.nb_splitmerge + K_p * error)
             diagnostics.splitmerge.nb_splitmerge = max(1.0, diagnostics.splitmerge.nb_splitmerge)
             nb_splitmerge = round(Float64, diagnostics.splitmerge.nb_splitmerge)
-        end    
+        end
 
         ########################
 
@@ -251,7 +253,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         # if progressoutput === :repl || progressoutput === :file || progressoutput
         next!(progbar; desc=(pretraining ? "Pre-training: " : "Sampling: "),
         showvalues=[
-        ("step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($nb_gibbs, $nb_splitmerge, $nb_amwg, $(hasnn(chain.hyperparams) ? "$nb_ffjord_am@$(round(ffjord_am_temperature, digits=1))" : "no fjjord"))"),
+        ("step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($(gibbs_sweep ? "\033[37m$nb_gibbs\033[34m" : "$nb_gibbs"), $nb_splitmerge, $nb_amwg, $(hasnn(chain.hyperparams) ? "$nb_ffjord_am@$(round(ffjord_am_temperature, digits=1))" : "no fjjord"))"),
         ("chain length", "$(length(chain))"),
         ("conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
         ("#chain samples (oldest, latest, eta) convergence", "$(progressoutput === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (drop if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(progressoutput === :repl ? "\033[0m" : "")"),

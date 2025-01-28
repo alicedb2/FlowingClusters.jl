@@ -269,7 +269,7 @@ function deformation_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)),
     return fig
 end
 
-function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=10, bounds_scaling_factor=2.0)
+function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -292,14 +292,14 @@ function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs
 
     if !isnothing(realzs)
         zsproj = setdiff(1:d, proj)
-        _realprobgrid = zeros(d, 2 * nblines * nbpoints)
+        _realprobgrid = zeros(d, 2 * nblines * nblines)
         _realprobgrid[proj, :] .= realprobgrid
         _realprobgrid[zsproj, :] .= realzs
         realprobgrid = _realprobgrid
     end
     if !isnothing(realzs)
         zsproj = setdiff(1:d, proj)
-        _baseprobgrid = zeros(d, 2 * nblines * nbpoints)
+        _baseprobgrid = zeros(d, 2 * nblines * nblines)
         _baseprobgrid[proj, :] .= baseprobgrid
         _baseprobgrid[zsproj, :] .= realzs
         baseprobgrid = _baseprobgrid
@@ -308,15 +308,15 @@ function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs
     fig = Figure(size=(900, 500));
     ax1 = Axis(fig[1, 1], xlabel="Real axis $(proj[1]) -> Base axis $(proj[1])", ylabel="Real axis $(proj[2]) -> Base axis $(proj[2])")
     basespace = nothing
-    scatter!(ax1, realprobgrid[proj[1], :], realprobgrid[proj[2], :], color=:grey, markersize=9, label=nothing);
+    scatter!(ax1, realprobgrid[proj[1], :], realprobgrid[proj[2], :], color=:grey, markersize=6, alpha=0.2, label=nothing);
     for _t in LinRange(0, 1, 50)
         _, basespace = forwardffjord(rng, realprobgrid, hyperparams, t=_t)
         scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=2, color=Cycled(1), label=nothing);
     end
-    scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=9, color=Cycled(1), label=nothing);
+    scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=6, color=Cycled(1), label=nothing);
 
-    scatter!(ax1, Float64[], Float64[], color=:grey, markersize=15, label="Real/environmental space");
-    scatter!(ax1, Float64[], Float64[], color=Cycled(1), markersize=15, label="Flow towards base space");
+    scatter!(ax1, Float64[], Float64[], color=:grey, markersize=15, label="Real space");
+    scatter!(ax1, Float64[], Float64[], color=Cycled(1), markersize=15, label="Flow from real to base space");
 
     # ylims!(ax1, nothing, 7);
     xlims!(ax1, _scale_lims(first(gridlims)..., bounds_scaling_factor));
@@ -327,16 +327,16 @@ function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs
 
     ax2 = Axis(fig[1, 2], xlabel="Base axis $(proj[1]) -> Real axis $(proj[1])", ylabel="Base axis $(proj[2]) -> Real axis $(proj[2])")
     
-    scatter!(ax2, baseprobgrid[proj[1], :], baseprobgrid[proj[2], :], color=:grey, alpha=0.5, markersize=9, label=nothing);
+    scatter!(ax2, baseprobgrid[proj[1], :], baseprobgrid[proj[2], :], color=:grey, alpha=0.2, markersize=6, label=nothing);
     realspace = nothing
     for _t in LinRange(0, 1, nbpoints)
         realspace = backwardffjord(rng, baseprobgrid, hyperparams, t=_t)
         scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=2, color=Cycled(1), label=nothing);
     end
-    scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=9, color=Cycled(1), label=nothing);
+    scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=6, color=Cycled(1), label=nothing);
 
     scatter!(ax2, Float64[], Float64[], color=:grey, markersize=15, label="Base space");
-    scatter!(ax2, Float64[], Float64[], color=Cycled(1), markersize=15, label="Flow towards real/environmental space");
+    scatter!(ax2, Float64[], Float64[], color=Cycled(1), markersize=15, label="Flow from base to real space");
     # ylims!(ax2, nothing, 7);
     xlims!(ax2, _scale_lims(last(gridlims)..., bounds_scaling_factor));
     ylims!(ax2, _scale_lims(last(gridlims)..., bounds_scaling_factor));

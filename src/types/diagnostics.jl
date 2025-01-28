@@ -21,10 +21,10 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
 
     sizeflatL = div(D * (D + 1), 2)
 
-    splitmerge = ComponentArray{T}(alpha=0.003,
+    splitmerge = ComponentArray{T}(alpha=0.01,
                                    K_p=0.5,
                                    K_i=0.1,
-                                   nb_splitmerge=200.0,
+                                   nb_splitmerge=50.0,
                                    target_per_step=1.0,
                                    integral_error=0.0)
 
