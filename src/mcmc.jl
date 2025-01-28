@@ -134,9 +134,9 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         if nb_splitmerge isa Float64
             # Learning rate
             # alpha = diagnostics.splitmerge.alpha
-            alpha = diagnostics.splitmerge.alpha * (length(chain)+1)^-(1/(1 + 10))
+            alpha = diagnostics.splitmerge.alpha * (length(chain)+1)^-(1/(1 + 100))
             # K_p = diagnostics.splitmerge.K_p
-            error = sign(diagnostics.splitmerge.target_per_step - (split_per_step + merge_per_step))
+            error = diagnostics.splitmerge.target_per_step - (split_per_step + merge_per_step)
             # rel_error = error / diagnostics.splitmerge.target_per_step
             diagnostics.splitmerge.nb_splitmerge = diagnostics.splitmerge.nb_splitmerge * exp(alpha * error)
             # diagnostics.splitmerge.nb_splitmerge = (1 - alpha * rel_error) * diagnostics.splitmerge.nb_splitmerge + alpha * rel_error * (diagnostics.splitmerge.nb_splitmerge + K_p * error)
@@ -296,8 +296,10 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             end
         end
 
-        if isfile("stop") && progressoutput === :repl
-            rm("stop")
+        if isfile("stop")
+            if progressoutput === :repl
+                rm("stop")
+            end
             break
         end
 
