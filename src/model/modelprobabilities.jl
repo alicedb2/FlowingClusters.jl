@@ -35,8 +35,8 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
         log_hyperpriors += log_jeffreys_crp_alpha(alpha, N)
 
         # NIW hyperpriors
-        log_hyperpriors += -log(lambda)
-        log_hyperpriors += -D * logdetpsd(psi)
+        log_hyperpriors += log_jeffreys_lambda(lambda)
+        log_hyperpriors += log_jeffreys_psi(psi)
         log_hyperpriors += log_jeffreys_nu(nu, D)
 
     end
@@ -59,11 +59,12 @@ function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:Abstract
         return -Inf
     end
 
-    logprob_ffjord = -sum(forwardffjord(rng, Matrix(clusters, orig=true), hpa, ffjord).deltalogpxs)
-    logprob_ffjord += log_nn_prior(hpa.nn.params, hpa.nn.prior.alpha, hpa.nn.prior.scale)
+    ret = forwardffjord(rng, Matrix(clusters, orig=true), hpa, ffjord)
+    logprob_ffjord = -sum(ret.deltalogpxs)
+    # logprob_ffjord += log_nn_prior(hpa.nn.params, hpa.nn.prior...)
 
     if !ignorehyperpriors
-        logprob_ffjord += log_jeffreys_nn(hpa.nn.prior.alpha, hpa.nn.prior.scale)
+        # logprob_ffjord += log_nn_hyperprior(hpa.nn.prior...)
     end
 
     logprob = (logprob_noffjord + logprob_ffjord) / temperature

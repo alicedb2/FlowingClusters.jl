@@ -254,73 +254,73 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 end
 
 
-function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
+# function advance_nn_alpha!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
 
-    hasnn(hyperparams) || return 0
+#     hasnn(hyperparams) || return 0
 
-    step_distrib = Normal(zero(T), stepsize)
+#     step_distrib = Normal(zero(T), stepsize)
 
-    nn_alpha = hyperparams._.nn.prior.alpha
-    nn_scale = hyperparams._.nn.prior.scale
-    nn_params = hyperparams._.nn.params
+#     nn_alpha = hyperparams._.nn.prior.alpha
+#     nn_scale = hyperparams._.nn.prior.scale
+#     nn_params = hyperparams._.nn.params
 
-    log_nn_alpha = log(nn_alpha)
+#     log_nn_alpha = log(nn_alpha)
 
-    proposed_log_nn_alpha = log_nn_alpha + rand(rng, step_distrib)
-    proposed_nn_alpha = exp(proposed_log_nn_alpha)
+#     proposed_log_nn_alpha = log_nn_alpha + rand(rng, step_distrib)
+#     proposed_nn_alpha = exp(proposed_log_nn_alpha)
 
-    # Hastings factor on log-scale
-    log_acceptance = proposed_log_nn_alpha - log_nn_alpha
+#     # Hastings factor on log-scale
+#     log_acceptance = proposed_log_nn_alpha - log_nn_alpha
 
-    log_acceptance += log_nn_prior(nn_params, proposed_nn_alpha, nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
-    log_acceptance += log_jeffreys_nn(proposed_nn_alpha, nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
+#     log_acceptance += log_nn_prior(nn_params, proposed_nn_alpha, nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
+#     log_acceptance += log_jeffreys_nn(proposed_nn_alpha, nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
-    acceptance = min(one(T), exp(log_acceptance))
-    # acceptance = logistic(log_acceptance)
+#     acceptance = min(one(T), exp(log_acceptance))
+#     # acceptance = logistic(log_acceptance)
 
-    if rand(rng, T) < acceptance
-        hyperparams._.nn.prior.alpha = proposed_nn_alpha
-        diagnostics.accepted.nn.prior.alpha += 1
-    else
-        diagnostics.rejected.nn.prior.alpha += 1
-    end
+#     if rand(rng, T) < acceptance
+#         hyperparams._.nn.prior.alpha = proposed_nn_alpha
+#         diagnostics.accepted.nn.prior.alpha += 1
+#     else
+#         diagnostics.rejected.nn.prior.alpha += 1
+#     end
 
-    return hyperparams
-end
+#     return hyperparams
+# end
 
-function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
+# function advance_nn_scale!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D}
 
-    hasnn(hyperparams) || return 0
+#     hasnn(hyperparams) || return 0
 
-    step_distrib = Normal(zero(T), stepsize)
+#     step_distrib = Normal(zero(T), stepsize)
 
-    nn_alpha = hyperparams._.nn.prior.alpha
-    nn_scale = hyperparams._.nn.prior.scale
-    nn_params = hyperparams._.nn.params
+#     nn_alpha = hyperparams._.nn.prior.alpha
+#     nn_scale = hyperparams._.nn.prior.scale
+#     nn_params = hyperparams._.nn.params
 
-    log_nn_scale = log(nn_scale)
+#     log_nn_scale = log(nn_scale)
 
-    proposed_log_nn_scale = log_nn_scale + rand(rng, step_distrib)
-    proposed_nn_scale = exp(proposed_log_nn_scale)
+#     proposed_log_nn_scale = log_nn_scale + rand(rng, step_distrib)
+#     proposed_nn_scale = exp(proposed_log_nn_scale)
 
-    # Hastings factor for log-scale moves
-    log_acceptance = proposed_log_nn_scale - log_nn_scale
+#     # Hastings factor for log-scale moves
+#     log_acceptance = proposed_log_nn_scale - log_nn_scale
 
-    log_acceptance += log_nn_prior(nn_params, nn_alpha, proposed_nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
-    log_acceptance += log_jeffreys_nn(nn_alpha, proposed_nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
+#     log_acceptance += log_nn_prior(nn_params, nn_alpha, proposed_nn_scale) - log_nn_prior(nn_params, nn_alpha, nn_scale)
+#     log_acceptance += log_jeffreys_nn(nn_alpha, proposed_nn_scale) - log_jeffreys_nn(nn_alpha, nn_scale)
 
-    acceptance = min(one(T), exp(log_acceptance))
-    # acceptance = logistic(log_acceptance)
+#     acceptance = min(one(T), exp(log_acceptance))
+#     # acceptance = logistic(log_acceptance)
 
-    if rand(rng, T) < acceptance
-        hyperparams._.nn.prior.scale = proposed_nn_scale
-        diagnostics.accepted.nn.prior.scale += 1
-    else
-        diagnostics.rejected.nn.prior.scale += 1
-    end
+#     if rand(rng, T) < acceptance
+#         hyperparams._.nn.prior.scale = proposed_nn_scale
+#         diagnostics.accepted.nn.prior.scale += 1
+#     else
+#         diagnostics.rejected.nn.prior.scale += 1
+#     end
 
-    return hyperparams
-end
+#     return hyperparams
+# end
 
 
 # Sequential splitmerge from Dahl & Newcomb
@@ -537,7 +537,7 @@ function advance_ffjord_am!(
     clusters::AbstractVector{<:AbstractCluster{T, D, E}},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    iteration=0, algo=:algo4, hpchain=nothing,
+    iteration=0,
     temperature=one(T)) where {T, D, E}
 
     !hasnn(hyperparams) && return hyperparams
@@ -545,54 +545,46 @@ function advance_ffjord_am!(
     di = diagnostics
 
     nn_D = size(hyperparams._.nn.params, 1)
+        
+    step_distrib = MvNormal(exp(di.am.logscale) * (di.am.sigma + di.am.eps * I(size(di.am.sigma, 1))))
 
-    if algo === :algo0
+    proposed_hparray = copy(hyperparams._)        
+    proposed_hparray.nn .+= rand(rng, step_distrib)
 
-        if iteration <= 4 * nn_D
-            step_distrib = MvNormal(di.am.algo0.safetysigma^2 / nn_D * I(nn_D))
-        else
-            safety_component = MvNormal(di.am.algo0.safetysigma^2 / nn_D * I(nn_D))
+    proposed_clusters, proposed_delta_logps = nothing, nothing
+    log_acceptance = zero(T)
+    # try
+        proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
+        # reflow() already computes the logprob coming
+        # from the jacobian of the FFJORD transformation
+        # so we do it here to avoid recomputing it
+        # in logprobgenerative()
+        # Call logprobgenerative without ffjord
+        log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
+        log_acceptance -= sum(proposed_delta_logps)
+        # log_acceptance += log_nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior...)
+        # log_acceptance += log_nn_hyperprior(proposed_hparray.nn.prior...)
+        
+        # Call logprobgenerative with ffjord but no hyperpriors
+        log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
+        # add back the nn hyperprior only (not the pyp/niw hyperpriors)
+        # log_acceptance -= log_nn_hyperprior(hyperparams._.nn.prior...)
+        
+        # Hastings factor on nn hyperprior
+        # remember than lambda0/alpha0/beta0 are actually
+        # log(lambda0), log(alpha0), log(beta0)
+        # log_acceptance += sum(proposed_hparray.nn.prior[(:lambda0, :alpha0, :beta0)] - hyperparams._.nn.prior[(:lambda0, :alpha0, :beta0)])
 
-            # try
-            empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma_algo0(diagnostics))
-            # catch e
-            #     if e isa PosDefException
-            #         nnc = nn_chain(Matrix, hpchain)
-            #         diagnostics.am.algo0.x .= sum(nnc, dims=2)
-            #         diagnostics.am.algo0.xx .= sum(eachslice(nnc, dims=2) .* transpose(eachslice(nnc, dims=2)))
-            #         diagnostics.am.algo0.xx .= (diagnostics.am.algo0.xx + diagnostics.am.algo0.xx') / 2
-            #         empirical_estimate_component = MvNormal(2.38^2 / nn_D * am_sigma_algo0(diagnostics))
-            #     end
-            # end
-            step_distrib = MixtureModel([safety_component, empirical_estimate_component], [di.am.algo0.safetyprob, 1 - di.am.algo0.safetyprob])
-        end
+        log_acceptance /= T(temperature)
+        
+        log_acceptance = isfinite(log_acceptance) ? log_acceptance : T(-Inf)
 
-        proposed_hparray = copy(hyperparams._)
-        proposed_hparray.nn.params .+= rand(rng, step_distrib)
+    # catch e
 
-    elseif algo === :algo4
-
-        step_distrib = MvNormal(exp(di.am.algo4.logscale) * di.am.algo4.sigma)
-
-        proposed_hparray = copy(hyperparams._)
-        proposed_hparray.nn.params .+= rand(rng, step_distrib)
-
-    end
-
-    proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
-
-    # reflow() already computes the logprob coming
-    # from the jacobian of the FFJORD transformation
-    # so we do it here to avoid recomputing it
-    # in logprobgenerative()
-    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
-    log_acceptance -= sum(proposed_delta_logps)
-    log_acceptance += log_nn_prior(proposed_hparray.nn.params, hyperparams._.nn.prior.alpha, hyperparams._.nn.prior.scale)
-
-    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
-
-    log_acceptance /= T(temperature)
-
+    #     log_acceptance = T(-Inf)
+    
+    # end
+    
     acceptance = min(one(T), exp(log_acceptance))
     # acceptance = logistic(log_acceptance)
 
@@ -600,35 +592,27 @@ function advance_ffjord_am!(
         empty!(clusters)
         append!(clusters, proposed_clusters)
         hyperparams._ .= proposed_hparray
-        diagnostics.accepted.nn.params += 1
+        di.accepted.nn += 1
     else
-        diagnostics.rejected.nn.params += 1
+        di.rejected.nn += 1
     end
 
-    if algo === :algo0
+    gamma = (di.am.i+1)^-(1/(1 + di.am.lambda))
+            
+    di.am.i += (0 >= di.am.previous_h * (acceptance - di.am.acceptance_target))
+    di.am.previous_h = acceptance - di.am.acceptance_target
 
-        diagnostics.am.algo0.L += 1
-        diagnostics.am.algo0.x .+= hyperparams._.nn.params
-        diagnostics.am.algo0.xx .+= hyperparams._.nn.params * hyperparams._.nn.params'
+    di.am.logscale = di.am.logscale + gamma * (acceptance - di.am.acceptance_target)
 
-    elseif algo === :algo4
+    dX = hyperparams._.nn - di.am.mu
+    dXdX = dX * dX'
 
-        i = (di.am.algo4.i += 1)
-        gamma = (i+1)^-(1/(1 + di.am.algo4.lambda))
-        # gamma *= rand(rng)
-
-        di.am.algo4.logscale = di.am.algo4.logscale + gamma * (acceptance - di.am.algo4.acceptance_target)
-
-        dX = hyperparams._.nn.params - di.am.algo4.mu
-        dXdX = dX * dX'
-
-        di.am.algo4.mu .= (1 - gamma) * di.am.algo4.mu + gamma * hyperparams._.nn.params
-        di.am.algo4.sigma .= (1 - gamma) * di.am.algo4.sigma + gamma * dXdX
-        di.am.algo4.sigma .= (di.am.algo4.sigma + di.am.algo4.sigma') / 2
-        # Prevent collapse
-        di.am.algo4.sigma .+= di.am.algo4.eps * I(length(dX))
-
-    end
+    di.am.mu .= di.am.mu + gamma * dX
+    di.am.sigma .= (1 - gamma) * di.am.sigma + gamma * dXdX
+    # Symmetrize because once in a while julia likes
+    # to introduce numerical noise I was never able 
+    # to track down
+    di.am.sigma .= (di.am.sigma + di.am.sigma') / 2
 
     return hyperparams
 
@@ -653,7 +637,7 @@ function advance_hyperparams_amwg!(
         advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL))
         advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
         if hasnn(hyperparams)
-            advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
+            # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
             # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
         end
     end
@@ -679,7 +663,8 @@ am_sigma_algo0(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=T(1
 function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptance_target::T=0.44, min_delta::T=0.01) where {T, D} #, minmax_logscale::T=one(T)0.0)
     delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))
 
-    contparams = hasnn(diagnostics) ? (:pyp, :niw, :nn) : (:pyp, :niw)
+    # contparams = hasnn(diagnostics) ? (:pyp, :niw, :nn) : (:pyp, :niw)
+    contparams = (:pyp, :niw)
     acc_rates = diagnostics.accepted[contparams] ./ (diagnostics.accepted[contparams] .+ diagnostics.rejected[contparams])
     diagnostics.amwg.logscales .+= delta_n .* (acc_rates .> acceptance_target) .- delta_n .* (acc_rates .<= acceptance_target)
 

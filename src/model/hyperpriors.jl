@@ -1,3 +1,15 @@
+function log_logarithmic(x::T; lowerbound=T(10^-5), upperbound=T(1000)) where T
+    if lowerbound < x <= upperbound
+        ret = -log(abs(x))
+        if lowerbound > 0 && isfinite(upperbound)
+            ret -= log(log(upperbound) - log(lowerbound))
+        end
+        return ret
+    else
+        return -Inf
+    end
+end
+
 # Very cute!
 function log_jeffreys_crp_alpha(alpha::T, n::Int) where T
 
@@ -13,130 +25,96 @@ end
 # I don't like it but it works. I don't think
 # it should be happening.
 function log_jeffreys_lambda(lambda::T) where T
-    loglambda = log(abs(lambda))
-    if loglambda > log(1000)
-        return -Inf
-    end
-    return -loglambda
+    return log_logarithmic(lambda)
 end
 
-function log_jeffreys_psi(psi::AbstractMatrix{T}) where T
+function log_jeffreys_psi(psi::AbstractMatrix{T}; loglowerbound=-size(psi, 1) * log(T(10^-3))) where T
     D = size(psi, 1)
-    return -D * logdetpsd(psi)
+    ret = -D * logdetpsd(psi)
+    if isfinite(ret)
+        return ret
+    else
+        return -Inf
+    end
 end
+# function log_jeffreys_psi(psi::AbstractMatrix{T}; loglowerbound=-size(psi, 1) * log(T(10^-3))) where T
+#     D = size(psi, 1)
+#     ret = -D * logdetpsd(psi)
+#     if ret >= loglowerbound
+#         return ret
+#     else
+#         return -Inf
+#     end
+# end
 
 # Very cute as well!
-function log_jeffreys_nu(nu::T, d::Int) where T
-
-    return -log(2) + 1/2 * log(sum([polygamma(1, nu/2 + (1 - i)/2) for i in 1:d]))
-
-end
-
-# The Cauchy distribution integrated over the Jeffreys prior
-# for its scale parameter leads to the symmetric
-# logarithmic prior. Terrible mixing for some reason,
-# much worse than the product of univariate t-distribrutions
-# with very small alpha and large scale such that
-# sqrt(alpha) * scale = 1. The two should in theory
-# be roughtly equivalent but for some reason they are not.
-# I blame maybe the singularity at zero.
-function log_nn_prior_logarithmic(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
-
-    # return zero(T)
-
-    weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
-
-    any(iszero.(weights)) && return -Inf
-
-    # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
-    return -sum(log.(abs.(weights)))
-
-end
-
-# Product of univariate Student t-distributions
-# Converges to the normal distribution when α -> ∞
-function log_nn_prior_univariate_tdists(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
-
-    # return zero(T)
-
-    # Stable t-distribution of index alpha on weights of last hidden layer.
-    # (Neal - 1996 - Bayesian Learning for Neural Networks)
-    # weights = nn_params[keys(nn_params)[end]].weight
-    # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
-
-    # Stable t-distribution of index alpha on all weights.
-    # When alpha=1 this becomes the Cauchy distribution
-
-    # weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
-
-    # Last layer
-    # weights = nn_params[keys(nn_params)[end]].weight
-
-    # Last layer mean
-    weights = mean(nn_params[keys(nn_params)[end]].weight)
-
-    # return sum(-(1 + alpha)/2 * log.(1 .+ abs.(weights ./ scale).^2 ./ alpha) .- 1/2 * log(pi * alpha * scale^2) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
-    return sum(-(1 + alpha)/2 * log1pexp.(2 * log.(abs.(weights)) .- 2 * log(abs(scale)) .- log(alpha)) .- 1/2 * log(pi * alpha) .- log(scale) .- loggamma(alpha/2) .+ loggamma((1 + alpha)/2))
-
-end
-
-# Isotropic multivariate Student t-distribution
-function log_nn_prior_multivariate_tdist(nn_params::ComponentArray{T}, alpha::T, scale::T) where {T}
-
-    # return zero(T)
-
-    last_weights = nn_params[keys(nn_params)[end]].weight
-    p = length(last_weights)
-
-    return -(alpha + p)/2 * log(1 + 1/alpha * sum(last_weights.^2 ./ scale^2)) - p/2 * log(pi * alpha) - p * log(scale) - loggamma(alpha/2) + loggamma((p + alpha)/2)
-
-end
-
-# log_nn_prior(args...; kwargs...) = log_nn_prior_logarithmic(args...; kwargs...)
-log_nn_prior(args...; kwargs...) = log_nn_prior_univariate_tdists(args...; kwargs...)
-# log_nn_prior(args...; kwargs...) = 0
-
-# Neat!
-function log_jeffreys_t_alpha(alpha::T) where T
-    # Otherwise weird stuff happens with polygamma
-    if alpha < 10000
-        return -log(2) + 1/2 * log(polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2) - 2 * (5 + alpha) / alpha / (alpha^2 + 4 * alpha  + 3))
+function log_jeffreys_nu(nu::T, d::Int; lowerbound=T(0), upperbound=T(1000)) where T
+    if T(d-1) + lowerbound < nu <= upperbound
+        return -log(2) + 1/2 * log(sum([polygamma(1, nu/2 + (1 - i)/2) for i in 1:d]))
     else
         return -Inf
     end
+
 end
 
-# Independence Jeffreys prior
-# of scale parameter for scaled t-distribution
-# alpha=3 by default so that alpha dependence
-# goes to zero by default. It doesn't mean
-# much because log_jeffreys_t_scale is used
-# as P(scale) in the indenpendce prior
-# P(scale, alpha) = P(scale)P(alpha)
-function log_jeffreys_t_scale(scale::T, alpha::T=T(3)) where T
-    return -log(abs(scale))
-    # return -log(abs(scale)) + log(2 * alpha) - log(3 + alpha)
-end
+function log_nn_prior_normalinvgamma(nn_params::ComponentArray{T}, mu0::T, lambda0::T, alpha0::T, beta0::T; lastlayer=true, flat=true) where T
 
-# Bivariate Jeffreys prior of
-# product of univariate t-distribution
-# with unique identical scale and degree.
-function log_jeffreys_t(alpha::T, scale::T) where T
-    # Otherwise weird stuff happens with polygamma
-    if alpha < 10000# && scale < 10000
-        # Just for fun the 2.0984 is the normalization
-        # constant of the alpha part of the Jeffreys
-        # prior which is independent of the improper scale part
-        return -log(2.0984) - log(abs(scale)) + 1/2 * log(alpha / 2 / (3 + alpha) * (polygamma(1, alpha / 2) - polygamma(1, (1 + alpha) / 2)) - 1 / (1 + alpha)^2)
-    else
-        return -Inf
+    if flat
+        return zero(T)
     end
+
+    lambda0, alpha0, beta0 = exp(lambda0), exp(alpha0), exp(beta0)
+
+    if lastlayer
+        weights = nn_params[keys(nn_params)[end]].weight
+    else
+        # All layers
+        weights = reduce(vcat, [nn_params[layername].weight[:] for layername in keys(nn_params)])
+    end
+
+    W = sum(weights)
+    WW = sum(weights.^2)
+    n = length(weights)
+
+    mu_u = (lambda0 * mu0 + W) / (lambda0 + n)
+    lambda_u = lambda0 + n
+    alpha_u = alpha0 + n / 2
+    beta_u = beta0 + 1/2 * (WW + lambda0 * mu0^2 - lambda_u * mu_u^2)
+    
+    if beta_u <= beta0
+        @warn "beta_u <= beta0, the posterior is improper over the alpha0 hyperparameter. This is a function of the data, you're simply unlucky. Proceed at your own risk, but it will eventually crash-and-burn." maxlog=1
+    end
+
+    # 1/Z0
+    A0 = 1/2 * log(lambda0) + alpha0 * log(beta0) - loggamma(alpha0)
+    
+    # 1/Zu
+    Au = 1/2 * log(lambda_u) + alpha_u * log(beta_u) - loggamma(alpha_u)
+
+    return A0 - Au
+
 end
 
-function log_jeffreys_nn(alpha::T, scale::T; independence=true) where T
-    if independence
-        return log_jeffreys_t_alpha(alpha) + log_jeffreys_t_scale(scale)
-    else
-        return log_jeffreys_t(alpha, scale)
+function log_nn_hyperprior(_mu0::T, lambda0::T, alpha0::T, beta0::T; cauchy=true) where T
+
+    if cauchy
+        return sum(logpdf(Cauchy(), [_mu0, lambda0, alpha0, beta0]))
     end
+
+    lambda0, alpha0, beta0 = exp(lambda0), exp(alpha0), exp(beta0)
+
+    ret = zero(T) # flat over mu0
+    ret += log_logarithmic(lambda0)
+    ret += log_logarithmic(beta0)
+
+    # If beta0 >= beta_u this will cause
+    # the posterior to be improper over
+    # the alpha0 hyperparameter
+    ret += 1/2 * log(polygamma(1, alpha0))
+
+    return ret
+
 end
+
+# log_nn_prior(args...; kwargs...) = log_nn_prior_normalinvgamma(args...; kwargs...)
+log_nn_prior(args...; kwargs...) = 0

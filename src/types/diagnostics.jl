@@ -4,6 +4,7 @@ struct Diagnostics{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
     amwg::ComponentArray{T}
+    splitmerge::ComponentArray{T}
 end
 
 struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
@@ -11,6 +12,7 @@ struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
     rejected::ComponentArray{Int}
     amwg::ComponentArray{T}
     am::ComponentArray{T}
+    splitmerge::ComponentArray{T}
 end
 
 hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
@@ -18,6 +20,14 @@ hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
 function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
 
     sizeflatL = div(D * (D + 1), 2)
+
+    splitmerge = ComponentArray{T}(alpha=0.003,
+                                   K_p=0.5,
+                                   K_i=0.1,
+                                   nb_splitmerge=200.0,
+                                   target_per_step=1.0,
+                                   integral_error=0.0)
+
 
     if nn_params === nothing
 
@@ -43,7 +53,7 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                             )
                 )
 
-        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg)
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg, splitmerge)
 
     else
 
@@ -55,9 +65,7 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                              nu=0),
                         splitmerge=(split=0, merge=0,
                                     splitper=0, mergeper=0),
-                        nn=(params=0,
-                            prior=(alpha=0,
-                                   scale=0))
+                        nn=0
                     )
 
         amwg = ComponentArray{T}(
@@ -67,48 +75,41 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                                        lambda=zero(T),
                                        flatL=zeros(T, sizeflatL),
                                        nu=zero(T)
-                                       ),
-                               nn=(params=zero(T),
-                                   prior=(alpha=zero(T),
-                                          scale=zero(T)
-                                          )
-                                )
+                                       )
                             )
                     )
 
         nn_D = size(nn_params, 1)
-        am_x = zeros(T, nn_D)
-        am_xx = zeros(T, nn_D, nn_D)
 
-        am_mu = zeros(T, nn_D)
+        am_mu = nn_params[:]
         am_sigma = Matrix{T}(I(nn_D))
-        logscale0 = 2 * log(2.38) - log(nn_D)
+        logscale0 = (2 * log(2.38) - log(nn_D))
+        # Seems to be too much for tanh networks,
+        # let's reduce the step size multiplier
+        # by two orders of magnitude and 
+        # start the exploration gently.
+        logscale0 -= 2
 
-        # small lambda adapts the global scale and
-        # proposal distribution more quickly in the
-        # beginning and then the speed of adaptation
-        # decays much slower. This is a good thing
-        # because the global scale and proposal
-        # distribution should be adapted quickly
-        # in the beginning to avoid getting stuck
-        # in a local minimum slowly later on
-        # to avoid overfitting.
-        algo4_lambda = 0.1
+        # Add eps * I to the covariance matrix
+        # to avoid singular matrix. Practically
+        # speaking, it reactivates dead directions
+        # in the proposal distribution which the
+        # adaptive Metropolis algorithm can then
+        # latch onto. This improves convergence
+        # and mixing trememdously!
+        eps = 1e-3
 
-        am = ComponentArray{T}(algo0=(L=0.0,
-                                      x=am_x,
-                                      xx=am_xx,
-                                      safetyprob=0.5,
-                                      safetysigma=0.1),
-                               algo4=(i=0.0,
-                                      acceptance_target=0.234,
-                                      lambda=algo4_lambda,
-                                      logscale=logscale0,
-                                      mu=am_mu,
-                                      sigma=am_sigma,
-                                      eps=1e-8))
+        am = ComponentArray{T}(i=1.0,
+                               previous_h=1.0,
+                               acceptance_target=0.234,
+                               lambda=1.0,
+                               logscale=logscale0,
+                               mu=am_mu,
+                               sigma=am_sigma,
+                               eps=eps
+                               )        
 
-        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am)
+        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am, splitmerge)
 
     end
 end
@@ -125,18 +126,18 @@ function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
     println(io, "        flatL: $(round.(diagnostics.accepted.niw.flatL ./ (diagnostics.rejected.niw.flatL .+ diagnostics.accepted.niw.flatL), digits=4))")
     print(io,   "           nu: $(round(diagnostics.accepted.niw.nu / (diagnostics.rejected.niw.nu + diagnostics.accepted.niw.nu), digits=4))")
     if hasnn(diagnostics)
-        println()
-        println(io, "    nn")
-        println(io, "       params: $(round(diagnostics.accepted.nn.params / (diagnostics.rejected.nn.params + diagnostics.accepted.nn.params), digits=4))")
-        println(io, "      t_alpha: $(round(diagnostics.accepted.nn.prior.alpha / (diagnostics.rejected.nn.prior.alpha + diagnostics.accepted.nn.prior.alpha), digits=4))")
-        print(io,   "      t_scale: $(round(diagnostics.accepted.nn.prior.scale / (diagnostics.rejected.nn.prior.scale + diagnostics.accepted.nn.prior.scale), digits=4))")
+        println("\n")
+        println(io, "     nn")
+        print(io, "       params: $(round(diagnostics.accepted.nn / (diagnostics.rejected.nn + diagnostics.accepted.nn), digits=4))")
+        # println(io, "      t_alpha: $(round(diagnostics.accepted.nn.prior.alpha / (diagnostics.rejected.nn.prior.alpha + diagnostics.accepted.nn.prior.alpha), digits=4))")
+        # print(io,   "      t_scale: $(round(diagnostics.accepted.nn.prior.scale / (diagnostics.rejected.nn.prior.scale + diagnostics.accepted.nn.prior.scale), digits=4))")
     end
 
 end
 
 function clear_diagnostics!(diagnostics::AbstractDiagnostics;
                             resethyperparams=true, resetsplitmerge=false,
-                            resetnn=false, resetamwg=false, resetam=false
+                            resetnn=false, resetamwg=false#, resetam=false
                             )
 
     if resethyperparams
@@ -144,16 +145,16 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics;
         diagnostics.rejected.pyp .= 0
         diagnostics.accepted.niw .= 0
         diagnostics.rejected.niw .= 0
-        if hasnn(diagnostics)
-            diagnostics.accepted.nn.prior .= 0
-            diagnostics.rejected.nn.prior .= 0
-        end
+        # if hasnn(diagnostics)
+        #     diagnostics.accepted.nn = 0
+        #     diagnostics.rejected.nn = 0
+        # end
     end
 
-    if hasnn(diagnostics) && resetnn
-        diagnostics.accepted.nn.params = 0
-        diagnostics.rejected.nn.params = 0
-    end
+    # if hasnn(diagnostics) && resetnn
+    #     diagnostics.accepted.nn.params = 0
+    #     diagnostics.rejected.nn.params = 0
+    # end
 
     if resetsplitmerge
         diagnostics.accepted.splitmerge .= 0
@@ -164,8 +165,8 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics;
         diagnostics.amwg .= 0
     end
 
-    if hasnn(diagnostics) && resetam
-        diagnostics.am .= 0
+    if hasnn(diagnostics) && resetnn
+        diagnostics.am.nn = 0
     end
 
     return diagnostics

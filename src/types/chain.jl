@@ -85,7 +85,6 @@ function FCChain(
     end
 
     hyperparams = FCHyperparams(T, D, ffjord_nn, rng=rng)
-    hyperparams._.pyp.alpha = 10.0 / log(length(data))
 
     # Keep unique observations only
     if perturb_data
@@ -97,7 +96,7 @@ function FCChain(
 
     if ffjord_nn isa Chain
         unique_matdata = reduce(hcat, unique_data)
-        _, _, base_data = forwardffjord(rng, unique_matdata, hyperparams._, hyperparams.ffjord)
+        _, base_data = forwardffjord(rng, unique_matdata, hyperparams._, hyperparams.ffjord)
         base_data = collect.(eachcol(base_data))
     else
         base_data = deepcopy(unique_data)
@@ -123,10 +122,7 @@ function FCChain(
     hyperparams_samples = CircularBuffer{typeof(hyperparams)}(nb_samples)
     samples_idx = CircularBuffer{Int}(nb_samples)
 
-    diagnostics = Diagnostics(T, D, hasnn(hyperparams) ? hyperparams._.nn.params : nothing)
-    if hasnn(hyperparams)
-        diagnostics.am.algo4.mu .= hyperparams._.nn.params
-    end
+    diagnostics = Diagnostics(T, D, hasnn(hyperparams) ? hyperparams._.nn : nothing)
 
     chain = FCChain{T, D, element_type, cluster_type{T, D, element_type}, typeof(hyperparams), typeof(diagnostics)}(
         cluster_type{T, D, element_type}[], hyperparams, diagnostics,
@@ -206,29 +202,32 @@ logprob_chain(chain::FCChain, burn=0) = chain.logprob_chain[burn+1:end]
 nbclusters_chain(chain::FCChain, burn=0) = chain.nbclusters_chain[burn+1:end]
 largestcluster_chain(chain::FCChain, burn=0) = chain.largestcluster_chain[burn+1:end]
 
-nn_chain(chain::Vector{<:FCHyperparamsFFJORD}, burn=0) = [p._.nn.params for p in chain[burn+1:end]]
-nn_chain(chain::FCChain, burn=0) = [p._.nn.params for p in chain.hyperparams_chain[burn+1:end]]
-nn_chain(::Type{Matrix}, chain::Union{FCChain, Vector{<:FCHyperparamsFFJORD}}, burn=0) = reduce(hcat, nn_chain(chain, burn))
+nn_params_chain(chain::Vector{<:AbstractFCHyperparams}, burn=0) = hasnn(first(chain)) ? [p._.nn.params for p in chain[burn+1:end]] : nothing
+nn_params_chain(chain::FCChain, burn=0) = nn_params_chain(chain.hyperparams_chain, burn)
+nn_params_chain(::Type{Matrix}, chain::Union{FCChain, Vector{<:FCHyperparamsFFJORD}}, burn=0) = reduce(hcat, nn_params_chain(chain, burn))
 
-nn_alpha_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.alpha for p in chain.hyperparams_chain[burn+1:end]] : nothing
-nn_scale_chain(chain::FCChain, burn=0) = chain.hyperparams._.nn !== nothing ? [p._.nn.prior.scale for p in chain.hyperparams_chain[burn+1:end]] : nothing
+nn_hyperparams_chain(chain::Vector{<:AbstractFCHyperparams}, burn=0) = hasnn(first(chain)) ? [p._.nn.prior for p in chain[burn+1:end]] : nothing
+nn_hyperparams_chain(chain::FCChain, burn=0) = nn_hyperparams_chain(chain.hyperparams_chain, burn)
+nn_hyperparams_chain(::Type{Matrix}, chain::Union{FCChain, Vector{<:FCHyperparamsFFJORD}}, burn=0) = reduce(hcat, nn_hyperparams_chain(chain, burn))
 
 function burn!(chain::FCChain, n=0; burn_map=false, burn_samples=false)
 
-    # n given as a proportion of the chain length
-    if (n isa Float64) && (-1 < n < 1)
-        n = round(Int, n * length(chain))
-    end
+    # # n given as a proportion of the chain length
+    # if (n isa Float64) && (-1 < n < 1)
+    #     n = round(Int, n * length(chain))
+    # end
 
-    # if n is negative, burn from the end
-    if n < 0
-        n = length(chain.logprob_chain) + n
-    end
+    # # if n is negative, burn from the end
+    # if n < 0
+    #     n = length(chain.logprob_chain) + n
+    # end
 
-    if n >= length(chain.logprob_chain)
-        @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
-        return chain
-    end
+    # if n >= length(chain.logprob_chain)
+    #     @error("Can't burn the whole chain, n must be smaller than $(length(chain.logprob_chain))")
+    #     return chain
+    # end
+
+    n = _burnlength(length(chain), n)
 
     if n > 0
 
@@ -285,7 +284,7 @@ function ess_rhat(chain::FCChain, burn=0)
 
     d = datadimension(chain.hyperparams)
     flatL_d = size(chain.hyperparams._.niw.flatL, 1)
-    nn_D = hasnn(chain.hyperparams) ? size(chain.hyperparams._.nn.params, 1) : 0
+    nn_D = hasnn(chain.hyperparams) ? size(chain.hyperparams._.nn, 1) : 0
 
     return (;
     alpha = ess_rhat(alpha_chain(chain, burn)),
@@ -295,7 +294,6 @@ function ess_rhat(chain::FCChain, burn=0)
     flatL = ess_rhat(reshape(flatL_chain(Matrix, chain, burn)', N, 1, flatL_d)),
     nu = ess_rhat(nu_chain(chain, burn)),
     nn = hasnn(chain.hyperparams) ? ess_rhat(reshape(nn_chain(Matrix, chain, burn)', N, 1, nn_D)) : nothing,
-    nn_alpha = hasnn(chain.hyperparams) ? ess_rhat(nn_alpha_chain(chain, burn)) : nothing,
     logprob = ess_rhat(logprob_chain(chain, burn)),
     nbclusters = ess_rhat(nbclusters_chain(chain, burn)),
     largestcluster = ess_rhat(largestcluster_chain(chain, burn))

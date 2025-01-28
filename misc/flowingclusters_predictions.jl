@@ -3,14 +3,17 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
     # Chain has already been trained on the training set
 
     # MAP and chain summary prediction functions
-    map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams, per_cluster=per_cluster)
+    map_tailprob_fun = tail_probability(chain.map_clusters, chain.map_hyperparams, nb_rejection_samples=nb_rejection_samples, per_cluster=per_cluster)
     map_nb_clusters = length(chain.map_clusters)
 
     # MAP predictions on validation set to find best threshold
     validation_map_presabs_tailprobs = map_tailprob_fun(dataset.validation.standardize(predictors...)(predictors...))
     validation_presence_mask = dataset.validation.presmask(species)
     validation_absence_mask = dataset.validation.absmask(species)
-    best_map_thresh = best_score_threshold(validation_map_presabs_tailprobs[validation_presence_mask], validation_map_presabs_tailprobs[validation_absence_mask], statistic=perfstat)
+    best_map_thresh = best_score_threshold(
+        validation_map_presabs_tailprobs[validation_presence_mask],
+        validation_map_presabs_tailprobs[validation_absence_mask],
+        statistic=perfstat, nbsteps=10_000)
 
     # MAP predictions on test set
     test_map_presabs_tailprobs = map_tailprob_fun(dataset.test.standardize(predictors...)(predictors...))
@@ -44,7 +47,11 @@ function evaluate_flowingclusters(chain::FCChain, dataset::SMSDataset, species, 
                 best_scoring_method = scoring
             end
 
-            __best_thresh = best_score_threshold(validation_presabs_tailprob_summaries[scoring][validation_presence_mask], validation_presabs_tailprob_summaries[scoring][validation_absence_mask], statistic=perfstat)
+            __best_thresh = best_score_threshold(
+                validation_presabs_tailprob_summaries[scoring][validation_presence_mask],
+                validation_presabs_tailprob_summaries[scoring][validation_absence_mask],
+                statistic=perfstat, nbsteps=10_000)
+
             __validation_performances_atthresh = map(x -> round(x, digits=5), performance_statistics(validation_presabs_tailprob_summaries[scoring][validation_presence_mask], validation_presabs_tailprob_summaries[scoring][validation_absence_mask], threshold=__best_thresh))
             if __validation_performances_atthresh[perfstat] > validation_performances_atthresh[perfstat]
                 best_thresh = __best_thresh

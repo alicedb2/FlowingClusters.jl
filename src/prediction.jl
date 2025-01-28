@@ -136,7 +136,7 @@ function tail_probability(
         basetailprob_func = tail_probability(weights, updated_mvstudent_degs_mus_sigs, nb_rejection_samples=nb_rejection_samples, per_cluster=per_cluster, rng=rng)
         function tailprob_func(coordinates::AbstractArray)
             # Project elements to the base space
-            _, _, base_elements = forwardffjord(rng, coordinates, hyperparams)
+            _, base_elements = forwardffjord(rng, coordinates, hyperparams)
             return basetailprob_func(base_elements)
         end
         return tailprob_func

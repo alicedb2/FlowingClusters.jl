@@ -14,43 +14,37 @@ struct FCHyperparamsFFJORD{T, D} <: AbstractFCHyperparams{T, D}
     # everything is already in the parameters.
 end
 
-function FCHyperparams(::Type{T}, D::Int, nn::Union{Nothing, Chain}=nothing; rng::Union{Nothing, AbstractRNG}=nothing) where {T <: AbstractFloat}
+function FCHyperparams(::Type{T}, D::Int, nn=nothing; rng::Union{Nothing, AbstractRNG}=nothing) where {T <: AbstractFloat}
 
     if isnothing(nn)
         return FCHyperparams{T, D}(
             ComponentArray{T}(
-                        pyp=(alpha=T(7.77),),# sigma=0.0),
+                        pyp=(alpha=one(T),),# sigma=0.0),
                         niw=(mu=zeros(T, D),
-                             lambda=one(T),
+                             lambda=T(1),
                              flatL=unfold(LowerTriangular{T}(I(D))),
-                             nu=T(D + 1))
+                             nu=T(D))
                 )
             )
     else
         rng isa AbstractRNG || throw(ArgumentError("You must provide a random number generator when using FFJORD"))
-        D == first(nn.layers).in_dims == last(nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
+        # D == first(nn.layers).in_dims == last(nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
 
         nn_params, nn_state = Lux.setup(rng, nn)
         nn_params = ComponentArray{T}(nn_params)
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
 
-        # nnalpha = 1.0
-        nnalpha = 0.001
-        scale = 1.0
-
         return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
-                        pyp=(alpha=T(7.77),),# sigma=0.0),
+                        pyp=(alpha=one(T),),# sigma=0.0),
                         niw=(mu=zeros(T, D),
-                            lambda=T(1.0),
+                            lambda=T(1),
                             flatL=unfold(LowerTriangular{T}(I(D))),
-                            nu=T(D - 0)),
+                            nu=T(D)),
                         nn=(params=nn_params,
-                            # "Almost logarithmic" hyperprior
-                            # on the weights of the neural network
-                            # The effectice scale is sqrt(alpha)*scale
-                            # in this case ~ 9.5
-                            # prior=(alpha=T(nnalpha), scale=T(effscale/sqrt(nnalpha)))
-                            prior=(alpha=T(nnalpha), scale=T(scale))
+                            # prior=(mu0=T(0), 
+                            #        lambda0=T(log(0.01)), 
+                            #        alpha0=T(log(10)), 
+                            #        beta0=T(log(1)))
                             )
                         ),
                     (nn=nn, nns=nn_state)
@@ -81,10 +75,9 @@ function transform!(hparray::ComponentArray)
     hparray.pyp.alpha = log(hparray.pyp.alpha)
     hparray.niw.lambda = log(hparray.niw.lambda)
     hparray.niw.nu = log(hparray.niw.nu - datadimension(hparray) + 1)
-    if hasnn(hparray)
-        hparray.nn.prior.alpha = log(hparray.nn.prior.alpha)
-        hparray.nn.prior.scale = log(hparray.nn.prior.scale)
-    end
+    # if hasnn(hparray)
+    #     hparray.nn.prior[(:lambda0, :alpha0, :beta0)] .= log.(hparray.nn.prior[(:lambda0, :alpha0, :beta0)])
+    # end
     return hparray
 end
 
@@ -92,10 +85,9 @@ function backtransform!(transformedhparray::ComponentArray)
     transformedhparray.pyp.alpha = exp(transformedhparray.pyp.alpha)
     transformedhparray.niw.lambda = exp(transformedhparray.niw.lambda)
     transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + datadimension(transformedhparray) - 1
-    if hasnn(transformedhparray)
-        transformedhparray.nn.prior.alpha = exp(transformedhparray.nn.prior.alpha)
-        transformedhparray.nn.prior.scale = exp(transformedhparray.nn.prior.scale)
-    end
+    # if hasnn(transformedhparray)
+    #     transformedhparray.nn.prior[(:lambda0, :alpha0, :beta0)] .= exp.(transformedhparray.nn.prior[(:lambda0, :alpha0, :beta0)])
+    # end
     return transformedhparray
 end
 
@@ -166,9 +158,11 @@ function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
         println(io)
         println(io, "  nn")
         println(io, "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
-        println(io, "    t")
-        println(io, "      alpha: $(round(hyperparams._.nn.prior.alpha, digits=3))")
-        print(io,   "      scale: $(round(hyperparams._.nn.prior.scale, digits=3))")
+        println(io, "    prior")
+        println(io, "              mu0: $(round(hyperparams._.nn.prior.mu0, digits=3))")
+        println(io, "      log lambda0: $(round(hyperparams._.nn.prior.lambda0, digits=3))")
+        println(io, "       log alpha0: $(round(hyperparams._.nn.prior.alpha0, digits=3))")
+        print(io,   "        log beta0: $(round(hyperparams._.nn.prior.beta0, digits=3))")
     end
 end
 

@@ -8,39 +8,35 @@
 ## forwardffjord pushes the data in the original space
 ## through the neural network and returns the data in the
 ## base space where the clustering happens
-function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::@NamedTuple{logpx::T, deltalogpxs::T, z::Vector{T}} where {T, D}
+function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::@NamedTuple{deltalogpxs::T, z::Vector{T}} where {T, D}
     D === size(x, 1) || throw(ArgumentError("The dimension of the data must be the same as the dimension of the hyperparameters"))
     if hasnn(hyperparams)
         return forwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
     else
-        return (;logpx=zero(T),
-                 deltalogpxs=zero(T),
-                 z=x)
+        return (; deltalogpxs=zero(T), z=x)
     end
 end
 
-function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::@NamedTuple{logpx::Array{T, N-1}, deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, D, N}
+function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::@NamedTuple{deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, D, N}
     D === size(x, 1) || throw(ArgumentError("The dimension of the data must be the same as the dimension of the hyperparameters"))
     if hasnn(hyperparams)
         return forwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
     else
-        return (;logpx=zeros(T, size(x)[2:end]),
-                 deltalogpxs=zeros(T, size(x)[2:end]),
-                 z=x)
+        return (; deltalogpxs=zeros(T, size(x)[2:end]),
+                  z=x)
     end
 end
 
-function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{logpx::T, deltalogpxs::T, z::Vector{T}} where {T}
+function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{deltalogpxs::T, z::Vector{T}} where {T}
     ret = forwardffjord(rng, reshape(x, :, 1), hyperparamsarray, ffjord, t=t)
-    return (; logpx=first(ret.logpx),
-              deltalogpxs=first(ret.deltalogpxs),
+    return (; deltalogpxs=first(ret.deltalogpxs),
               z=reshape(ret.z, :))
 end
 
-function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{logpx::Array{T, N-1}, deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, N}
+function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, N}
     hasnn(hyperparamsarray) || return (;logpx=zeros(T, size(x)[2:end]), deltalogpxs=zeros(T, size(x)[2:end]), z=x)
     D = size(x, 1)
-    D == first(ffjord.nn.layers).in_dims == last(ffjord.nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
+    # D == first(ffjord.nn.layers).in_dims == last(ffjord.nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
 
     # FFJORD expect a matrix with each data point as a column
     if ndims(x) > 2
@@ -52,8 +48,7 @@ function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarra
     ffjord_mdl = FFJORD(ffjord.nn, (zero(T), t), (D,), Tsit5(), ad=AutoForwardDiff(), basedist=nothing)
     ret = first(ffjord_mdl(_x, hyperparamsarray.nn.params, ffjord.nns, rng))
 
-    return (; logpx=reshape(ret.logpx, size(x)[2:end]...),
-              deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...),
+    return (; deltalogpxs=reshape(ret.delta_logp, size(x)[2:end]...),
               z=reshape(ret.z, size(x)...))
 end
 
@@ -97,7 +92,7 @@ function reflow(rng::AbstractRNG, clusters::AbstractVector{SetCluster{T, D, E}},
     # origdata = reduce(hcat, [base2original[el] for c in clusters for el in c])
     origdata = Matrix(clusters, orig=true)
 
-    _, deltalogpxs, new_basedata = forwardffjord(rng, origdata, hyperparamsarray, ffjord, t=t)
+    deltalogpxs, new_basedata = forwardffjord(rng, origdata, hyperparamsarray, ffjord, t=t)
 
     new_base2original = Dict{SVector{D, T}, SVector{D, T}}(collect.(eachcol(new_basedata)) .=> collect.(eachcol(origdata)))
     new_clusters = [SetCluster(basedata, new_base2original) for basedata in chunk(new_basedata, cluster_sizes)]
@@ -107,7 +102,7 @@ end
 function reflow(rng::AbstractRNG, clusters::AbstractVector{BitCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1)) where {T, D, E}
     base2original = first(clusters).b2o
 
-    _, deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray, ffjord, t=t)
+    deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray, ffjord, t=t)
 
     new_base2original = cat(new_basedata, base2original[:, :, O], dims=3)
 
@@ -116,19 +111,14 @@ end
 function reflow(rng::AbstractRNG, clusters::AbstractVector{IndexCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1)) where {T, D, E}
     base2original = first(clusters).b2o
 
-    _, deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray, ffjord, t=t)
+    deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray, ffjord, t=t)
 
     new_base2original = cat(new_basedata, base2original[:, :, O], dims=3)
 
     return (clusters=[IndexCluster(cluster.elements, new_base2original) for cluster in clusters], deltalogpxs=deltalogpxs)
 end
 
-function uniformbias(lower, upper)
-    fun(rng, outdims, _) = rand(rng, Uniform(lower, upper), outdims, 1)
-    return fun
-end
-
-function dense_nn(nbnodes::Int...; act=tanh_fast)
+function dense_nn(nbnodes::Int...; act=tanh_fast, gain=0.2)
     
     if act isa Tuple || act isa AbstractVector
         @assert length(act) == length(nbnodes)-1
@@ -136,12 +126,18 @@ function dense_nn(nbnodes::Int...; act=tanh_fast)
         act = fill(act, length(nbnodes)-1)
     end
 
-    nn = Chain(
-        [Dense(nbnodes[i], nbnodes[i+1],
-            act[i],
-            init_bias=(args...; kwargs...) -> rand64(args...; kwargs...),
-            init_weight=kaiming_uniform(gain=0.1)
-            ) for i in 1:length(nbnodes)-1]...
-    )
+    layers = [Dense(nbnodes[i], nbnodes[i+1],
+                    act[i],
+                    # init_bias=(i == 1) ? (x...) -> 2*(rand64(x...) .- 1/2) : zeros64,
+                    init_bias=(i == 1) ? (x...) -> 2*(rand64(x...) .- 1/2) : zeros64,
+                    init_weight=zeros64
+                    # init_bias=randn64,
+                    # init_weight=orthogonal(Float64)
+                    # init_weight=glorot_uniform(Float64, gain=gain)
+                    # init_weight=kaiming_uniform(gain=gain)
+                    ) for i in 1:length(nbnodes)-1]
+    
+    nn = Chain(layers...)
+
     return nn
 end

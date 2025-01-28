@@ -1,3 +1,23 @@
+function _burnlength(len, burnin)
+    if burnin > 0
+        if 0 < burnin < 1
+            burnin = round(Int, burnin * len)
+        end
+    elseif burnin < 0
+        if -1 < burnin < 0
+            burnin = round(Int, -burnin * len)
+        end
+        burnin = len - burnin
+    elseif iszero(burnin)
+        return 0
+    end
+
+    if burnin > len
+        throw(ArgumentError("burn-in must be less than the chain length"))
+    end
+    return burnin
+end
+
 function performance_statistics(scores_at_presences, scores_at_absences; threshold=nothing)
 
     if threshold !== nothing
@@ -35,7 +55,7 @@ function performance_statistics(scores_at_presences, scores_at_absences; thresho
 
 end
 
-function best_score_threshold(scores_at_presences, scores_at_absences; statistic=:MCC, nbsteps=1000)
+function best_score_threshold(scores_at_presences, scores_at_absences; statistic=:MCC, nbsteps=10000)
 
     thresholds = LinRange(0.0, 1.0, nbsteps)
     best_score = -Inf

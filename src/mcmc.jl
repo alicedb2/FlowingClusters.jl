@@ -47,9 +47,24 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         _nb_steps = nb_steps
     end
 
+    # When given as a float between 0 and 1
+    # we adaptively adjust the number of splitmerge
+    # to reach the target number of splitmerge moves
+    # per epoch.
+    if nb_splitmerge isa Float64 && nb_splitmerge > 0
+        diagnostics.splitmerge.target_per_step = nb_splitmerge
+        nb_splitmerge = diagnostics.splitmerge.nb_splitmerge
+    end
+
     for step in 1:_nb_steps
 
-        for i in 1:nb_amwg
+        if 0 < nb_amwg < 1 && rand(chain.rng) < nb_amwg
+            _nb_amwg = 1
+        else
+            _nb_amwg = nb_amwg
+        end
+
+        for i in 1:_nb_amwg
             advance_hyperparams_amwg!(
                 chain.rng,
                 chain.clusters,
@@ -58,38 +73,44 @@ function advance_chain!(chain::FCChain, nb_steps=100;
                 amwg_batch_size=amwg_batch_size)
         end
 
-        for i in 1:nb_ffjord_am
-            advance_ffjord_am!(
-                chain.rng,
-                chain.clusters,
-                chain.hyperparams,
-                chain.diagnostics,
-                iteration=length(chain), hpchain=chain.hyperparams_chain,
-                temperature=ffjord_am_temperature,
-                )
+        if hasnn(chain.hyperparams)
+            if 0 < nb_ffjord_am < 1 && rand(chain.rng) < nb_ffjord_am
+                _nb_ffjord_am = 1
+            else
+                _nb_ffjord_am = nb_ffjord_am
+            end
+
+            for i in 1:_nb_ffjord_am
+                advance_ffjord_am!(
+                    chain.rng,
+                    chain.clusters,
+                    chain.hyperparams,
+                    chain.diagnostics,
+                    iteration=length(chain),
+                    temperature=ffjord_am_temperature,
+                    )
+            end
         end
 
         push!(chain.hyperparams_chain, deepcopy(chain.hyperparams))
 
         # Sequential split-merge
-        if nb_splitmerge isa Int64
-            for i in 1:nb_splitmerge
-                advance_splitmerge_seq!(chain.rng, chain.clusters, chain.hyperparams, diagnostics, t=splitmerge_t)
-            end
-        elseif nb_splitmerge isa Float64 || nb_splitmerge === :matchgibbs
-            # old_nb_ssuccess = chain.hyperparams.diagnostics.accepted_split
-            # old_nb_msuccess = chain.hyperparams.diagnostics.accepted_merge
-            # while (chain.hyperparams.diagnostics.accepted_split == old_nb_ssuccess) && (chain.hyperparams.diagnostics.accepted_merge == old_nb_msuccess)
-            #     advance_splitmerge_seq!(chain.clusters, chain.hyperparams, t=splitmerge_t, temperature=splitmerge_temp)
-            # end
+        current_accepted_split = diagnostics.accepted.splitmerge.split
+        current_accepted_merge = diagnostics.accepted.splitmerge.merge
+        for i in 1:nb_splitmerge
+            advance_splitmerge_seq!(chain.rng, chain.clusters, chain.hyperparams, diagnostics, t=splitmerge_t)
         end
+        # nb_split_attempts = diagnostics.accepted.splitmerge.split + diagnostics.rejected.splitmerge.split - current_accepted_split - current_rejected_split
+        # nb_merge_attempts = diagnostics.accepted.splitmerge.merge + diagnostics.rejected.splitmerge.merge - current_accepted_merge - current_rejected_merge
+        split_per_step = (diagnostics.accepted.splitmerge.split - current_accepted_split) # /nb_split_attempts
+        merge_per_step = (diagnostics.accepted.splitmerge.merge - current_accepted_merge) # /nb_merge_attempts
 
         # Gibbs sweep
         if nb_gibbs isa Int64
             for i in 1:nb_gibbs
                 advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
             end
-        elseif (0 < nb_gibbs < 1) && (rand(chain.rng, T)r < nb_gibbs)
+        elseif (0 < nb_gibbs < 1) && (rand(chain.rng) < nb_gibbs)
             advance_gibbs!(chain.rng, chain.clusters, chain.hyperparams)
         end
 
@@ -101,13 +122,25 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         merge_ratio = "$(diagnostics.accepted.splitmerge.merge - last_accepted_merge)/$(diagnostics.rejected.splitmerge.merge - last_rejected_merge)"
         split_total += diagnostics.accepted.splitmerge.split - last_accepted_split
         merge_total += diagnostics.accepted.splitmerge.merge - last_accepted_merge
-        split_per_step = round(split_total/step, digits=2)
-        merge_per_step = round(merge_total/step, digits=2)
+        av_split_per_step = round(split_total/step, digits=2)
+        av_merge_per_step = round(merge_total/step, digits=2)
         last_accepted_split = diagnostics.accepted.splitmerge.split
         last_rejected_split = diagnostics.rejected.splitmerge.split
         last_accepted_merge = diagnostics.accepted.splitmerge.merge
         last_rejected_merge = diagnostics.rejected.splitmerge.merge
 
+        if nb_splitmerge isa Float64
+            # Learning rate
+            # alpha = diagnostics.splitmerge.alpha
+            alpha = diagnostics.splitmerge.alpha * (length(chain)+1)^-(1/(1 + 10))
+            # K_p = diagnostics.splitmerge.K_p
+            error = sign(diagnostics.splitmerge.target_per_step - (split_per_step + merge_per_step))
+            # rel_error = error / diagnostics.splitmerge.target_per_step
+            diagnostics.splitmerge.nb_splitmerge = diagnostics.splitmerge.nb_splitmerge * exp(alpha * error)
+            # diagnostics.splitmerge.nb_splitmerge = (1 - alpha * rel_error) * diagnostics.splitmerge.nb_splitmerge + alpha * rel_error * (diagnostics.splitmerge.nb_splitmerge + K_p * error)
+            diagnostics.splitmerge.nb_splitmerge = max(1.0, diagnostics.splitmerge.nb_splitmerge)
+            nb_splitmerge = round(Float64, diagnostics.splitmerge.nb_splitmerge)
+        end    
 
         ########################
 
@@ -177,7 +210,8 @@ function advance_chain!(chain::FCChain, nb_steps=100;
                 if mod(length(chain.logprob_chain), sample_every) == 0
                     push!(chain.clusters_samples, deepcopy(chain.clusters))
                     push!(chain.hyperparams_samples, deepcopy(chain.hyperparams))
-                    chain.oldest_sample = length(chain.logprob_chain)
+                    push!(chain.samples_idx, length(chain))
+                    sample_eta = sample_every - (length(chain) - last(chain.samples_idx))
                 end
             end
         end
@@ -224,7 +258,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         ("logprob (best, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
         ("nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
         ("split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
-        ("split/step, merge/step", "$(split_per_step), $(merge_per_step)"),
+        ("average (current run) split/step, merge/step", "$(av_split_per_step), $(av_merge_per_step)"),
         ("MAP #attempts/#successes", "$(nb_map_attemps)/$(nb_map_successes)" * (attempt_map ? "" : " (off)")),
         ("nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.map_clusters)), $(length(filter(c -> length(c) > 1, chain.map_clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.map_clusters)))), $(round(median([length(c) for c in chain.map_clusters]), digits=0)), $(round(mean([length(c) for c in chain.map_clusters]), digits=0)), $(maximum([length(c) for c in chain.map_clusters]))"),
         ("last MAP logprob (minus nn)", "$(round(chain.map_logprob, digits=1)) ($(round(logprob_map_noffjord, digits=1)))"),
@@ -260,7 +294,10 @@ function advance_chain!(chain::FCChain, nb_steps=100;
             end
         end
 
-        isfile("stop") && break
+        if isfile("stop")
+            rm("stop")
+            break
+        end
 
     end
 
@@ -276,7 +313,7 @@ function advance_chain!(chain::FCChain, nb_steps=100;
 end
 
 
-function attempt_map!(chain::FCChain; max_nb_pushes=15, optimize_hyperparams=false, verbose=true, force=false)
+function attempt_map!(chain::FCChain; max_nb_pushes=25, optimize_hyperparams=false, verbose=true, force=false)
 
     map_clusters_attempt = deepcopy(chain.clusters)
     map_hyperparams = deepcopy(chain.hyperparams)

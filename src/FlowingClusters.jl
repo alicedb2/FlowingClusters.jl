@@ -10,7 +10,7 @@ module FlowingClusters
                          MvNormal, MvTDist, InverseWishart, Normal,
                          Cauchy, Uniform, Exponential, Dirichlet,
                          Multinomial, Beta, MixtureModel, Categorical,
-                         InverseGamma
+                         InverseGamma, LocationScale, TDist, Truncated
     using PDMats
     using SpecialFunctions: loggamma, polygamma, logbeta
 
@@ -24,13 +24,17 @@ module FlowingClusters
     using Optim: optimize, minimizer, LBFGS, NelderMead, Options
     using DataStructures: CircularBuffer
 
-    using DifferentialEquations: Tsit5
+    using DifferentialEquations: AutoTsit5, AutoVern7,
+        Tsit5, Rodas5P, Rodas4P, Rosenbrock23
     using DiffEqFlux: Lux, Chain, Dense,
-                      FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff,
-                      kaiming_uniform, zeros64, rand64, randn64,
-                      softsign, tanh_fast, sigmoid, relu,
-                      swish, mish, sigmoid_fast
-    export Chain, Dense, kaiming_uniform, zeros64, softsign, swish, sigmoid, tanh_fast, dswish
+        FFJORD, __forward_ffjord, __backward_ffjord, AutoForwardDiff,
+        kaiming_uniform, glorot_normal, glorot_uniform, orthogonal,
+        zeros64, rand64, randn64,
+        softsign, tanh_fast, sigmoid, relu,
+        swish, mish, sigmoid_fast, tanhshrink
+    export Chain, Dense, 
+        softsign, swish, sigmoid_fast, tanh_fast,
+        tanhshrink, dswish
 
     using ComponentArrays: ComponentArray
 
@@ -56,7 +60,7 @@ module FlowingClusters
     export FCChain, burn!
     export logprob_chain, nbclusters_chain, largestcluster_chain
     export alpha_chain, mu_chain, lambda_chain, psi_chain, nu_chain, flatL_chain
-    export nn_chain, nn_alpha_chain, nn_scale_chain
+    export nn_params_chain, nn_hyperparams_chain
     export ess_rhat, stats
 
     include("model/conjugateupdates.jl")
@@ -68,7 +72,7 @@ module FlowingClusters
     export logprobgenerative
 
     include("model/ffjord.jl")
-    export forwardffjord, backwardffjord, reflow, uniformbias, dense_nn
+    export forwardffjord, backwardffjord, reflow, dense_nn
 
     include("sampler.jl")
     export advance_gibbs!, sequential_gibbs!, advance_splitmerge_seq!,
@@ -80,7 +84,7 @@ module FlowingClusters
     export advance_chain!, attempt_map!
 
     include("plotting.jl")
-    export plot, plot!, deformation_figure_2d
+    export plot, plot!, deformation_plot, flow_plot
 
     include("naivebioclim.jl")
     using .NaiveBIOCLIM
