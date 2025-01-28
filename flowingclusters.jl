@@ -48,6 +48,7 @@ function parse_commandline()
             arg_type=Int
         "--activation-function"
             help="Activation function (tanh_fast, softsign, relu, sigmoid_fast, swish, etc.)"
+            nargs='+'
             arg_type=String
             default="tanh_fast"
         "--nb-ffjord-am"
@@ -158,12 +159,20 @@ function main(parsed_args)
         println(@blue("     Hidden nodes:  "), hn)
         println(@blue("   Activation fun:  "), _act)
 
-        if hasproperty(FlowingClusters, Symbol(_act))
-            act = getproperty(FlowingClusters, Symbol(_act))
-        elseif hasproperty(FlowingClusters.Lux, Symbol(_act))
-            act = getproperty(FlowingClusters.Lux, Symbol(_act))
-        else
-            error("Activation function $_act not found. Available functions can be found here: https://lux.csail.mit.edu/stable/api/NN_Primitives/ActivationFunctions")
+        if _act isa String
+            _act = fill(_act, length(hn)-1)
+        elseif length(_act) == 1
+            _act = fill(act[1], length(hn)-1)
+        end
+        act = Function[]
+        for __act in _act
+            if hasproperty(FlowingClusters, Symbol(__act))
+                push!(act, getproperty(FlowingClusters, Symbol(__act)))
+            elseif hasproperty(FlowingClusters.Lux, Symbol(__act))
+                push!(act, getproperty(FlowingClusters.Lux, Symbol(__act)))
+            else
+                error("Activation function $__act not found. Available functions can be found here: https://lux.csail.mit.edu/stable/api/NN_Primitives/ActivationFunctions")
+            end
         end
 
         hn = [length(predictors), hn..., length(predictors)]
