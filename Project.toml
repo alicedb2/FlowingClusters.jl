@@ -28,13 +28,10 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 StatsFuns = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 Term = "22787eb5-b846-44ae-b979-8e399b8463ab"
 
+[sources]
+DiffEqFlux = {rev = "ffjordmodif", url = "https://github.com/alicedb2/DiffEqFlux.jl"}
+SplitMaskStandardize = {rev = "main", url = "https://github.com/alicedb2/SplitMaskStandardize.jl"}
+
 [compat]
 ADTypes = "<1.12.1"
-
-[sources.DiffEqFlux]
-rev = "ffjordmodif"
-url = "https://github.com/alicedb2/DiffEqFlux.jl"
-
-[sources.SplitMaskStandardize]
-rev = "main"
-url = "https://github.com/alicedb2/SplitMaskStandardize.jl"
+ArgParse = "1.2.0"

@@ -1,10 +1,10 @@
 #!/usr/bin/env -S julia --color=yes --startup-file=no
 
 using Pkg
+Pkg.activate(@__DIR__, io=devnull)
+
 using ArgParse
 using Term
-
-Pkg.activate(@__DIR__, io=devnull)
 
 function parse_commandline()
     s = ArgParseSettings()
