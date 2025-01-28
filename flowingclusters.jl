@@ -31,17 +31,17 @@ function parse_commandline()
             arg_type=Int
             default=-1
         "--nb-gibbs", "-g"
-            help="Number of Gibbs sweep per iteration"
-            arg_type=Int
-            default=1
+            help="Number or probability of Gibbs sweep per iteration"
+            arg_type=String
+            default="1"
         "--nb-splitmerge", "-c"
-            help="Number of split-merge attempts per iteration"
-            arg_type=Int
-            default=350
+            help="Number of split-merge attempts or average number of successful split-merges moves per iteration"
+            arg_type=String
+            default="100"
         "--nb-amwg", "-w"
-            help="Number of adaptive Metropolis within Gibbs per iteration"
-            arg_type=Int
-            default=1
+            help="Number or probability of adaptive Metropolis within Gibbs per iteration"
+            arg_type=String
+            default="1"
         "--hidden-nodes", "-H"
             help="Activate FFJORD, hidden layer sizes (off by default)"
             nargs='*'
@@ -52,8 +52,8 @@ function parse_commandline()
             default="tanh_fast"
         "--nb-ffjord-am", "-a"
             help="Number of adaptive Metropolis per iteration"
-            arg_type=Int
-            default=1
+            arg_type=String
+            default="1"
         "--pre-training"
             help="Number of iteration of pre-training over neural network"
             arg_type=Int
@@ -196,11 +196,23 @@ function main(parsed_args)
 
     fc_eval_init = evaluate_flowingclusters(chain, dataset, species, predictors)
 
+    function parse_intfloat(s)
+        return try
+            if occursin(".", s)
+                return parse(Float64, s)
+            else
+                return parse(Int, s)
+            end
+        catch e
+            throw("Argument must be an Int or a Float")
+        end
+    end
+
     advance_chain!(chain, parsed_args["nb-iter"],
-        nb_ffjord_am=parsed_args["nb-ffjord-am"],
-        nb_gibbs=parsed_args["nb-gibbs"],
-        nb_amwg=parsed_args["nb-amwg"],
-        nb_splitmerge=parsed_args["nb-splitmerge"],
+        nb_ffjord_am=parse_intfloat(parsed_args["nb-ffjord-am"]),
+        nb_gibbs=parse_intfloat(parsed_args["nb-gibbs"]),
+        nb_amwg=parse_intfloat(parsed_args["nb-amwg"]),
+        nb_splitmerge=parsed_argsparse_intfloat(["nb-splitmerge"]),
         attempt_map=true, sample_every=:autocov, stop_criterion=:sample_ess,
         progressoutput=progressoutput)
 
