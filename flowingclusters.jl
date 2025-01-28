@@ -50,7 +50,6 @@ function parse_commandline()
             help="Activation function (tanh_fast, softsign, relu, sigmoid_fast, swish, etc.)"
             nargs='+'
             arg_type=String
-            default="tanh_fast"
         "--nb-ffjord-am"
             help="Number of adaptive Metropolis per iteration"
             arg_type=String
