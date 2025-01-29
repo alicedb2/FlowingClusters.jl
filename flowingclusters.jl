@@ -4,7 +4,6 @@ using Pkg
 Pkg.activate(@__DIR__, io=devnull)
 
 using ArgParse
-using Term
 
 function parse_commandline()
     s = ArgParseSettings()
@@ -186,8 +185,14 @@ function main(parsed_args)
     training_dataset = dataset.training.presence(species).standardize(predictors...)(predictors...)
 
     bioclim_eval = parsed_args["evaluate-bioclim"] ? evaluate_bioclim(dataset, species, predictors) : nothing
-    brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=false) : nothing
-    brt_eval_halftraining = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=true) : nothing
+    
+    if isdefined(Main, :evaluate_brt)
+        brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=false) : nothing
+        brt_eval_halftraining = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=true) : nothing
+    else
+        brt_eval = nothing
+        brt_eval_halftraining = nothing
+    end
 
     mkpath(output_dir)
 
@@ -260,11 +265,11 @@ function main(parsed_args)
 end
 
 if parsed_args["evaluate-bioclim"]
-    include(joinpath(@__DIR__, "misc", "bioclim_predictions.jl"))
+    include(joinpath(@__DIR__, "src", "bioclim_predictions.jl"))
 end
 if parsed_args["evaluate-brt"]
-    include(joinpath(@__DIR__, "misc", "brt_predictions.jl"))
+    include(joinpath(@__DIR__, "src", "brt_predictions.jl"))
 end
-include(joinpath(@__DIR__, "misc", "flowingclusters_predictions.jl"))
+include(joinpath(@__DIR__, "src", "flowingclusters_predictions.jl"))
 
 main(parsed_args)
