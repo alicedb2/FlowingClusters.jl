@@ -86,10 +86,6 @@ module FlowingClusters
     include("plotting.jl")
     export plot, plot!, deformation_plot, flow_plot
 
-    include("naivebioclim.jl")
-    using .NaiveBIOCLIM
-    export bioclim_predictor
-
     include("prediction.jl")
     export predictive_distribution, tail_probability, tail_probability_summary
 
