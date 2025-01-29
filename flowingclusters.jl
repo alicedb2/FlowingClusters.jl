@@ -187,8 +187,8 @@ function main(parsed_args)
     bioclim_eval = parsed_args["evaluate-bioclim"] ? evaluate_bioclim(dataset, species, predictors) : nothing
     
     if isdefined(Main, :evaluate_brt)
-        brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=false) : nothing
-        brt_eval_halftraining = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=true) : nothing
+        brt_eval = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=false, rng=seed) : nothing
+        brt_eval_halftraining = parsed_args["evaluate-brt"] ? evaluate_brt(dataset, species, predictors, halftraining=true, rng=seed) : nothing
     else
         brt_eval = nothing
         brt_eval_halftraining = nothing

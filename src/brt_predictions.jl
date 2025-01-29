@@ -1,4 +1,5 @@
 using SplitMaskStandardize
+using Random: default_rng
 try
     using EvoTrees
 catch e
@@ -6,7 +7,7 @@ catch e
 end
 
 if isdefined(Main, :EvoTrees)
-    function evaluate_brt(dataset::SMSDataset, species, predictors, perfstat=:MCC; halftraining=false)
+    function evaluate_brt(dataset::SMSDataset, species, predictors, perfstat=:MCC; halftraining=false, rng=default_rng())
 
         _truncate(x, minval, maxval) = min.(maxval, max.(minval, x))
 
@@ -24,7 +25,7 @@ if isdefined(Main, :EvoTrees)
         # Train BRT and predict validation set
         validation_predictors = transpose(dataset.standardize(predictors...).validation(predictors...))
         validation_presabs = dataset.validation(species)
-        gaussian_tree_parameters = EvoTreeGaussian(; loss=:gaussian, metric=:gaussian, nrounds=100, nbins=100, λ=0.0, γ=0.0, η=0.1, max_depth=7, min_weight=1.0, rowsample=0.5, colsample=1.0)
+        gaussian_tree_parameters = EvoTreeGaussian(; loss=:gaussian, metric=:gaussian, nrounds=100, nbins=100, λ=0.0, γ=0.0, η=0.1, max_depth=7, min_weight=1.0, rowsample=0.5, colsample=1.0, rng=rng)
         brt_model = fit_evotree(gaussian_tree_parameters; x_train=train_predictors, y_train=train_presabs, metric=:logloss, x_eval=validation_predictors, y_eval=validation_presabs)
         brt_validation_predictions = _truncate(EvoTrees.predict(brt_model, validation_predictors)[:, 1], 0, 1)
 
