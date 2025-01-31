@@ -30,15 +30,15 @@ function parse_commandline()
             arg_type=Int
             default=-1
         "--nb-gibbs"
-            help="Number or probability of Gibbs sweep per iteration"
+            help="Number (integer) or probability (0 < p < 1) of Gibbs sweep per iteration"
             arg_type=String
             default="1"
         "--nb-splitmerge"
-            help="Number of split-merge attempts or average number of successful split-merges moves per iteration"
+            help="Number of split-merge proposals (integer) or average number of successful split-merges moves per iteration (sm > 0)"
             arg_type=String
             default="100"
         "--nb-amwg"
-            help="Number or probability of adaptive Metropolis within Gibbs per iteration"
+            help="Number (integer) or probability (0 < p < 1) of adaptive Metropolis within Gibbs per iteration"
             arg_type=String
             default="1"
         "--hidden-nodes"
@@ -50,7 +50,7 @@ function parse_commandline()
             nargs='+'
             arg_type=String
         "--nb-ffjord-am"
-            help="Number of adaptive Metropolis per iteration"
+            help="Number (integer) or probability (0 < p < 1) of adaptive Metropolis per iteration"
             arg_type=String
             default="1"
         "--pre-training"
@@ -240,6 +240,7 @@ function main(parsed_args)
     chain_file = joinpath(output_dir, "$(output_prefix)_pid$(getpid())_chain.jld2")
 
     results = (
+        args=join(ARGS, " "),
         parsed_args=parsed_args,
         dataset=dataset_file,
         brt_eval=brt_eval,
