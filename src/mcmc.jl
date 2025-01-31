@@ -1,6 +1,6 @@
 function advance_chain!(chain::FCChain, nb_steps=100;
     nb_gibbs=1, nb_splitmerge=30, splitmerge_t=3,
-    nb_amwg=1, amwg_batch_size=50, nb_ffjord_am=1, ffjord_am_temperature=1.0,
+    nb_amwg=1, amwg_batch_size=10, nb_ffjord_am=1, ffjord_am_temperature=1.0,
     sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
     attempt_map=true, progressoutput=:repl)

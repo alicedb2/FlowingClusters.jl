@@ -38,7 +38,7 @@ function FCHyperparams(::Type{T}, D::Int, nn=nothing; rng::Union{Nothing, Abstra
                         pyp=(alpha=one(T),),# sigma=0.0),
                         niw=(mu=zeros(T, D),
                             lambda=T(1),
-                            flatL=unfold(LowerTriangular{T}(I(D))),
+                            flatL=unfold(LowerTriangular{T}(4*I(D))),
                             nu=T(D)),
                         nn=(params=nn_params,
                             # prior=(mu0=T(0), 

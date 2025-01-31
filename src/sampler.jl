@@ -163,7 +163,7 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
 end
 
 function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D};
-                      stepsize::Vector{T}=fill(1/10, div(D * (D + 1), 2)), random_order=true) where {T, D, E}
+                      stepsize::Vector{T}=fill(1/10, div(D * (D + 1), 2)), random_order=true, diagonly=false) where {T, D, E}
 
     flatL_d = div(D * (D + 1), 2)
 
@@ -174,6 +174,10 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
         dim_order = randperm(rng, flatL_d)
     else
         dim_order = 1:flatL_d
+    end
+
+    if diagonly
+        dim_order = filter(k -> isequal(ij(k)...), dim_order)
     end
 
     mu, lambda, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.nu
@@ -634,7 +638,7 @@ function advance_hyperparams_amwg!(
         advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.pyp.alpha))
         advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.mu))
         advance_lambda!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.lambda))
-        advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL))
+        advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL), diagonly=false)
         advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
         if hasnn(hyperparams)
             # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
