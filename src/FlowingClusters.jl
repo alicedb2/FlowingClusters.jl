@@ -40,6 +40,8 @@ module FlowingClusters
 
     import MCMCDiagnosticTools: ess_rhat
 
+    using SplitMaskStandardize: SMSDataset, subset, ByRow
+
     include("types/diagnostics.jl")
     export Diagnostics, DiagnosticsFFJORD
     export clear_diagnostics!

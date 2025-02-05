@@ -1,3 +1,9 @@
+function Base.match(cluster::SetCluster, dataset::SMSDataset, predictors::Tuple; standardized=true)
+    cluster_elements = Set(Vector(cluster, orig=true))
+    cluster_df = subset(dataset.__df, collect(predictors) => ByRow((preds...) -> collect(preds) in cluster_elements))
+    return SMSDataset(cluster_df, nothing, dataset.__zero, dataset.__scale, dataset.__rng)
+end
+
 function _burnlength(len, burnin)
     if burnin > 0
         if 0 < burnin < 1
