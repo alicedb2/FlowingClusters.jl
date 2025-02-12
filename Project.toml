@@ -17,6 +17,7 @@ JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MCMCDiagnosticTools = "be115224-59cd-429b-ad48-344e309966f0"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Markdown = "d6f4376e-aef5-505a-96c1-9c027394607a"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 PDMats = "90014a1f-27ba-587c-ab20-58faa44d9150"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
@@ -33,6 +34,6 @@ DiffEqFlux = {rev = "ffjordmodif", url = "https://github.com/alicedb2/DiffEqFlux
 SplitMaskStandardize = {rev = "main", url = "https://github.com/alicedb2/SplitMaskStandardize.jl"}
 
 [compat]
-ADTypes = "<1.12.1"
 ArgParse = "1.2.0"
+Markdown = "1.11.0"
 Term = "2.0.7"
