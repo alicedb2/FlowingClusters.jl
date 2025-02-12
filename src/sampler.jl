@@ -56,6 +56,62 @@ function sequential_gibbs!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperp
     return clusters
 end
 
+function advance_hyperparams_amwg!(
+    rng::AbstractRNG,
+    clusters::Vector{<:AbstractCluster{T, D, E}},
+    hyperparams::AbstractFCHyperparams{T, D},
+    diagnostics::AbstractDiagnostics{T, D};
+    regularizelatent=true
+    ) where {T, D, E}
+
+    di = diagnostics
+    # for j in 1:amwg_batch_size
+    advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.pyp.alpha))
+    if !hasnn(hyperparams) || !regularizelatent
+        advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.mu))
+    else
+        hyperparams._.niw.mu .= zeros(T, D)
+    end
+    advance_lambda!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.lambda))
+    advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL), diagonly=false)
+    advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
+        # if hasnn(hyperparams)
+            # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
+            # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
+        # end
+    # end
+
+    di.amwg.batch_iter += 1
+    if di.amwg.batch_iter >= di.amwg.batch_size
+        di.amwg.batch_iter = 0
+        di.amwg.nb_batches += 1
+        adjust_amwg_logscales!(di)
+        # by default only resets hyperparams acceptance rates
+        clear_diagnostics!(di, resethyperparams=true)
+    end
+
+    return hyperparams
+
+end
+
+
+function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}) where {T, D}
+
+    di = diagnostics
+
+    delta_n = min(di.amwg.min_delta, 1/sqrt(di.amwg.nb_batches))
+
+    # contparams = hasnn(di) ? (:pyp, :niw, :nn) : (:pyp, :niw)
+    contparams = (:pyp, :niw)
+    acc_rates = di.accepted[contparams] ./ (di.accepted[contparams] .+ di.rejected[contparams])
+    di.amwg.logscales .+= delta_n .* (acc_rates .> di.amwg.acceptance_target) .- delta_n .* (acc_rates .<= di.amwg.acceptance_target)
+
+    # di.amwg_logscales[di.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
+    # di.amwg_logscales[di.amwg_logscales .> minmax_logscale] .= minmax_logscale
+
+    return di
+end
+
 function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
 
     step_distrib = Normal(zero(T), stepsize)
@@ -326,6 +382,9 @@ end
 #     return hyperparams
 # end
 
+function advance_splitmerge!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T))::AbstractVector{<:AbstractCluster{T, D, E}} where {T, D, C <: AbstractCluster{T, D, E}} where E
+end
+
 
 # Sequential splitmerge from Dahl & Newcomb
 function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T))::AbstractVector{<:AbstractCluster{T, D, E}} where {T, D, C <: AbstractCluster{T, D, E}} where E
@@ -538,142 +597,131 @@ end
 
 function advance_ffjord_am!(
     rng::AbstractRNG,
-    clusters::AbstractVector{<:AbstractCluster{T, D, E}},
+    clusters::AbstractVector{C},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    iteration=0,
-    temperature=one(T)) where {T, D, E}
+    canonicalform=false,
+    pauseadaptive=false,
+    temperature=one(T)) where {T, D, C <:AbstractCluster{T, D, E}} where E
 
     !hasnn(hyperparams) && return hyperparams
 
     di = diagnostics
 
-    nn_D = size(hyperparams._.nn.params, 1)
-        
-    step_distrib = MvNormal(exp(di.am.logscale) * (di.am.sigma + di.am.eps * I(size(di.am.sigma, 1))))
+    nn_D = size(di.am.sigma, 1)
 
-    proposed_hparray = copy(hyperparams._)        
-    proposed_hparray.nn .+= rand(rng, step_distrib)
+    # if pauseadaptive
+    #     sigma0 = Matrix{T}(I(nn_D))
+    #     logscale0 = (2 * log(2.38) - log(nn_D)) - 2
+    #     step_distrib = MvNormal(exp(logscale0) * (sigma0 + di.am.eps * I(nn_D)))
+    # else
+        # step_distrib = MvNormal(exp(di.am.logscale) * (di.am.sigma + di.am.eps * I(nn_D)))
+        step_distrib = MvNormal(exp(di.am.logscale) * di.am.sigma)
+    # end
 
-    proposed_clusters, proposed_delta_logps = nothing, nothing
+    proposed_hparray = copy(hyperparams._)
+    # params_move = rand(rng, step_distrib)
+    # proposed_hparray.nn.params .+= params_move
+    proposed_hparray.nn.params .+= rand(rng, step_distrib)
+
+    # proposed_clusters, proposed_delta_logps = nothing, nothing
     log_acceptance = zero(T)
-    # try
-        proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
-        # reflow() already computes the logprob coming
-        # from the jacobian of the FFJORD transformation
-        # so we do it here to avoid recomputing it
-        # in logprobgenerative()
-        # Call logprobgenerative without ffjord
-        log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
-        log_acceptance -= sum(proposed_delta_logps)
-        # log_acceptance += log_nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior...)
-        # log_acceptance += log_nn_hyperprior(proposed_hparray.nn.prior...)
-        
-        # Call logprobgenerative with ffjord but no hyperpriors
-        log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
-        # add back the nn hyperprior only (not the pyp/niw hyperpriors)
-        # log_acceptance -= log_nn_hyperprior(hyperparams._.nn.prior...)
-        
-        # Hastings factor on nn hyperprior
-        # remember than lambda0/alpha0/beta0 are actually
-        # log(lambda0), log(alpha0), log(beta0)
-        # log_acceptance += sum(proposed_hparray.nn.prior[(:lambda0, :alpha0, :beta0)] - hyperparams._.nn.prior[(:lambda0, :alpha0, :beta0)])
 
-        log_acceptance /= T(temperature)
-        
-        log_acceptance = isfinite(log_acceptance) ? log_acceptance : T(-Inf)
+    # reflow() already computes the logprob coming
+    # from the jacobian of the FFJORD transformation
+    # so we do it here to avoid recomputing it
+    # in logprobgenerative()
+    # Call logprobgenerative without ffjord
+
+    proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
+    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
+    log_acceptance -= sum(proposed_delta_logps)
+
+    # log_acceptance += log_nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior...)
+    # log_acceptance += log_nn_hyperprior(proposed_hparray.nn.prior...)
+
+    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
+
+    # add back the nn hyperprior only (not the pyp/niw hyperpriors)
+    # log_acceptance -= log_nn_hyperprior(hyperparams._.nn.prior...)
+
+    # Hastings factor on nn hyperprior
+    # remember than lambda0/alpha0/beta0 are actually
+    # log(lambda0), log(alpha0), log(beta0)
+    # log_acceptance += sum(proposed_hparray.nn.prior[(:lambda0, :alpha0, :beta0)] - hyperparams._.nn.prior[(:lambda0, :alpha0, :beta0)])
+
+    log_acceptance /= T(temperature)
+
+    log_acceptance = isfinite(log_acceptance) ? log_acceptance : T(-Inf)
 
     # catch e
 
     #     log_acceptance = T(-Inf)
-    
+
     # end
-    
+
     acceptance = min(one(T), exp(log_acceptance))
     # acceptance = logistic(log_acceptance)
 
+    # previous_params = copy(hyperparams._.nn.params)
+    # eligible_mask = ones(T, nn_D)
     if rand(rng, T) < acceptance
         empty!(clusters)
         append!(clusters, proposed_clusters)
         hyperparams._ .= proposed_hparray
+        if canonicalform
+            nn_params, perm, signs = canonicalize(hyperparams._.nn.params)
+            # eligible_mask = (perm .== 1:nn_D) .& (signs .== ones(T, nn_D))
+            # eligible_mask = 0.1 .+ 0.9 .* ((perm .== 1:nn_D) .& (signs .== ones(T, nn_D)))
+
+            hyperparams._.nn.params .= nn_params
+
+            # Should we or should we not canonicalize
+            # the adaptive proposal distribution before
+            # updating?
+            # Wouldn't this make it not learn anything
+            # about the canonical space or parameters?
+            # di.am.mu .= di.am.mu[perm]
+            # di.am.sigma .= di.am.sigma[perm, :]
+            # di.am.sigma .= di.am.sigma[:, perm]
+
+            # di.am.mu .*= signs
+            # di.am.sigma = signs .* di.am.sigma .* signs'
+        end
         di.accepted.nn += 1
     else
+        # params_move .= zero(T)
         di.rejected.nn += 1
     end
 
-    gamma = (di.am.i+1)^-(1/(1 + di.am.lambda))
-            
-    di.am.i += (0 >= di.am.previous_h * (acceptance - di.am.acceptance_target))
-    di.am.previous_h = acceptance - di.am.acceptance_target
 
-    di.am.logscale = di.am.logscale + gamma * (acceptance - di.am.acceptance_target)
+    if !pauseadaptive
+        gamma_λ = di.am.C * (di.am.i+1)^-di.am.lambda_λ
+        gamma_μ = di.am.C * (di.am.i+1)^-di.am.lambda_μ
+        gamma_Σ = di.am.C * (di.am.i+1)^-di.am.lambda_Σ
 
-    dX = hyperparams._.nn - di.am.mu
-    dXdX = dX * dX'
+        h = acceptance - di.am.acceptance_target
+        di.am.i += di.am.previous_h * h <= 0
+        di.am.previous_h = h
 
-    di.am.mu .= di.am.mu + gamma * dX
-    di.am.sigma .= (1 - gamma) * di.am.sigma + gamma * dXdX
-    # Symmetrize because once in a while julia likes
-    # to introduce numerical noise I was never able 
-    # to track down
-    di.am.sigma .= (di.am.sigma + di.am.sigma') / 2
+        # dX = hyperparams._ - di.am.mu
+        # dX = (previous_params + (gamma .+ (1 - gamma) .* eligible_mask) .* params_move) - di.am.mu
+        # (1 - γ) * μ + γ * X
+        di.am.logscale = di.am.logscale + gamma_λ * (acceptance - di.am.acceptance_target)
+
+        dX = hyperparams._.nn.params - di.am.mu
+        di.am.mu .= di.am.mu + gamma_μ * dX
+
+        dXdX = dX * dX'
+        # (1 - γ) * Σ + γ (X - μ)(X - μ)'
+        ϵ = 1e-3 * tr(di.am.sigma) / nn_D
+        di.am.sigma .= (1 - gamma_Σ) * di.am.sigma + gamma_Σ * dXdX + ϵ * I(nn_D)
+        # Symmetrize because once in a while julia likes
+        # to introduce numerical noise I was never able
+        # to track down
+        di.am.sigma .= (di.am.sigma + di.am.sigma') / 2
+    end
 
     return hyperparams
 
-end
-
-function advance_hyperparams_amwg!(
-    rng::AbstractRNG,
-    clusters::Vector{<:AbstractCluster{T, D, E}},
-    hyperparams::AbstractFCHyperparams{T, D},
-    diagnostics::AbstractDiagnostics{T, D};
-    amwg_batch_size=30, acceptance_target::T=T(0.234)
-    ) where {T, D, E}
-
-    di = diagnostics
-    # by default only resets hyperparams acceptance rates
-    clear_diagnostics!(di)
-
-    for j in 1:amwg_batch_size
-        advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.pyp.alpha))
-        advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.mu))
-        advance_lambda!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.lambda))
-        advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL), diagonly=false)
-        advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
-        if hasnn(hyperparams)
-            # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
-            # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
-        end
-    end
-
-    di.amwg.nbbatches += 1
-
-    adjust_amwg_logscales!(di, acceptance_target=acceptance_target)
-
-    return hyperparams
-
-end
-
-function am_sigma_algo0(L::Real, x::AbstractVector{T}, xx::AbstractMatrix{T}; correction=true, eps::T=T(1e-4)) where T
-    sigma = (xx - x * x' / L) / (L - 1)
-    if correction
-        sigma = (sigma + sigma') / 2 + eps * I
-    end
-    return sigma
-end
-
-am_sigma_algo0(diagnostics::DiagnosticsFFJORD{T, D}; correction=true, eps::T=T(1e-4)) where {T, D} = am_sigma_algo0(diagnostics.am.algo0.L, diagnostics.am.algo0.x, diagnostics.am.algo0.xx, correction=correction, eps=eps)
-
-function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}; acceptance_target::T=0.44, min_delta::T=0.01) where {T, D} #, minmax_logscale::T=one(T)0.0)
-    delta_n = min(min_delta, 1/sqrt(diagnostics.amwg.nbbatches))
-
-    # contparams = hasnn(diagnostics) ? (:pyp, :niw, :nn) : (:pyp, :niw)
-    contparams = (:pyp, :niw)
-    acc_rates = diagnostics.accepted[contparams] ./ (diagnostics.accepted[contparams] .+ diagnostics.rejected[contparams])
-    diagnostics.amwg.logscales .+= delta_n .* (acc_rates .> acceptance_target) .- delta_n .* (acc_rates .<= acceptance_target)
-
-    # diagnostics.amwg_logscales[diagnostics.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
-    # diagnostics.amwg_logscales[diagnostics.amwg_logscales .> minmax_logscale] .= minmax_logscale
-
-    return diagnostics
 end

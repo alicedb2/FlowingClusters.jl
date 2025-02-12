@@ -16,39 +16,30 @@ end
 
 function FCHyperparams(::Type{T}, D::Int, nn=nothing; rng::Union{Nothing, AbstractRNG}=nothing) where {T <: AbstractFloat}
 
-    if isnothing(nn)
-        return FCHyperparams{T, D}(
-            ComponentArray{T}(
-                        pyp=(alpha=one(T),),# sigma=0.0),
-                        niw=(mu=zeros(T, D),
-                             lambda=T(1),
-                             flatL=unfold(LowerTriangular{T}(I(D))),
-                             nu=T(D))
+    hpparams = ComponentArray{T}(
+                    pyp=(alpha=one(T),),# sigma=0.0),
+                    niw=(mu=zeros(T, D),
+                         lambda=T(0.01^2),
+                         flatL=unfold(LowerTriangular{T}(I(D))),
+                         nu=T(D-0.9)
+                    )
                 )
-            )
+
+    if isnothing(nn)
+        return FCHyperparams{T, D}(hpparams)
     else
         rng isa AbstractRNG || throw(ArgumentError("You must provide a random number generator when using FFJORD"))
         # D == first(nn.layers).in_dims == last(nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
 
         nn_params, nn_state = Lux.setup(rng, nn)
-        nn_params = ComponentArray{T}(nn_params)
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
+        ffjord = (nn=nn, nns=nn_state)
+        nn_params = ComponentArray{T}(nn_params)
+        # nn_params, perm, signs = canonicalize(ComponentArray{T}(nn_params))
 
-        return FCHyperparamsFFJORD{T, D}(ComponentArray{T}(
-                        pyp=(alpha=one(T),),# sigma=0.0),
-                        niw=(mu=zeros(T, D),
-                            lambda=T(1),
-                            flatL=unfold(LowerTriangular{T}(4*I(D))),
-                            nu=T(D)),
-                        nn=(params=nn_params,
-                            # prior=(mu0=T(0), 
-                            #        lambda0=T(log(0.01)), 
-                            #        alpha0=T(log(10)), 
-                            #        beta0=T(log(1)))
-                            )
-                        ),
-                    (nn=nn, nns=nn_state)
-                )
+        hpparams = vcat(hpparams, ComponentArray{T}(nn=(params=nn_params,)))
+
+        return FCHyperparamsFFJORD{T, D}(hpparams, ffjord)
     end
 end
 

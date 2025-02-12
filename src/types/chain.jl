@@ -122,7 +122,7 @@ function FCChain(
     hyperparams_samples = CircularBuffer{typeof(hyperparams)}(nb_samples)
     samples_idx = CircularBuffer{Int}(nb_samples)
 
-    diagnostics = Diagnostics(T, D, hasnn(hyperparams) ? hyperparams._.nn : nothing)
+    diagnostics = Diagnostics(T, D, hyperparams._)
 
     chain = FCChain{T, D, element_type, cluster_type{T, D, element_type}, typeof(hyperparams), typeof(diagnostics)}(
         cluster_type{T, D, element_type}[], hyperparams, diagnostics,
@@ -137,7 +137,7 @@ function FCChain(
     if strategy == :hot || strategy isa Float64
         push!(chain.clusters, cluster_type(initial_elements, base2original))
         if strategy == :hot
-            temperature = 1.6
+            temperature = 2.0
         else
             temperature = strategy
         end

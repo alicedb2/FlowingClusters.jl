@@ -80,14 +80,14 @@ function log_nn_prior_normalinvgamma(nn_params::ComponentArray{T}, mu0::T, lambd
     lambda_u = lambda0 + n
     alpha_u = alpha0 + n / 2
     beta_u = beta0 + 1/2 * (WW + lambda0 * mu0^2 - lambda_u * mu_u^2)
-    
+
     if beta_u <= beta0
         @warn "beta_u <= beta0, the posterior is improper over the alpha0 hyperparameter. This is a function of the data, you're simply unlucky. Proceed at your own risk, but it will eventually crash-and-burn." maxlog=1
     end
 
     # 1/Z0
     A0 = 1/2 * log(lambda0) + alpha0 * log(beta0) - loggamma(alpha0)
-    
+
     # 1/Zu
     Au = 1/2 * log(lambda_u) + alpha_u * log(beta_u) - loggamma(alpha_u)
 

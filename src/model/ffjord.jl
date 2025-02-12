@@ -118,26 +118,67 @@ function reflow(rng::AbstractRNG, clusters::AbstractVector{IndexCluster{T, D, E}
     return (clusters=[IndexCluster(cluster.elements, new_base2original) for cluster in clusters], deltalogpxs=deltalogpxs)
 end
 
-function dense_nn(nbnodes::Int...; act=tanh_fast, gain=0.2)
-    
+function dense_nn(nbnodes::Int...; act=tanh_fast, gain=0.2, uw=2.0)
+
     if act isa Tuple || act isa AbstractVector
         @assert length(act) == length(nbnodes)-1
     elseif act isa Function
         act = fill(act, length(nbnodes)-1)
     end
 
-    layers = [Dense(nbnodes[i], nbnodes[i+1],
-                    act[i],
-                    # init_bias=(i == 1) ? (x...) -> 2*(rand64(x...) .- 1/2) : zeros64,
-                    init_bias=(i == 1) ? (x...) -> 2*(rand64(x...) .- 1/2) : zeros64,
-                    init_weight=zeros64
-                    # init_bias=randn64,
+    layers = [Dense(nbnodes[i], nbnodes[i+1], act[i],
+                    # init_bias=(i == length(nbnodes)-1) ? ((x...) -> uw*(rand64(x...) .- 1/2)) : zeros64,
+                    init_bias=zeros64,
+                    init_weight=zeros64,
                     # init_weight=orthogonal(Float64)
                     # init_weight=glorot_uniform(Float64, gain=gain)
                     # init_weight=kaiming_uniform(gain=gain)
                     ) for i in 1:length(nbnodes)-1]
-    
+
     nn = Chain(layers...)
 
     return nn
+end
+
+function canonicalize(nn_params::ComponentArray{T}) where T
+
+    nn_params = deepcopy(nn_params)
+
+    # signs = sign.(nn_params.layer_1.weight[:, 1])
+    signs = T[sign(ws[findlast(x -> abs(x) == maximum(abs.(ws)), ws)]) for ws in eachrow(nn_params.layer_1.weight)]
+    signs[signs .== 0] .= one(T)
+    nn_params.layer_1.weight .*= signs
+    nn_params.layer_1.bias .*= signs
+    nn_params.layer_2.weight .*= signs'
+
+    # Append w for norm(w) in case of a
+    # cosmically improbable tie.
+    permidx = sortperm(eachrow(nn_params.layer_1.weight), by=w -> (norm(w), w), rev=true)
+    # permidx = sortperm(eachrow(nn_params.layer_1.weight), rev=true)
+
+    nn_params.layer_1.weight .= nn_params.layer_1.weight[permidx, :]
+    nn_params.layer_1.bias .= nn_params.layer_1.bias[permidx]
+    nn_params.layer_2.weight .= nn_params.layer_2.weight[:, permidx]
+
+    fullperm = collect(1:length(nn_params))
+
+    lm1w_idx = label2index(nn_params, "layer_1.weight")
+    lm1w_perm = reshape(reshape(lm1w_idx, size(nn_params.layer_1.weight))[permidx, :], :)
+    fullperm[lm1w_idx] .= fullperm[lm1w_perm]
+
+    lm1b_idx = label2index(nn_params, "layer_1.bias")
+    fullperm[lm1b_idx] .= fullperm[lm1b_idx][permidx]
+
+    l2w_idx = label2index(nn_params, "layer_2.weight")
+    l2w_perm = reshape(reshape(l2w_idx, size(nn_params.layer_2.weight)...)[:, permidx], :)
+    fullperm[l2w_idx] .= fullperm[l2w_perm]
+
+    signs = signs[permidx]
+    fullsigns = ComponentArray(ones(T, length(nn_params)), first(getaxes(nn_params)))
+    fullsigns.layer_1.weight .*= signs
+    fullsigns.layer_1.bias .*= signs
+    fullsigns.layer_2.weight .*= signs'
+
+    return (nn_params=nn_params, permutation=fullperm, signs=fullsigns)
+
 end

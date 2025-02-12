@@ -60,8 +60,8 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     map_idx = chain.map_idx
 
     if hasnn(chain.hyperparams)
-        # ysize = 2800
-        ysize = 2400
+        ysize = 2800
+        # ysize = 2400
     else
         ysize = 1500
     end
@@ -70,7 +70,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
 
     p_map_axis = Axis(fig[1:2, 1], title="MAP state ($(length(chain.map_clusters)) clusters)")
     plot!(p_map_axis, chain.map_clusters; proj=proj, orig=true, rev=rev, nbclusters=nbclusters)
-    
+
     p_current_axis = Axis(fig[1:2, 2], title="Current state ($(length(chain.clusters)) clusters)")
     plot!(p_current_axis, chain.clusters; proj=proj, orig=true, rev=rev, nbclusters=nbclusters)
 
@@ -156,10 +156,12 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
 
     if hasnn(chain.hyperparams)
         nnc = nn_params_chain(Matrix, chain, burn)
-        nn_axis = Axis(fig[9, 1:2], title="FFJORD neural network prior")
+        nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network prior")
         _deco!(nn_axis, hide=(:t, :r))
         for p in eachrow(nnc)
-            lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
+            # scatter!(nn_axis, burn+1:N, collect(p), label=nothing, markersize=2, alpha=0.5)
+            barplot!(nn_axis, burn+1:N, collect(p), fillto=collect(p) .- 0.01, gap=-0.01, strokewidth=0, label=nothing)
+            # lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
         end
         if map_idx > 0
             vlines!(nn_axis, [map_idx], label=nothing, color=:black)
@@ -269,7 +271,17 @@ function deformation_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)),
     return fig
 end
 
+# fig = Figure();
+# ax = Axis(fig[1, 1]);
+# streamplot!(ax,(x,y)->Point2(chain.hyperparams.ffjord.nn(Float64[x, y], chain.map_hyperparams._.nn.params, chain.hyperparams.ffjord.nns.model)[1]...), -6..6, -6..6);
+# scatter!(Tuple.(eachcol(Matrix(chain.clusters, orig=true))));
+# scatter!(Tuple.(eachcol(Matrix(chain.clusters, orig=false))));
+# fig
+
+
 function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
+
+    # streamplot((x,y)->Point2(chain.hyperparams.ffjord.nn(Float64[x, y], chain.map_hyperparams._.nn.params, chain.hyperparams.ffjord.nns.model)[1]...), -2..2, -2..2)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -304,7 +316,7 @@ function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs
         _baseprobgrid[zsproj, :] .= realzs
         baseprobgrid = _baseprobgrid
     end
-    
+
     fig = Figure(size=(900, 500));
     ax1 = Axis(fig[1, 1], xlabel="Real axis $(proj[1]) -> Base axis $(proj[1])", ylabel="Real axis $(proj[2]) -> Base axis $(proj[2])")
     basespace = nothing
@@ -326,7 +338,7 @@ function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs
     _deco!(ax1, hide=(:t, :r))
 
     ax2 = Axis(fig[1, 2], xlabel="Base axis $(proj[1]) -> Real axis $(proj[1])", ylabel="Base axis $(proj[2]) -> Real axis $(proj[2])")
-    
+
     scatter!(ax2, baseprobgrid[proj[1], :], baseprobgrid[proj[2], :], color=:grey, alpha=0.2, markersize=6, label=nothing);
     realspace = nothing
     for _t in LinRange(0, 1, nbpoints)

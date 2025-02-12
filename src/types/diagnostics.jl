@@ -17,59 +17,17 @@ end
 
 hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
 
-function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
+function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=nothing) where T
+# function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
 
     sizeflatL = div(D * (D + 1), 2)
 
-    splitmerge = ComponentArray{T}(alpha=0.01,
-                                   K_p=0.5,
-                                   K_i=0.1,
-                                   nb_splitmerge=50.0,
-                                   target_per_step=1.0,
-                                   integral_error=0.0)
-
-
-    if nn_params === nothing
-
-        accepted = ComponentArray{Int}(
-                        pyp=(alpha=0,),#, sigma=0),
-                        niw=(mu=zeros(D),
-                            lambda=0,
-                            flatL=zeros(sizeflatL),
-                            nu=0
-                            ),
-                        splitmerge=(split=0, merge=0,
-                                    splitper=0, mergeper=0
-                                    )
-                    )
-
-        amwg = ComponentArray{T}(
-                nbbatches=zero(T),
-                logscales=(pyp=(alpha=zero(T),),# sigma=zero(T)),
-                            niw=(mu=zeros(T, D),
-                                lambda=zero(T),
-                                flatL=zeros(T, sizeflatL),
-                                nu=zero(T))
-                            )
-                )
-
-        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg, splitmerge)
-
-    else
-
-        accepted = ComponentArray{Int}(
-                        pyp=(alpha=0,),# , sigma=0),
-                        niw=(mu=zeros(D),
-                             lambda=0,
-                             flatL=zeros(sizeflatL),
-                             nu=0),
-                        splitmerge=(split=0, merge=0,
-                                    splitper=0, mergeper=0),
-                        nn=0
-                    )
-
-        amwg = ComponentArray{T}(
-                    nbbatches=zero(T),
+    amwg = ComponentArray{T}(
+                    batch_size=30,
+                    nb_batches=0,
+                    batch_iter=0,
+                    acceptance_target=0.234,
+                    min_delta=0.01,
                     logscales=(pyp=(alpha=zero(T),),#, sigma=zero(T)),
                                niw=(mu=zeros(T, D),
                                        lambda=zero(T),
@@ -79,35 +37,56 @@ function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=
                             )
                     )
 
-        nn_D = size(nn_params, 1)
+    splitmerge = ComponentArray{T}(alpha=0.1,
+                                   lambda=1.0,
+                                   K_p=0.5,
+                                   K_i=0.1,
+                                   nb_splitmerge=50.0,
+                                   target_per_step=1.0,
+                                   integral_error=0.0)
 
-        am_mu = nn_params[:]
-        am_sigma = Matrix{T}(I(nn_D))
-        logscale0 = (2 * log(2.38) - log(nn_D))
-        # Seems to be too much for tanh networks,
-        # let's reduce the step size multiplier
-        # by two orders of magnitude and 
-        # start the exploration gently.
-        logscale0 -= 2
+    accepted = ComponentArray{Int}(
+                            pyp=(alpha=0,),#, sigma=0),
+                            niw=(mu=zeros(D),
+                                lambda=0,
+                                flatL=zeros(sizeflatL),
+                                nu=0
+                                ),
+                            splitmerge=(split=0, merge=0,
+                                        splitper=0, mergeper=0
+                                        )
+                        )
 
-        # Add eps * I to the covariance matrix
-        # to avoid singular matrix. Practically
-        # speaking, it reactivates dead directions
-        # in the proposal distribution which the
-        # adaptive Metropolis algorithm can then
-        # latch onto. This improves convergence
-        # and mixing trememdously!
-        eps = 1e-3
+    if !hasnn(hpparams)
+
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg, splitmerge)
+
+    else
+
+        accepted = vcat(accepted, ComponentArray(nn=0))
+
+        nn_D = size(hpparams.nn.params, 1)
+        # nn_D = size(hpparams, 1)
+
+        mu0 = deepcopy(hpparams.nn.params)
+        sigma0 = Matrix{T}(I(nn_D))
+        logscale0 = (2 * log(2.38) - log(nn_D)) - 1
+        # sigma0 = T(2.38^2 / nn_D / 10) * Matrix{T}(I(nn_D))
+        # logscale0 = zero(T)
 
         am = ComponentArray{T}(i=1.0,
-                               previous_h=1.0,
+                               previous_h=0.0,
                                acceptance_target=0.234,
-                               lambda=1.0,
+                            #    lambda=0.9,
+                               lambda_λ = 0.6,
+                               lambda_μ = 0.7,
+                               lambda_Σ = 0.8,
+                               C=1.0,
                                logscale=logscale0,
-                               mu=am_mu,
-                               sigma=am_sigma,
-                               eps=eps
-                               )        
+                               mu=mu0,
+                               sigma=sigma0,
+                               eps=1e-7
+                               )
 
         return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am, splitmerge)
 
@@ -135,26 +114,17 @@ function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
 
 end
 
-function clear_diagnostics!(diagnostics::AbstractDiagnostics;
-                            resethyperparams=true, resetsplitmerge=false,
-                            resetnn=false, resetamwg=false#, resetam=false
-                            )
+function clear_diagnostics!(diagnostics::AbstractDiagnostics{T, D};
+                            resethyperparams=false, resetsplitmerge=false,
+                            resetnn=false, resetamwg=false, resetam=false
+                            ) where {T, D}
 
     if resethyperparams
         diagnostics.accepted.pyp .= 0
         diagnostics.rejected.pyp .= 0
         diagnostics.accepted.niw .= 0
         diagnostics.rejected.niw .= 0
-        # if hasnn(diagnostics)
-        #     diagnostics.accepted.nn = 0
-        #     diagnostics.rejected.nn = 0
-        # end
     end
-
-    # if hasnn(diagnostics) && resetnn
-    #     diagnostics.accepted.nn.params = 0
-    #     diagnostics.rejected.nn.params = 0
-    # end
 
     if resetsplitmerge
         diagnostics.accepted.splitmerge .= 0
@@ -162,11 +132,22 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics;
     end
 
     if resetamwg
-        diagnostics.amwg .= 0
+        diagnostics.amwg.nb_batches = 0
+        diagnostics.amwg.batch_iter = 0
+        diagnostics.amwg.logscales .= 0
     end
 
     if hasnn(diagnostics) && resetnn
-        diagnostics.am.nn = 0
+        diagnostics.accepted.nn = 0
+        diagnostics.rejected.nn = 0
+    end
+
+    if hasnn(diagnostics) && resetam
+        diagnostics.am.i = 1.0
+        diagnostics.am.previous_h = 1.0
+        diagnostics.am.mu .= 0
+        diagnostics.am.sigma .= Matrix{T}(I(size(diagnostics.am.mu, 1)))
+        diagnostics.am.logscale = 2 * log(2.38) - log(size(diagnostics.am.mu, 1)) - 2
     end
 
     return diagnostics

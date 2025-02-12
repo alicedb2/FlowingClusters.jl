@@ -10,12 +10,13 @@ module FlowingClusters
                          MvNormal, MvTDist, InverseWishart, Normal,
                          Cauchy, Uniform, Exponential, Dirichlet,
                          Multinomial, Beta, MixtureModel, Categorical,
-                         InverseGamma, LocationScale, TDist, Truncated
+                         InverseGamma, LocationScale, TDist, Truncated,
+                         DiscreteNonParametric
     using PDMats
     using SpecialFunctions: loggamma, polygamma, logbeta
 
     using Makie: Figure, Axis, axislegend, Cycled,
-                 lines!, scatter, scatter!, vlines!, hlines!, hist!,
+                 lines!, scatter, scatter!, vlines!, hlines!, hist!, barplot!,
                  xlims!, ylims!, hidespines!, hidedecorations!
     import Makie: plot, plot!
 
@@ -36,7 +37,7 @@ module FlowingClusters
         softsign, swish, sigmoid_fast, tanh_fast,
         tanhshrink, dswish
 
-    using ComponentArrays: ComponentArray
+    using ComponentArrays: ComponentArray, label2index, getaxes
 
     import MCMCDiagnosticTools: ess_rhat
 

@@ -62,6 +62,7 @@ function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:Abstract
     ret = forwardffjord(rng, Matrix(clusters, orig=true), hpa, ffjord)
     logprob_ffjord = -sum(ret.deltalogpxs)
     # logprob_ffjord += log_nn_prior(hpa.nn.params, hpa.nn.prior...)
+    # logprob_ffjord += log_nn_prior(ret.z)
 
     if !ignorehyperpriors
         # logprob_ffjord += log_nn_hyperprior(hpa.nn.prior...)
