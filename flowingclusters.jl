@@ -4,9 +4,35 @@ using Pkg
 Pkg.activate(@__DIR__, io=devnull)
 
 using ArgParse
+using Term, Markdown
+
+title = @style "FlowingClusters.jl" bold blue
+description = """
+
+A Julia package for Bayesian nonparametric clustering with normalizing flow.
+
+FlowingClusters.jl uses a combination of Dirichlet process mixture together with an optional 
+normalizing flow called FFJORD (Free-Form Jacobian of Reversible Dyanamics) to rectify
+non-linearities in data space into a linear latent space better suited for clustering.
+
+The package doubles as a presence-only species distribution model (SDM) for ecology which can
+- uncover microhabitats,
+- predict species distributions including uncertainty,
+- discover and correct non-linearities in environmental space.
+
+References:
+- Neal (2001) Markov Chain Sampling Methods for Dirichlet Process Mixture Models (10.2307/1390653, Algorithm 1)
+- Dahl & Newcomb (2022) Sequentially allocated merge-split samplers for conjugate Bayesian nonparametric models (10.1080/00949655.2021.1998502)
+- Robert & Rosenthal (2009) Examples of Adaptive MCMC (10.1198/jcgs.2009.06134, AMWG algorithm)
+- Adrieu & Thoms (2008) A tutorial on adaptive MCMC (10.1007/s11222-008-9110-y, Algorithm 4)
+- Grathwohl et al. (2018) FFJORD: Free-form Continuous Dynamics for Scalable Reversible Generative Models (10.48550/arXiv.1810.01367)
+"""
 
 function parse_commandline()
-    s = ArgParseSettings()
+    s = ArgParseSettings(
+        description=title * description,
+        preformatted_description=true
+    )
     @add_arg_table s begin
         "--input"
             help="Data file"
@@ -274,3 +300,4 @@ end
 include(joinpath(@__DIR__, "src", "flowingclusters_predictions.jl"))
 
 main(parsed_args)
+
