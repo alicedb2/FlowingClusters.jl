@@ -242,10 +242,8 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         # end
         logprob_map_noffjord = logprobgenerative(chain.map_clusters, chain.map_hyperparams, chain.rng, ignoreffjord=true)
 
-        pretraining = nb_gibbs == 0 && nb_splitmerge == 0 && nb_amwg == 0 && nb_ram > 0
-
         # if progressoutput === :repl || progressoutput === :file || progressoutput
-        next!(progbar; desc=(pretraining ? "Pre-training: " : "Sampling: "),
+        next!(progbar; desc="Sampling: ",
         showvalues=[
         ("step (#gibbs, #splitmerge, #crpram, #ffjordram)", "$(step)/$(nb_steps) ($(gibbs_sweep ? "\033[37m$nb_gibbs\033[34m" : "$nb_gibbs"), $nb_splitmerge, $nb_crp_ram, $(hasnn(chain.hyperparams) ? "$nb_ffjord_ram" : "no fjjord"))"),
         ("chain length", "$(length(chain))"),
