@@ -1,7 +1,6 @@
 function advance_chain!(chain::FCChain, nb_steps=100;
     nb_gibbs=1, nb_splitmerge=1.0, splitmerge_t=3, 
     nb_crp_ram=10, nb_ffjord_ram=1, regularizelatent=hasnn(chain),
-    nb_ram=0, nb_amwg=0,
     sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
     attempt_map=true, progressoutput=:repl)
@@ -58,32 +57,6 @@ function advance_chain!(chain::FCChain, nb_steps=100;
     end
 
     for step in 1:_nb_steps
-
-        if nb_amwg === :batchsize
-            _nb_amwg = diagnostics.amwg.batch_size
-        elseif 0 < nb_amwg < 1
-            _nb_amwg = rand(chain.rng) < nb_amwg ? 1 : 0
-        else
-            _nb_amwg = nb_amwg
-        end
-
-        for i in 1:_nb_amwg
-            advance_hyperparams_amwg!(
-                chain.rng,
-                chain.clusters,
-                chain.hyperparams,
-                chain.diagnostics,
-                regularizelatent=regularizelatent)
-        end
-
-        for i in 1:nb_ram
-            advance_ram!(
-                chain.rng,
-                chain.clusters,
-                chain.hyperparams,
-                chain.diagnostics,
-                regularizelatent=regularizelatent)
-        end
 
         for i in 1:nb_crp_ram
             advance_crp_ram!(

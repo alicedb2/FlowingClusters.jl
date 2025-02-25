@@ -3,9 +3,6 @@ abstract type AbstractDiagnostics{T, D} end
 struct Diagnostics{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
-    ram::ComponentArray{T}
-    ramΣ::Cholesky{T, <: AbstractMatrix{T}}
-    amwg::ComponentArray{T}
     crp_ram::ComponentArray{T}
     crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     splitmerge::ComponentArray{T}
@@ -14,9 +11,6 @@ end
 struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
-    ram::ComponentArray{T}
-    ramΣ::Cholesky{T, <: AbstractMatrix{T}}
-    amwg::ComponentArray{T}
     crp_ram::ComponentArray{T}
     crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     ffjord_ram::ComponentArray{T}
@@ -29,23 +23,6 @@ hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
 function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=nothing) where T
 
     sizeflatL = div(D * (D + 1), 2)
-
-    amwg = ComponentArray{T}(
-                    batch_size=15,
-                    nb_batches=0,
-                    batch_iter=0,
-                    acceptance_target=0.234,
-                    min_delta=0.01,
-                    logscales=(
-                        crp=(alpha=zero(T),
-                             niw=(mu=zeros(T, D),
-                                  lambda=zero(T),
-                                  flatL=zeros(T, sizeflatL),
-                                  nu=zero(T)
-                                )
-                            ),
-                        )
-                    )
 
     splitmerge = ComponentArray{T}(alpha=0.1,
                                    lambda=1.0,
@@ -68,16 +45,6 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
                                         )
                         )
 
-    modelD = modeldimension(hpparams, include_nn=true)
-    ramL0 = 2.38 / sqrt(modelD) / 10 * I(modelD)
-    ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ramL0)))
-                    
-    ram = ComponentArray{T}(i=1.0,
-                            γ=0.6,
-                            previous_h=0.0,
-                            acceptance_target=0.234,
-                        )
-
     crp_ram = ComponentArray{T}(i=1.0,
                                 γ=0.6,
                                 previous_h=0.0,
@@ -90,7 +57,7 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
 
     if !hasnn(hpparams)
 
-        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, amwg, crp_ram, crp_ramΣ, splitmerge)
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), crp_ram, crp_ramΣ, splitmerge)
 
     else
 
@@ -107,7 +74,7 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
         ffjord_ramL0 = 2.38 / sqrt(ffjordD) / 10 * I(ffjordD)
         ffjord_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ffjord_ramL0)))
 
-        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, amwg, crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
+        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
 
     end
 end
@@ -135,7 +102,7 @@ end
 
 function clear_diagnostics!(diagnostics::AbstractDiagnostics{T, D};
                             resethyperparams=false, resetsplitmerge=false,
-                            resetnn=false, resetamwg=false, resetam=false
+                            resetnn=false, resetcrpram=false, resetffjordram=false
                             ) where {T, D}
 
     if resethyperparams
@@ -148,23 +115,19 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics{T, D};
         diagnostics.rejected.splitmerge .= 0
     end
 
-    if resetamwg
-        diagnostics.amwg.nb_batches = 0
-        diagnostics.amwg.batch_iter = 0
-        diagnostics.amwg.logscales .= 0
-    end
-
     if hasnn(diagnostics) && resetnn
         diagnostics.accepted.nn = 0
         diagnostics.rejected.nn = 0
     end
 
-    if hasnn(diagnostics) && resetam
-        diagnostics.am.i = 1.0
-        diagnostics.am.previous_h = 0.0
-        diagnostics.am.mu .= 0
-        diagnostics.am.sigma .= Matrix{T}(I(size(diagnostics.am.mu, 1)))
-        diagnostics.am.logscale = 2 * log(2.38) - log(size(diagnostics.am.mu, 1)) - 2
+    if resetcrpram
+        diagnostics.crp_ram.i = 1.0
+        diagnostics.cp_ram.previous_h = diagnostics.crp_ram.target_acceptance
+    end
+
+    if hasnn(diagnostics) && resetffjordram
+        diagnostics.ffjord_ram.i = 1.0
+        diagnostics.ffjord_ram.previous_h = diagnostics.ffjord_ram.target_acceptance
     end
 
     return diagnostics
