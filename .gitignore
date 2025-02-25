@@ -1,4 +1,7 @@
 *.ipynb
+*vscode*
+*VSCode*
+LocalPreferences.toml
 Manifest.toml
 .ipynb_checkpoints/
 *.aux
@@ -6,3 +9,11 @@ Manifest.toml
 *.out
 *.synctex.gz
 .DS_Store
+figures/
+data/
+*.png
+task.sh
+assets/
+notes/
+scrapbook/
+test*
