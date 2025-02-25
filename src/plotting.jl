@@ -271,17 +271,51 @@ function deformation_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)),
     return fig
 end
 
-# fig = Figure();
-# ax = Axis(fig[1, 1]);
-# streamplot!(ax,(x,y)->Point2(chain.hyperparams.ffjord.nn(Float64[x, y], chain.map_hyperparams._.nn.params, chain.hyperparams.ffjord.nns.model)[1]...), -6..6, -6..6);
-# scatter!(Tuple.(eachcol(Matrix(chain.clusters, orig=true))));
-# scatter!(Tuple.(eachcol(Matrix(chain.clusters, orig=false))));
-# fig
+function stream_plot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; proj=[1, 2], bounds=((-4, 4), (-4, 4)), zs=nothing, nbclusters=nothing, rev=false, showclusters=false) where {T, D}
 
+    @assert length(Set(proj)) == 2 "Specify exactly 2 different dimensions"
+    @assert length(proj) + (isnothing(zs) ? 0 : length(zs)) == D "You must specify as many zs values as the number of dimensions minus 2"
+
+    orig_clusters = sort(project_clusters(clusters, proj, orig=true), by=length, rev=!rev)
+    base_clusters = sort(project_clusters(clusters, proj, orig=false), by=length, rev=!rev)
+
+    if nbclusters === nothing || nbclusters < 0
+        nbclusters = length(clusters)
+    end
+
+    (xmin, xmax), (ymin, ymax) = bounds
+
+    function fillxy(X)
+        negproj = setdiff(1:D, proj)
+        _X = zeros(D)
+        if !isnothing(zs)
+            _X[negproj] .= zs
+        end
+        _X[proj] .= X
+        
+        return _X
+    end
+
+    fig = with_theme(theme_minimal()) do
+        fig = Figure();
+        ax = Axis(fig[1, 1]);
+        if !isnothing(clusters)
+            for (i, cl) in enumerate(orig_clusters[1:nbclusters])
+                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 1), marker=:circle);
+            end
+            for (i, cl) in enumerate(base_clusters[1:nbclusters])
+                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 2), marker=:cross);
+            end
+        end
+        streamplot!(ax, (x, y)->Point2(hyperparams.ffjord.nn(fillxy([x, y]), hyperparams._.nn.params, hyperparams.ffjord.nns.model)[1]...), xmin..xmax, ymin..ymax, alpha=0.4, arrow_size=10);
+        fig
+    end
+
+    return fig
+end
 
 function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
 
-    # streamplot((x,y)->Point2(chain.hyperparams.ffjord.nn(Float64[x, y], chain.map_hyperparams._.nn.params, chain.hyperparams.ffjord.nns.model)[1]...), -2..2, -2..2)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -309,7 +343,7 @@ function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs
         _realprobgrid[zsproj, :] .= realzs
         realprobgrid = _realprobgrid
     end
-    if !isnothing(realzs)
+    if !isnothing(basezs)
         zsproj = setdiff(1:d, proj)
         _baseprobgrid = zeros(d, 2 * nblines * nblines)
         _baseprobgrid[proj, :] .= baseprobgrid

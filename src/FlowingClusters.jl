@@ -16,8 +16,10 @@ module FlowingClusters
     using SpecialFunctions: loggamma, polygamma, logbeta
 
     using Makie: Figure, Axis, axislegend, Cycled,
-                 lines!, scatter, scatter!, vlines!, hlines!, hist!, barplot!,
-                 xlims!, ylims!, hidespines!, hidedecorations!
+                 lines!, scatter, scatter!, vlines!, hlines!, 
+                 hist!, barplot!, streamplot!,
+                 xlims!, ylims!, hidespines!, hidedecorations!,
+                 with_theme, theme_minimal, :.., Point2
     import Makie: plot, plot!
 
     using JLD2: jldsave, load
@@ -87,7 +89,7 @@ module FlowingClusters
     export advance_chain!, attempt_map!
 
     include("plotting.jl")
-    export plot, plot!, deformation_plot, flow_plot
+    export plot, plot!, deformation_plot, flow_plot, stream_plot
 
     include("prediction.jl")
     export predictive_distribution, tail_probability, tail_probability_summary
