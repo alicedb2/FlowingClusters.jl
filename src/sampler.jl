@@ -65,7 +65,7 @@ function advance_hyperparams_amwg!(
     ) where {T, D, E}
 
     di = diagnostics
-    # for j in 1:amwg_batch_size
+
     advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.pyp.alpha))
     if !hasnn(hyperparams) || !regularizelatent
         advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.mu))
@@ -110,6 +110,72 @@ function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}) where {T
     # di.amwg_logscales[di.amwg_logscales .> minmax_logscale] .= minmax_logscale
 
     return di
+end
+
+function advance_crp_ram!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; regularizelatent=true) where {T, D, E}
+
+    di = diagnostics
+
+    crpD = modeldimension(hyperparams, include_nn=false)
+
+    hparray = hyperparams._
+    proposed_hparray = transform(hparray)
+
+    U = ComponentArray(randn(rng, crpD), getaxes(proposed_hparray))
+    if regularizelatent
+        U.niw.mu .= zeros(T, D)
+    end
+    SU = ComponentArray(di.crp_ramΣ.L * U, getaxes(proposed_hparray))
+    proposed_hparray.pyp .+= SU.pyp
+    proposed_hparray.niw .+= SU.niw
+    backtransform!(proposed_hparray)
+    
+    proposed_logprob = logrobgenerative(clusters, proposed_hparray, rng; ignorehyperpriors=false, ignoreffjord=true)
+    
+    log_acceptance = proposed_logprob
+    log_acceptance -= di.crp_ram.previous_logprob
+
+    # crp log alpha hastings
+    log_acceptance += log(proposed_hpparams.pyp.alpha) - log(hpparams.pyp.alpha)
+
+    # niw log lambda hastings
+    log_acceptance += log(proposed_hpparams.niw.lambda) - log(hpparams.niw.lambda)
+    # niw L hastings
+    proposed_L = LowerTriangular(proposed_hpparams.niw.flatL)
+    L = LowerTriangular(hpparams.niw.flatL)
+    log_acceptance += sum((D:-1:1) .* (log.(abs.(diag(proposed_L)))))
+    log_acceptance -= log.(abs.(diag(L)))
+    # niw log(nu - D + 1) hastings
+    log_acceptance += log(proposed_hparray.niw.nu - D + 1) - log(hparray.niw.nu - D + 1)
+
+    acceptance = min(one(T), exp(log_acceptance))
+    
+    if rand(rng, T) < acceptance
+        hyperparams._ .= proposed_hparray
+        di.crp_ram.previous_logprob = proposed_logprob
+        di.accepted.pyp += 1
+        di.accepted.niw += 1
+    else
+        di.rejected.pyp += 1
+        di.rejected.niw += 1
+    end
+
+    η = (di.crp_ram.i + 1)^-di.crp_ram.γ
+    h = acceptance - di.crp_ram.acceptance_target
+    # di.crp_ram.i += 1
+    di.crp_ram.i += (di.crp_ram.previous_h * h <= 0)
+    di.crp_ram.previous_h = h
+
+    v = sqrt(η * abs(h)) * SU / norm(U)
+
+    if h > 0
+        lowrankupdate!(di.crp_ramΣ , v)
+    elseif h < 0
+        lowrankdowndate!(di.crp_ramΣ , v)
+    end
+
+    return hyperparams
+
 end
 
 function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; stepsize::T=one(T)) where {T, D, E}
@@ -382,9 +448,6 @@ end
 #     return hyperparams
 # end
 
-function advance_splitmerge!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T))::AbstractVector{<:AbstractCluster{T, D, E}} where {T, D, C <: AbstractCluster{T, D, E}} where E
-end
-
 
 # Sequential splitmerge from Dahl & Newcomb
 function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; t::Int=3, temperature::T=one(T))::AbstractVector{<:AbstractCluster{T, D, E}} where {T, D, C <: AbstractCluster{T, D, E}} where E
@@ -594,38 +657,24 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 
 end
 
-
-function advance_ffjord_am!(
+function advance_ffjord_ram!(
     rng::AbstractRNG,
     clusters::AbstractVector{C},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    canonicalform=false,
-    pauseadaptive=false,
     temperature=one(T)) where {T, D, C <:AbstractCluster{T, D, E}} where E
 
     !hasnn(hyperparams) && return hyperparams
 
     di = diagnostics
 
-    nn_D = size(di.am.sigma, 1)
-
-    # if pauseadaptive
-    #     sigma0 = Matrix{T}(I(nn_D))
-    #     logscale0 = (2 * log(2.38) - log(nn_D)) - 2
-    #     step_distrib = MvNormal(exp(logscale0) * (sigma0 + di.am.eps * I(nn_D)))
-    # else
-        # step_distrib = MvNormal(exp(di.am.logscale) * (di.am.sigma + di.am.eps * I(nn_D)))
-        step_distrib = MvNormal(exp(di.am.logscale) * di.am.sigma)
-    # end
+    nnD = size(hyperparams._.nn.params, 1)
 
     proposed_hparray = copy(hyperparams._)
-    # params_move = rand(rng, step_distrib)
-    # proposed_hparray.nn.params .+= params_move
-    proposed_hparray.nn.params .+= rand(rng, step_distrib)
 
-    # proposed_clusters, proposed_delta_logps = nothing, nothing
-    log_acceptance = zero(T)
+    U = ComponentArray(randn(rng, nnD), getaxes(proposed_hparray))
+    SU = di.ffjord_ramΣ.L * U
+    proposed_hparray.nn.params .+= SU
 
     # reflow() already computes the logprob coming
     # from the jacobian of the FFJORD transformation
@@ -634,13 +683,14 @@ function advance_ffjord_am!(
     # Call logprobgenerative without ffjord
 
     proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
-    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
-    log_acceptance -= sum(proposed_delta_logps)
+    proposed_logprob = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
+    proposed_logprob -= sum(proposed_delta_logps)
 
     # log_acceptance += log_nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior...)
     # log_acceptance += log_nn_hyperprior(proposed_hparray.nn.prior...)
 
-    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
+    log_acceptance = proposed_logprob - di.ffjord_ram.previous_logprob
+    # log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
 
     # add back the nn hyperprior only (not the pyp/niw hyperpriors)
     # log_acceptance -= log_nn_hyperprior(hyperparams._.nn.prior...)
@@ -654,72 +704,31 @@ function advance_ffjord_am!(
 
     log_acceptance = isfinite(log_acceptance) ? log_acceptance : T(-Inf)
 
-    # catch e
-
-    #     log_acceptance = T(-Inf)
-
-    # end
-
     acceptance = min(one(T), exp(log_acceptance))
-    # acceptance = logistic(log_acceptance)
 
-    # previous_params = copy(hyperparams._.nn.params)
-    # eligible_mask = ones(T, nn_D)
     if rand(rng, T) < acceptance
         empty!(clusters)
         append!(clusters, proposed_clusters)
+        di.ffjord_ram.previous_logprob = proposed_logprob
         hyperparams._ .= proposed_hparray
-        if canonicalform
-            nn_params, perm, signs = canonicalize(hyperparams._.nn.params)
-            # eligible_mask = (perm .== 1:nn_D) .& (signs .== ones(T, nn_D))
-            # eligible_mask = 0.1 .+ 0.9 .* ((perm .== 1:nn_D) .& (signs .== ones(T, nn_D)))
-
-            hyperparams._.nn.params .= nn_params
-
-            # Should we or should we not canonicalize
-            # the adaptive proposal distribution before
-            # updating?
-            # Wouldn't this make it not learn anything
-            # about the canonical space or parameters?
-            # di.am.mu .= di.am.mu[perm]
-            # di.am.sigma .= di.am.sigma[perm, :]
-            # di.am.sigma .= di.am.sigma[:, perm]
-
-            # di.am.mu .*= signs
-            # di.am.sigma = signs .* di.am.sigma .* signs'
-        end
         di.accepted.nn += 1
     else
-        # params_move .= zero(T)
         di.rejected.nn += 1
     end
 
 
-    if !pauseadaptive
-        gamma_λ = di.am.C * (di.am.i+1)^-di.am.lambda_λ
-        gamma_μ = di.am.C * (di.am.i+1)^-di.am.lambda_μ
-        gamma_Σ = di.am.C * (di.am.i+1)^-di.am.lambda_Σ
+    η = (di.ffjord_ram.i + 1)^-di.ffjord_ram.γ
+    h = acceptance - di.ffjord_ram.acceptance_target
+    # di.ffjord_ram.i += 1
+    di.ffjord_ram.i += (di.ffjord_ram.previous_h * h <= 0)
+    di.ffjord_ram.previous_h = h
 
-        h = acceptance - di.am.acceptance_target
-        di.am.i += di.am.previous_h * h <= 0
-        di.am.previous_h = h
+    v = sqrt(η * abs(h)) * SU / norm(U)
 
-        # dX = hyperparams._ - di.am.mu
-        # dX = (previous_params + (gamma .+ (1 - gamma) .* eligible_mask) .* params_move) - di.am.mu
-        # (1 - γ) * μ + γ * X
-        di.am.logscale = di.am.logscale + gamma_λ * (acceptance - di.am.acceptance_target)
-
-        dX = hyperparams._.nn.params - di.am.mu
-        di.am.mu .= di.am.mu + gamma_μ * dX
-
-        dXdX = dX * dX'
-        # (1 - γ) * Σ + γ (X - μ)(X - μ)'
-        ϵ = 1e-3 * tr(di.am.sigma) / nn_D
-        di.am.sigma .= (1 - gamma_Σ) * di.am.sigma + gamma_Σ * dXdX + ϵ * I(nn_D)
-        # Symmetrize because once in a while julia likes
-        # to introduce numerical noise I was never able
-        # to track down
-        di.am.sigma .= (di.am.sigma + di.am.sigma') / 2
+    if h > 0
+        lowrankupdate!(di.ffjord_ramΣ, v)
+    elseif h < 0
+        lowrankdowndate!(di.ffjord_ramΣ, v)
     end
 
     return hyperparams

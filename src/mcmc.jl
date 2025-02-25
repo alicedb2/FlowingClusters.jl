@@ -1,6 +1,7 @@
 function advance_chain!(chain::FCChain, nb_steps=100;
-    nb_gibbs=0, nb_splitmerge=2.0, splitmerge_t=3, nb_amwg=10,
-    nb_ffjord_am=3, pauseadaptive=false, regularizelatent=true,
+    nb_gibbs=1, nb_splitmerge=1.0, splitmerge_t=3, 
+    nb_amwg=0, nb_crp_ram=1, regularizelatent=true,
+    nb_ffjord_ram=1,
     sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
     attempt_map=true, progressoutput=:repl)
@@ -75,27 +76,34 @@ function advance_chain!(chain::FCChain, nb_steps=100;
                 regularizelatent=regularizelatent)
         end
 
+        for i in 1:nb_crp_ram
+            advance_crp_ram!(
+                chain.rng,
+                chain.clusters,
+                chain.hyperparams,
+                chain.diagnostics,
+                regularizelatent=regularizelatent)
+        end
+
         if hasnn(chain.hyperparams)
-            if nb_ffjord_am isa Float64 && nb_ffjord_am > 0
-                ipart = floor(Int, nb_ffjord_am)
-                ppart = nb_ffjord_am - ipart
+            if nb_ffjord_ram isa Float64 && nb_ffjord_ram > 0
+                ipart = floor(Int, nb_ffjord_ram)
+                ppart = nb_ffjord_ram - ipart
                 for i in 1:max(1, ipart)
                     if rand(chain.rng) < ppart
-                        advance_ffjord_am!(
+                        advance_ffjord_ram!(
                             chain.rng,
                             chain.clusters,
                             chain.hyperparams,
                             chain.diagnostics,
-                            pauseadaptive=pauseadaptive
                         )
                     end
                 end
             else
-                for i in 1:nb_ffjord_am
-                    advance_ffjord_am!(chain.rng,
+                for i in 1:nb_ffjord_ram
+                    advance_ffjord_ram!(chain.rng,
                                     chain.clusters, chain.hyperparams,
                                     chain.diagnostics,
-                                    pauseadaptive=pauseadaptive,
                                     )
                 end
             end
@@ -253,15 +261,15 @@ function advance_chain!(chain::FCChain, nb_steps=100;
         # end
         logprob_map_noffjord = logprobgenerative(chain.map_clusters, chain.map_hyperparams, chain.rng, ignoreffjord=true)
 
-        pretraining = nb_gibbs == 0 && nb_splitmerge == 0 && nb_amwg == 0 && nb_ffjord_am > 0
+        pretraining = nb_gibbs == 0 && nb_splitmerge == 0 && nb_amwg == 0 && nb_ram > 0
 
         # if progressoutput === :repl || progressoutput === :file || progressoutput
         next!(progbar; desc=(pretraining ? "Pre-training: " : "Sampling: "),
         showvalues=[
-        ("step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($(gibbs_sweep ? "\033[37m$nb_gibbs\033[34m" : "$nb_gibbs"), $nb_splitmerge, $nb_amwg, $(hasnn(chain.hyperparams) ? "$nb_ffjord_am" : "no fjjord"))"),
+        ("step (#gibbs, #splitmerge, #amwg, #ffjordam@T)", "$(step)/$(nb_steps) ($(gibbs_sweep ? "\033[37m$nb_gibbs\033[34m" : "$nb_gibbs"), $nb_splitmerge, $nb_amwg, $(hasnn(chain.hyperparams) ? "$nb_ram" : "no fjjord"))"),
         ("chain length", "$(length(chain))"),
         ("conv largestcluster chain (burn 50%)", "ess=$(round(largestcluster_convergence.ess, digits=1)), rhat=$(round(largestcluster_convergence.rhat, digits=3))$(length(chain) < start_sampling_at ? " (wait $start_sampling_at)" : "")"),
-        ("#chain samples (oldest, latest, eta) convergence", "$(progressoutput === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(max(0, sample_eta))) ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (drop if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(progressoutput === :repl ? "\033[0m" : "")"),
+        ("#chain samples (oldest, latest, eta) convergence", "$(progressoutput === :repl ? "\033[37m" : "")$(length(chain.samples_idx))/$(length(chain.samples_idx.buffer)) ($(length(chain.samples_idx) > 0 ? chain.samples_idx[begin] : -1), $(length(chain.samples_idx) > 0 ? chain.samples_idx[end] : -1), $(isnothing(sample_every) ? "disabled" : max(0, sample_eta)))" * (isnothing(sample_every) ? "" : "ess=$(samples_convergence.ess > 0 ? round(samples_convergence.ess, digits=1) : "wait 20") rhat=$(samples_convergence.rhat > 0 ? round(samples_convergence.rhat, digits=3) : "wait 20") (drop if ess < $(samples_convergence.ess > 0 ? round(length(chain.samples_idx)/2, digits=1) : "wait"))$(progressoutput === :repl ? "\033[0m" : "")")),
         ("logprob (best, q95)", "$(round(chain.logprob_chain[end], digits=1)) ($(round(maximum(chain.logprob_chain), digits=1)), $(round(logp_quantile95, digits=1)))"),
         ("nb clusters, nb>1, smallest(>1), median, mean, largest", "$(length(chain.clusters)), $(length(filter(c -> length(c) > 1, chain.clusters))), $(minimum(length.(filter(c -> length(c) > 1, chain.clusters)))), $(round(median([length(c) for c in chain.clusters]), digits=0)), $(round(mean([length(c) for c in chain.clusters]), digits=0)), $(maximum([length(c) for c in chain.clusters]))"),
         ("split #succ/#tot, merge #succ/#tot", split_ratio * ", " * merge_ratio),
@@ -331,11 +339,11 @@ function attempt_map!(chain::FCChain; max_nb_pushes=25, optimize_hyperparams=fal
     # We only use Gibbs moves in the base space
     # to construct an approximate MAP state so both
     # map_mll and test_mll use ignoreffjord=true
-    map_mll = logprobgenerative(map_clusters_attempt, chain.map_hyperparams, ignoreffjord=true)
+    map_mll = logprobgenerative(map_clusters_attempt, chain.map_hyperparams, chain.rng, ignoreffjord=true, ignorehyperpriors=true)
     for p in 1:max_nb_pushes
         test_attempt = copy(map_clusters_attempt)
         advance_gibbs!(chain.rng, test_attempt, map_hyperparams; temperature=0.0)
-        test_mll = logprobgenerative(test_attempt, map_hyperparams, ignoreffjord=true)
+        test_mll = logprobgenerative(test_attempt, map_hyperparams, chain.rng, ignoreffjord=true, ignorehyperpriors=true)
         if test_mll <= map_mll
             # We've regressed, so stop and leave
             # the previous state before this test

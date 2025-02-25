@@ -52,8 +52,8 @@ end
 
 # load_chain(filename::AbstractString) = JLD2.load(filename)["chain"]
 
-function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, optimize=false, ffjord_nn=nothing, perturb_data=false, seed=default_rng()) where T
-    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, optimize=optimize, ffjord_nn=ffjord_nn, perturb_data=perturb_data, seed=seed)
+function FCChain(dataset::AbstractMatrix{T}, cluster_type::Type{<:AbstractCluster}=SetCluster; nb_samples=200, strategy=:sequential, ffjord_nn=nothing, perturb_data=false, seed=default_rng()) where T
+    return FCChain(collect.(eachcol(dataset)), cluster_type; nb_samples=nb_samples, strategy=strategy, ffjord_nn=ffjord_nn, perturb_data=perturb_data, seed=seed)
 end
 
 function FCChain(
@@ -61,7 +61,6 @@ function FCChain(
     cluster_type::Type{C}=SetCluster;
     nb_samples=200,
     strategy=:sequential,
-    optimize=false,
     perturb_data=false,
     ffjord_nn=nothing,
     seed=default_rng()
@@ -162,10 +161,15 @@ function FCChain(
     # end
 
     push!(chain.hyperparams_chain, deepcopy(hyperparams))
-    lp = logprobgenerative(chain.clusters, chain.hyperparams, ignorehyperpriors=false, ignoreffjord=false)
+    lp = logprobgenerative(chain.clusters, chain.hyperparams, chain.rng, ignorehyperpriors=false, ignoreffjord=false)
     push!(chain.logprob_chain, lp)
     push!(chain.nbclusters_chain, length(chain.clusters))
     push!(chain.largestcluster_chain, maximum(length.(chain.clusters)))
+    
+    chain.diagnostics.crp_ram.previous_logprob = logprobgenerative(chain.clusters, chain.hyperparams, chain.rng, ignoreffjord=true, ignorehyperpriors=false)
+    if hasnn(chain.hyperparams)
+        chain.diagnostics.ffjord_ram.previous_logprob = logprobgenerative(chain.clusters, chain.hyperparams, chain.rng, ignoreffjord=false, ignorehyperpriors=true)
+    end
 
     chain.map_clusters = deepcopy(chain.clusters)
     chain.map_logprob = lp

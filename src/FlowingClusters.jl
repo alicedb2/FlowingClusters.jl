@@ -2,7 +2,7 @@ module FlowingClusters
 
     using Random: randperm, shuffle, shuffle!, seed!, MersenneTwister, Xoshiro, AbstractRNG, default_rng
     using StatsBase
-    using StatsFuns: logsumexp, logmvgamma, logit, logistic, log1pexp
+    using StatsFuns: logsumexp, logmvgamma, logit, logistic, log1pexp, softmax
     using LinearAlgebra
     using StaticArrays: SVector
 
@@ -33,7 +33,7 @@ module FlowingClusters
         zeros64, rand64, randn64,
         softsign, tanh_fast, sigmoid, relu,
         swish, mish, sigmoid_fast, tanhshrink
-    export Chain, Dense, 
+    export Chain, Dense,
         softsign, swish, sigmoid_fast, tanh_fast,
         tanhshrink, dswish
 

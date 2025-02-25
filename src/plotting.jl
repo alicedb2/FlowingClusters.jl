@@ -160,8 +160,8 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
         _deco!(nn_axis, hide=(:t, :r))
         for p in eachrow(nnc)
             # scatter!(nn_axis, burn+1:N, collect(p), label=nothing, markersize=2, alpha=0.5)
-            barplot!(nn_axis, burn+1:N, collect(p), fillto=collect(p) .- 0.01, gap=-0.01, strokewidth=0, label=nothing)
-            # lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
+            # barplot!(nn_axis, burn+1:N, collect(p), fillto=collect(p) .- 0.01, gap=-0.01, strokewidth=0, label=nothing)
+            lines!(nn_axis, burn+1:N, collect(p), label=nothing, linewidth=1, alpha=0.5)
         end
         if map_idx > 0
             vlines!(nn_axis, [map_idx], label=nothing, color=:black)

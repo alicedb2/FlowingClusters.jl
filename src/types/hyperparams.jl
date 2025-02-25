@@ -17,12 +17,13 @@ end
 function FCHyperparams(::Type{T}, D::Int, nn=nothing; rng::Union{Nothing, AbstractRNG}=nothing) where {T <: AbstractFloat}
 
     hpparams = ComponentArray{T}(
-                    pyp=(alpha=one(T),),# sigma=0.0),
-                    niw=(mu=zeros(T, D),
-                         lambda=T(0.01^2),
-                         flatL=unfold(LowerTriangular{T}(I(D))),
-                         nu=T(D-0.9)
-                    )
+                    crp=(alpha=one(T),
+                         niw=(mu=zeros(T, D),
+                             lambda=T(0.1^2),
+                             flatL=unfold(LowerTriangular{T}(0.01*I(D))),
+                             nu=T(D)
+                         )
+                    ),
                 )
 
     if isnothing(nn)
@@ -46,15 +47,15 @@ end
 datadimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
 datadimension(hyperparamsarray::ComponentArray) = size(hyperparamsarray.niw.mu, 1)
 
-modeldimension(hpparams::ComponentArray) = size(hpparams, 1)
-modeldimension(hyperparams::FCHyperparams) = size(hyperparams._, 1)
-function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
-    dim = size(hyperparams._, 1)
-    if !include_nn
-        dim -= size(hyperparams._.nn, 1)
-    end
-    return dim
-end
+modeldimension(hpparams::ComponentArray; include_nn=true) = size(hpparams.pyp, 1) + size(hpparams.niw, 1) + (include_nn && hasnn(hpparams) ? size(hpparams.nn, 1) : 0)
+modeldimension(hyperparams::AbstractFCHyperparams; include_nn=true) = modeldimension(hyperparams._, include_nn=include_nn)
+# function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
+#     dim = size(hyperparams._, 1)
+#     if !include_nn
+#         dim -= size(hyperparams._.nn, 1)
+#     end
+#     return dim
+# end
 
 hasnn(hyperparams::AbstractFCHyperparams) = hyperparams isa FCHyperparamsFFJORD
 hasnn(hyperparamsarray::ComponentArray) = :nn in keys(hyperparamsarray)
@@ -148,12 +149,12 @@ function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
     if hasnn(hyperparams)
         println(io)
         println(io, "  nn")
-        println(io, "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
-        println(io, "    prior")
-        println(io, "              mu0: $(round(hyperparams._.nn.prior.mu0, digits=3))")
-        println(io, "      log lambda0: $(round(hyperparams._.nn.prior.lambda0, digits=3))")
-        println(io, "       log alpha0: $(round(hyperparams._.nn.prior.alpha0, digits=3))")
-        print(io,   "        log beta0: $(round(hyperparams._.nn.prior.beta0, digits=3))")
+        print(io, "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
+        # println(io, "    prior")
+        # println(io, "              mu0: $(round(hyperparams._.nn.prior.mu0, digits=3))")
+        # println(io, "      log lambda0: $(round(hyperparams._.nn.prior.lambda0, digits=3))")
+        # println(io, "       log alpha0: $(round(hyperparams._.nn.prior.alpha0, digits=3))")
+        # print(io,   "        log beta0: $(round(hyperparams._.nn.prior.beta0, digits=3))")
     end
 end
 

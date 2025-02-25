@@ -4,6 +4,8 @@ struct Diagnostics{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
     amwg::ComponentArray{T}
+    crp_ram::ComponentArray{T}
+    crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     splitmerge::ComponentArray{T}
 end
 
@@ -11,19 +13,21 @@ struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
     amwg::ComponentArray{T}
-    am::ComponentArray{T}
+    crp_ram::ComponentArray{T}
+    crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
+    ffjord_ram::ComponentArray{T}
+    ffjord_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     splitmerge::ComponentArray{T}
 end
 
 hasnn(diagnostics::AbstractDiagnostics) = diagnostics isa DiagnosticsFFJORD
 
 function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=nothing) where T
-# function Diagnostics(::Type{T}, D, nn_params::Union{Nothing, ComponentArray{T}}=nothing) where T
 
     sizeflatL = div(D * (D + 1), 2)
 
     amwg = ComponentArray{T}(
-                    batch_size=30,
+                    batch_size=15,
                     nb_batches=0,
                     batch_iter=0,
                     acceptance_target=0.234,
@@ -56,39 +60,34 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
                                         splitper=0, mergeper=0
                                         )
                         )
+    
+    crp_ram = ComponentArray{T}(i=1.0,
+                                γ=0.6,
+                                previous_h=0.0,
+                                acceptance_target=0.234,
+                                previous_logprob=-Inf
+                            )
+    
+    crpD = modeldimension(hpparams, include_nn=false)
+    crp_ramΣ0 = 2.38^2 / crpD * I(crpD)
+    crp_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(crp_ramΣ0)), 'L', 0)
 
     if !hasnn(hpparams)
 
-        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg, splitmerge)
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg, crp_ram, crp_ramΣ, splitmerge)
 
     else
 
         accepted = vcat(accepted, ComponentArray(nn=0))
 
-        nn_D = size(hpparams.nn.params, 1)
-        # nn_D = size(hpparams, 1)
+        ffjordD = modeldimension(hpparams, include_nn=true) - modeldimension(hpparams, include_nn=false)
+        
+        ffjord_ram = copy(crp_ram)
+        
+        ffjord_ramΣ0 = 2.38^2 / ffjordD * I(ffjordD)
+        ffjord_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ffjord_ramΣ0)), 'L', 0)
 
-        mu0 = deepcopy(hpparams.nn.params)
-        sigma0 = Matrix{T}(I(nn_D))
-        logscale0 = (2 * log(2.38) - log(nn_D)) - 1
-        # sigma0 = T(2.38^2 / nn_D / 10) * Matrix{T}(I(nn_D))
-        # logscale0 = zero(T)
-
-        am = ComponentArray{T}(i=1.0,
-                               previous_h=0.0,
-                               acceptance_target=0.234,
-                            #    lambda=0.9,
-                               lambda_λ = 0.6,
-                               lambda_μ = 0.7,
-                               lambda_Σ = 0.8,
-                               C=1.0,
-                               logscale=logscale0,
-                               mu=mu0,
-                               sigma=sigma0,
-                               eps=1e-7
-                               )
-
-        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, am, splitmerge)
+        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
 
     end
 end
@@ -107,7 +106,7 @@ function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
     if hasnn(diagnostics)
         println("\n")
         println(io, "     nn")
-        print(io, "       params: $(round(diagnostics.accepted.nn / (diagnostics.rejected.nn + diagnostics.accepted.nn), digits=4))")
+        print(io,   "       params: $(round(diagnostics.accepted.nn / (diagnostics.rejected.nn + diagnostics.accepted.nn), digits=4))")
         # println(io, "      t_alpha: $(round(diagnostics.accepted.nn.prior.alpha / (diagnostics.rejected.nn.prior.alpha + diagnostics.accepted.nn.prior.alpha), digits=4))")
         # print(io,   "      t_scale: $(round(diagnostics.accepted.nn.prior.scale / (diagnostics.rejected.nn.prior.scale + diagnostics.accepted.nn.prior.scale), digits=4))")
     end
@@ -144,7 +143,7 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics{T, D};
 
     if hasnn(diagnostics) && resetam
         diagnostics.am.i = 1.0
-        diagnostics.am.previous_h = 1.0
+        diagnostics.am.previous_h = 0.0
         diagnostics.am.mu .= 0
         diagnostics.am.sigma .= Matrix{T}(I(size(diagnostics.am.mu, 1)))
         diagnostics.am.logscale = 2 * log(2.38) - log(size(diagnostics.am.mu, 1)) - 2

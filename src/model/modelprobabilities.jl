@@ -74,11 +74,11 @@ function logprobgenerative(rng::AbstractRNG, clusters::AbstractVector{<:Abstract
 
 end
 
-function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, rng::Union{Nothing, AbstractRNG}=default_rng(); ignorehyperpriors::Bool=false, ignoreffjord::Bool=false, temperature::T=one(T)) where {T, D, E}
+function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, rng::Union{Nothing, AbstractRNG}=default_rng(); ignorehyperpriors::Bool=false, ignoreffjord::Bool=false) where {T, D, E}
     if hasnn(hyperparams) && !ignoreffjord
         (rng isa AbstractRNG)|| throw(ArgumentError("You must provide a random number generator when using FFJORD"))
-        return logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=ignorehyperpriors, temperature=temperature)
+        return logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=ignorehyperpriors)
     else
-        return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors, temperature=temperature)
+        return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors)
     end
 end
