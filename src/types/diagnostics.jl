@@ -3,6 +3,8 @@ abstract type AbstractDiagnostics{T, D} end
 struct Diagnostics{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
+    ram::ComponentArray{T}
+    ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     amwg::ComponentArray{T}
     crp_ram::ComponentArray{T}
     crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
@@ -12,6 +14,8 @@ end
 struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
+    ram::ComponentArray{T}
+    ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     amwg::ComponentArray{T}
     crp_ram::ComponentArray{T}
     crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
@@ -32,13 +36,15 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
                     batch_iter=0,
                     acceptance_target=0.234,
                     min_delta=0.01,
-                    logscales=(pyp=(alpha=zero(T),),#, sigma=zero(T)),
-                               niw=(mu=zeros(T, D),
-                                       lambda=zero(T),
-                                       flatL=zeros(T, sizeflatL),
-                                       nu=zero(T)
-                                       )
-                            )
+                    logscales=(
+                        crp=(alpha=zero(T),
+                             niw=(mu=zeros(T, D),
+                                  lambda=zero(T),
+                                  flatL=zeros(T, sizeflatL),
+                                  nu=zero(T)
+                                )
+                            ),
+                        )
                     )
 
     splitmerge = ComponentArray{T}(alpha=0.1,
@@ -50,31 +56,41 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
                                    integral_error=0.0)
 
     accepted = ComponentArray{Int}(
-                            pyp=(alpha=0,),#, sigma=0),
-                            niw=(mu=zeros(D),
-                                lambda=0,
-                                flatL=zeros(sizeflatL),
-                                nu=0
+                            crp=(alpha=0,
+                                 niw=(mu=zeros(D),
+                                     lambda=0,
+                                     flatL=zeros(sizeflatL),
+                                     nu=0
+                                     )
                                 ),
                             splitmerge=(split=0, merge=0,
                                         splitper=0, mergeper=0
                                         )
                         )
-    
+
+    modelD = modeldimension(hpparams, include_nn=true)
+    ramL0 = 2.38 / sqrt(modelD) / 10 * I(modelD)
+    ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ramL0)))
+                    
+    ram = ComponentArray{T}(i=1.0,
+                            γ=0.6,
+                            previous_h=0.0,
+                            acceptance_target=0.234,
+                        )
+
     crp_ram = ComponentArray{T}(i=1.0,
                                 γ=0.6,
                                 previous_h=0.0,
                                 acceptance_target=0.234,
-                                previous_logprob=-Inf
                             )
     
     crpD = modeldimension(hpparams, include_nn=false)
-    crp_ramΣ0 = 2.38^2 / crpD * I(crpD)
-    crp_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(crp_ramΣ0)), 'L', 0)
+    crp_ramL0 = 2.38 / sqrt(crpD) / 10 * I(crpD)
+    crp_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(crp_ramL0)), 'L', 0)
 
     if !hasnn(hpparams)
 
-        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), amwg, crp_ram, crp_ramΣ, splitmerge)
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, amwg, crp_ram, crp_ramΣ, splitmerge)
 
     else
 
@@ -82,12 +98,16 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
 
         ffjordD = modeldimension(hpparams, include_nn=true) - modeldimension(hpparams, include_nn=false)
         
-        ffjord_ram = copy(crp_ram)
-        
-        ffjord_ramΣ0 = 2.38^2 / ffjordD * I(ffjordD)
-        ffjord_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ffjord_ramΣ0)), 'L', 0)
+        ffjord_ram = ComponentArray{T}(i=1.0,
+                                       γ=0.6,
+                                       previous_h=0.0,
+                                       acceptance_target=0.234,
+                                   )
 
-        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), amwg, crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
+        ffjord_ramL0 = 2.38 / sqrt(ffjordD) / 10 * I(ffjordD)
+        ffjord_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ffjord_ramL0)))
+
+        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, amwg, crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
 
     end
 end
@@ -95,18 +115,18 @@ end
 function Base.show(io::IO, diagnostics::AbstractDiagnostics{T, D}) where {T, D}
     println(io, "Diagnostics")
     println(io, "  acceptance rates")
-    println(io, "    pyp")
-    println(io, "        alpha: $(round(diagnostics.accepted.pyp.alpha / (diagnostics.rejected.pyp.alpha + diagnostics.accepted.pyp.alpha), digits=4))")
-    # println(io, "        sigma: $(round(diagnostics.accepted.pyp.sigma / (diagnostics.rejected.pyp.sigma + diagnostics.accepted.pyp.sigma), digits=4))")
-    println(io, "    niw")
-    println(io, "           mu: $(round.(diagnostics.accepted.niw.mu ./ (diagnostics.rejected.niw.mu .+ diagnostics.accepted.niw.mu), digits=4))")
-    println(io, "       lambda: $(round(diagnostics.accepted.niw.lambda / (diagnostics.rejected.niw.lambda + diagnostics.accepted.niw.lambda), digits=4))")
-    println(io, "        flatL: $(round.(diagnostics.accepted.niw.flatL ./ (diagnostics.rejected.niw.flatL .+ diagnostics.accepted.niw.flatL), digits=4))")
-    print(io,   "           nu: $(round(diagnostics.accepted.niw.nu / (diagnostics.rejected.niw.nu + diagnostics.accepted.niw.nu), digits=4))")
+    println(io, "    crp")
+    println(io, "      alpha: $(round(diagnostics.accepted.crp.alpha / (diagnostics.rejected.crp.alpha + diagnostics.accepted.crp.alpha), digits=4))")
+    # println(io, "        sigma: $(round(diagnostics.accepted.crp.sigma / (diagnostics.rejected.crp.sigma + diagnostics.accepted.crp.sigma), digits=4))")
+    println(io, "      niw")
+    println(io, "             mu: $(round.(diagnostics.accepted.crp.niw.mu ./ (diagnostics.rejected.crp.niw.mu .+ diagnostics.accepted.crp.niw.mu), digits=4))")
+    println(io, "         lambda: $(round(diagnostics.accepted.crp.niw.lambda / (diagnostics.rejected.crp.niw.lambda + diagnostics.accepted.crp.niw.lambda), digits=4))")
+    println(io, "          flatL: $(round.(diagnostics.accepted.crp.niw.flatL ./ (diagnostics.rejected.crp.niw.flatL .+ diagnostics.accepted.crp.niw.flatL), digits=4))")
+    print(io,   "             nu: $(round(diagnostics.accepted.crp.niw.nu / (diagnostics.rejected.crp.niw.nu + diagnostics.accepted.crp.niw.nu), digits=4))")
     if hasnn(diagnostics)
         println("\n")
-        println(io, "     nn")
-        print(io,   "       params: $(round(diagnostics.accepted.nn / (diagnostics.rejected.nn + diagnostics.accepted.nn), digits=4))")
+        println(io, "    nn")
+        print(io,   "      params: $(round(diagnostics.accepted.nn / (diagnostics.rejected.nn + diagnostics.accepted.nn), digits=4))")
         # println(io, "      t_alpha: $(round(diagnostics.accepted.nn.prior.alpha / (diagnostics.rejected.nn.prior.alpha + diagnostics.accepted.nn.prior.alpha), digits=4))")
         # print(io,   "      t_scale: $(round(diagnostics.accepted.nn.prior.scale / (diagnostics.rejected.nn.prior.scale + diagnostics.accepted.nn.prior.scale), digits=4))")
     end
@@ -119,10 +139,8 @@ function clear_diagnostics!(diagnostics::AbstractDiagnostics{T, D};
                             ) where {T, D}
 
     if resethyperparams
-        diagnostics.accepted.pyp .= 0
-        diagnostics.rejected.pyp .= 0
-        diagnostics.accepted.niw .= 0
-        diagnostics.rejected.niw .= 0
+        diagnostics.accepted.crp .= 0
+        diagnostics.rejected.crp .= 0
     end
 
     if resetsplitmerge

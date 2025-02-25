@@ -9,7 +9,7 @@ end
 
 function advance_gibbs!(rng::AbstractRNG, element::E, clusters::AbstractVector{C}, hyperparams::AbstractFCHyperparams{T, D}; leaveempty=false, temperature::T=one(T)) where {C <: AbstractCluster{T, D, E}} where {T, D, E}
 
-    alpha, mu, lambda, psi, nu = hyperparams._.pyp.alpha, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    alpha, mu, lambda, psi, nu = hyperparams._.crp.alpha, hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu
 
     _b2o = first(clusters).b2o
 
@@ -66,15 +66,15 @@ function advance_hyperparams_amwg!(
 
     di = diagnostics
 
-    advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.pyp.alpha))
-    if !hasnn(hyperparams) || !regularizelatent
-        advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.mu))
+    advance_alpha!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.crp.alpha))
+    if !regularizelatent
+        advance_mu!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.crp.niw.mu))
     else
-        hyperparams._.niw.mu .= zeros(T, D)
+        hyperparams._.crp.niw.mu .= zeros(T, D)
     end
-    advance_lambda!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.lambda))
-    advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.niw.flatL), diagonly=false)
-    advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.niw.nu))
+    advance_lambda!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.crp.niw.lambda))
+    advance_psi!(rng, clusters, hyperparams, di, stepsize=exp.(di.amwg.logscales.crp.niw.flatL), diagonly=false)
+    advance_nu!(rng, clusters, hyperparams, di, stepsize=exp(di.amwg.logscales.crp.niw.nu))
         # if hasnn(hyperparams)
             # advance_nn_alpha!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.alpha))
             # advance_nn_scale!(rng, hyperparams, di, stepsize=exp(di.amwg.logscales.nn.prior.scale))
@@ -101,15 +101,88 @@ function adjust_amwg_logscales!(diagnostics::AbstractDiagnostics{T, D}) where {T
 
     delta_n = min(di.amwg.min_delta, 1/sqrt(di.amwg.nb_batches))
 
-    # contparams = hasnn(di) ? (:pyp, :niw, :nn) : (:pyp, :niw)
-    contparams = (:pyp, :niw)
-    acc_rates = di.accepted[contparams] ./ (di.accepted[contparams] .+ di.rejected[contparams])
+    acc_rates = di.accepted.crp ./ (di.accepted.crp .+ di.rejected.crp)
     di.amwg.logscales .+= delta_n .* (acc_rates .> di.amwg.acceptance_target) .- delta_n .* (acc_rates .<= di.amwg.acceptance_target)
 
     # di.amwg_logscales[di.amwg_logscales .< -minmax_logscale] .= -minmax_logscale
     # di.amwg_logscales[di.amwg_logscales .> minmax_logscale] .= minmax_logscale
 
     return di
+end
+
+function advance_ram!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; regularizelatent=true) where {T, D, E}
+
+    di = diagnostics
+
+    modelD = modeldimension(hyperparams, include_nn=true)
+
+    hparray = hyperparams._
+    proposed_hparray = transform(hparray)
+
+    U = randn(rng, modelD)
+    SU = ComponentArray(di.ramΣ.L * U, getaxes(proposed_hparray))
+    if regularizelatent
+        SU.crp.niw.mu .= zeros(T, D)
+    end
+    proposed_hparray .+= SU
+    backtransform!(proposed_hparray)
+    
+    if hasnn(hyperparams)
+        proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
+        proposed_logprob = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=false)
+        proposed_logprob -= sum(proposed_delta_logps)
+    else
+        proposed_logprob = logprobgenerative(clusters, proposed_hparray, ignorehyperpriors=false)
+    end
+
+    log_acceptance = proposed_logprob - logprobgenerative(clusters, hyperparams, ignorehyperpriors=false, ignoreffjord=false)
+
+    # crp log alpha hastings
+    log_acceptance += log(proposed_hparray.crp.alpha) - log(hparray.crp.alpha)
+    
+
+    # niw log lambda hastings
+    log_acceptance += log(proposed_hparray.crp.niw.lambda) - log(hparray.crp.niw.lambda)
+    
+    # niw L hastings
+    proposed_L = LowerTriangular(proposed_hparray.crp.niw.flatL)
+    L = LowerTriangular(hparray.crp.niw.flatL)
+    log_acceptance += sum((D:-1:1) .* (log.(abs.(diag(proposed_L)))))
+    log_acceptance -= sum((D:-1:1) .* (log.(abs.(diag(L)))))
+    
+    # niw log(nu - D + 1) hastings
+    log_acceptance += log(proposed_hparray.crp.niw.nu - D + 1) - log(hparray.crp.niw.nu - D + 1)
+    
+
+    acceptance = min(one(T), exp(log_acceptance))
+
+    if rand(rng, T) < acceptance
+        if hasnn(hyperparams)
+            empty!(clusters)
+            append!(clusters, proposed_clusters)
+        end
+        hyperparams._ .= proposed_hparray
+        di.accepted .+= 1
+    else
+        di.rejected .+= 1
+    end
+
+    η = di.ram.i^-di.ram.γ
+    h = acceptance - di.ram.acceptance_target
+    # di.ram.i += 1
+    di.ram.i += (di.ram.previous_h * h <= 0)
+    di.ram.previous_h = h
+
+    ΔS = sqrt(η * abs(h)) * SU / norm(U)
+
+    if h > 0
+        lowrankupdate!(di.ramΣ , ΔS)
+    elseif h < 0
+        lowrankdowndate!(di.ramΣ , ΔS)
+    end
+
+    return hyperparams
+
 end
 
 function advance_crp_ram!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluster{T, D, E}}, hyperparams::AbstractFCHyperparams{T, D}, diagnostics::AbstractDiagnostics{T, D}; regularizelatent=true) where {T, D, E}
@@ -121,43 +194,41 @@ function advance_crp_ram!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractC
     hparray = hyperparams._
     proposed_hparray = transform(hparray)
 
-    U = ComponentArray(randn(rng, crpD), getaxes(proposed_hparray))
+    U = randn(rng, crpD)
+    SU = ComponentArray(di.crp_ramΣ.L * U, getaxes(proposed_hparray.crp))
     if regularizelatent
-        U.niw.mu .= zeros(T, D)
+        SU.niw.mu .= zeros(T, D)
     end
-    SU = ComponentArray(di.crp_ramΣ.L * U, getaxes(proposed_hparray))
-    proposed_hparray.pyp .+= SU.pyp
-    proposed_hparray.niw .+= SU.niw
+    proposed_hparray.crp .+= SU
     backtransform!(proposed_hparray)
     
-    proposed_logprob = logrobgenerative(clusters, proposed_hparray, rng; ignorehyperpriors=false, ignoreffjord=true)
+    # Without rng this ignores ffjord
+    proposed_logprob = logprobgenerative(clusters, proposed_hparray; ignorehyperpriors=false)
     
     log_acceptance = proposed_logprob
-    log_acceptance -= di.crp_ram.previous_logprob
+    log_acceptance -= logprobgenerative(clusters, hparray; ignorehyperpriors=false)
 
     # crp log alpha hastings
-    log_acceptance += log(proposed_hpparams.pyp.alpha) - log(hpparams.pyp.alpha)
+    log_acceptance += log(proposed_hparray.crp.alpha) - log(hparray.crp.alpha)
 
     # niw log lambda hastings
-    log_acceptance += log(proposed_hpparams.niw.lambda) - log(hpparams.niw.lambda)
+    log_acceptance += log(proposed_hparray.crp.niw.lambda) - log(hparray.crp.niw.lambda)
     # niw L hastings
-    proposed_L = LowerTriangular(proposed_hpparams.niw.flatL)
-    L = LowerTriangular(hpparams.niw.flatL)
+    proposed_L = LowerTriangular(proposed_hparray.crp.niw.flatL)
+    L = LowerTriangular(hparray.crp.niw.flatL)
     log_acceptance += sum((D:-1:1) .* (log.(abs.(diag(proposed_L)))))
-    log_acceptance -= log.(abs.(diag(L)))
+    log_acceptance -= sum((D:-1:1) .* (log.(abs.(diag(L)))))
     # niw log(nu - D + 1) hastings
-    log_acceptance += log(proposed_hparray.niw.nu - D + 1) - log(hparray.niw.nu - D + 1)
+    log_acceptance += log(proposed_hparray.crp.niw.nu - D + 1) - log(hparray.crp.niw.nu - D + 1)
 
     acceptance = min(one(T), exp(log_acceptance))
     
     if rand(rng, T) < acceptance
         hyperparams._ .= proposed_hparray
-        di.crp_ram.previous_logprob = proposed_logprob
-        di.accepted.pyp += 1
-        di.accepted.niw += 1
+        # di.crp_ram.previous_logprob = proposed_logprob
+        di.accepted.crp .+= 1
     else
-        di.rejected.pyp += 1
-        di.rejected.niw += 1
+        di.rejected.crp .+= 1
     end
 
     η = (di.crp_ram.i + 1)^-di.crp_ram.γ
@@ -185,7 +256,7 @@ function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClu
     N = sum(length.(clusters))
     K = length(clusters)
 
-    alpha = hyperparams._.pyp.alpha
+    alpha = hyperparams._.crp.alpha
     log_alpha = log(alpha)
 
     proposed_logalpha = log_alpha + rand(rng, step_distrib)
@@ -209,10 +280,10 @@ function advance_alpha!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClu
     # acceptance = logistic(log_acceptance)
 
     if rand(rng, T) < acceptance
-        hyperparams._.pyp.alpha = proposed_alpha
-        diagnostics.accepted.pyp.alpha += 1
+        hyperparams._.crp.alpha = proposed_alpha
+        diagnostics.accepted.crp.alpha += 1
     else
-        diagnostics.rejected.pyp.alpha += 1
+        diagnostics.rejected.crp.alpha += 1
     end
 
     return hyperparams
@@ -224,9 +295,9 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
     step_distrib = MvNormal(diagm(stepsize.^2))
     steps = rand(rng, step_distrib)
 
-    lambda, psi, nu = hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    lambda, psi, nu = hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu
 
-    mu = hyperparams._.niw.mu
+    mu = hyperparams._.crp.niw.mu
 
     if random_order
         dim_order = randperm(rng, D)
@@ -235,7 +306,7 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
     end
 
     for k in dim_order
-        proposed_mu = hyperparams._.niw.mu[:]
+        proposed_mu = hyperparams._.crp.niw.mu[:]
         proposed_mu[k] = proposed_mu[k] + steps[k]
 
         log_acceptance = sum([log_Zniw(c, proposed_mu, lambda, psi, nu) - log_Zniw(EmptyCluster{T, D, E}(), proposed_mu, lambda, psi, nu) - log_Zniw(c, mu, lambda, psi, nu) + log_Zniw(EmptyCluster{T, D, E}(), mu, lambda, psi, nu) for c in clusters])
@@ -244,10 +315,10 @@ function advance_mu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
         # acceptance = logistic(log_acceptance)
 
         if rand(rng, T) < acceptance
-            hyperparams._.niw.mu = proposed_mu
-            diagnostics.accepted.niw.mu[k] += 1
+            hyperparams._.crp.niw.mu = proposed_mu
+            diagnostics.accepted.crp.niw.mu[k] += 1
         else
-            diagnostics.rejected.niw.mu[k] += 1
+            diagnostics.rejected.crp.niw.mu[k] += 1
         end
     end
 
@@ -258,7 +329,7 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
 
     step_distrib = Normal(zero(T), stepsize)
 
-    mu, lambda, psi, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    mu, lambda, psi, nu = hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu
 
     proposed_loglambda = log(lambda) + rand(rng, step_distrib)
     proposed_lambda = exp(proposed_loglambda)
@@ -274,10 +345,10 @@ function advance_lambda!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCl
     # acceptance = logistic(log_acceptance)
 
     if rand(rng, T) < acceptance
-        hyperparams._.niw.lambda = proposed_lambda
-        diagnostics.accepted.niw.lambda += 1
+        hyperparams._.crp.niw.lambda = proposed_lambda
+        diagnostics.accepted.crp.niw.lambda += 1
     else
-        diagnostics.rejected.niw.lambda += 1
+        diagnostics.rejected.crp.niw.lambda += 1
     end
 
     return hyperparams
@@ -302,16 +373,16 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
         dim_order = filter(k -> isequal(ij(k)...), dim_order)
     end
 
-    mu, lambda, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.nu
+    mu, lambda, nu = hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, hyperparams._.crp.niw.nu
 
     for k in dim_order
 
         # We need L for the Hastings factor
         # so we don't use foldpsi()
-        L = LowerTriangular(hyperparams._.niw.flatL)
+        L = LowerTriangular(hyperparams._.crp.niw.flatL)
         psi = L * L'
 
-        proposed_flatL = hyperparams._.niw.flatL[:]
+        proposed_flatL = hyperparams._.crp.niw.flatL[:]
         proposed_flatL[k] = proposed_flatL[k] + steps[k]
 
         # We need proposed_L for the Hastings factor
@@ -334,10 +405,10 @@ function advance_psi!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractClust
         # acceptance = logistic(log_acceptance)
 
         if rand(rng, T) < acceptance
-            hyperparams._.niw.flatL = proposed_flatL
-            diagnostics.accepted.niw.flatL[k] += 1
+            hyperparams._.crp.niw.flatL = proposed_flatL
+            diagnostics.accepted.crp.niw.flatL[k] += 1
         else
-            diagnostics.rejected.niw.flatL[k] += 1
+            diagnostics.rejected.crp.niw.flatL[k] += 1
         end
 
     end
@@ -349,7 +420,7 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
 
     step_distrib = Normal(zero(T), stepsize)
 
-    mu, lambda, psi, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+    mu, lambda, psi, nu = hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu
 
     # x = nu - (d - 1)
     # we use moves on the log of x
@@ -370,10 +441,10 @@ function advance_nu!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractCluste
     # acceptance = logistic(log_acceptance)
 
     if rand(rng, T) < acceptance
-        hyperparams._.niw.nu = proposed_nu
-        diagnostics.accepted.niw.nu += 1
+        hyperparams._.crp.niw.nu = proposed_nu
+        diagnostics.accepted.crp.niw.nu += 1
     else
-        diagnostics.rejected.niw.nu += 1
+        diagnostics.rejected.crp.niw.nu += 1
     end
 
     return hyperparams
@@ -454,8 +525,8 @@ function advance_splitmerge_seq!(rng::AbstractRNG, clusters::AbstractVector{C}, 
 
     @assert t >= 0
 
-    alpha = hyperparams._.pyp.alpha
-    mu, lambda, flatL, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.flatL, hyperparams._.niw.nu
+    alpha = hyperparams._.crp.alpha
+    mu, lambda, flatL, nu = hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, hyperparams._.crp.niw.flatL, hyperparams._.crp.niw.nu
     psi = foldpsi(flatL)
 
     _b2o = first(clusters).b2o
@@ -662,7 +733,8 @@ function advance_ffjord_ram!(
     clusters::AbstractVector{C},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    temperature=one(T)) where {T, D, C <:AbstractCluster{T, D, E}} where E
+    # temperature=one(T)
+    ) where {T, D, C <:AbstractCluster{T, D, E}} where E
 
     !hasnn(hyperparams) && return hyperparams
 
@@ -672,7 +744,7 @@ function advance_ffjord_ram!(
 
     proposed_hparray = copy(hyperparams._)
 
-    U = ComponentArray(randn(rng, nnD), getaxes(proposed_hparray))
+    U = ComponentArray(randn(rng, nnD), getaxes(proposed_hparray.nn.params))
     SU = di.ffjord_ramΣ.L * U
     proposed_hparray.nn.params .+= SU
 
@@ -689,10 +761,10 @@ function advance_ffjord_ram!(
     # log_acceptance += log_nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior...)
     # log_acceptance += log_nn_hyperprior(proposed_hparray.nn.prior...)
 
-    log_acceptance = proposed_logprob - di.ffjord_ram.previous_logprob
-    # log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
+    log_acceptance = proposed_logprob
+    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
 
-    # add back the nn hyperprior only (not the pyp/niw hyperpriors)
+    # add back the nn hyperprior only (not the crp/niw hyperpriors)
     # log_acceptance -= log_nn_hyperprior(hyperparams._.nn.prior...)
 
     # Hastings factor on nn hyperprior
@@ -700,7 +772,7 @@ function advance_ffjord_ram!(
     # log(lambda0), log(alpha0), log(beta0)
     # log_acceptance += sum(proposed_hparray.nn.prior[(:lambda0, :alpha0, :beta0)] - hyperparams._.nn.prior[(:lambda0, :alpha0, :beta0)])
 
-    log_acceptance /= T(temperature)
+    # log_acceptance /= T(temperature)
 
     log_acceptance = isfinite(log_acceptance) ? log_acceptance : T(-Inf)
 
@@ -709,7 +781,7 @@ function advance_ffjord_ram!(
     if rand(rng, T) < acceptance
         empty!(clusters)
         append!(clusters, proposed_clusters)
-        di.ffjord_ram.previous_logprob = proposed_logprob
+        # di.ffjord_ram.previous_logprob = proposed_logprob
         hyperparams._ .= proposed_hparray
         di.accepted.nn += 1
     else

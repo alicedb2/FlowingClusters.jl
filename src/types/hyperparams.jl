@@ -45,9 +45,9 @@ function FCHyperparams(::Type{T}, D::Int, nn=nothing; rng::Union{Nothing, Abstra
 end
 
 datadimension(::AbstractFCHyperparams{T, D}) where {T, D} = D
-datadimension(hyperparamsarray::ComponentArray) = size(hyperparamsarray.niw.mu, 1)
+datadimension(hyperparamsarray::ComponentArray) = size(hyperparamsarray.crp.niw.mu, 1)
 
-modeldimension(hpparams::ComponentArray; include_nn=true) = size(hpparams.pyp, 1) + size(hpparams.niw, 1) + (include_nn && hasnn(hpparams) ? size(hpparams.nn, 1) : 0)
+modeldimension(hpparams::ComponentArray; include_nn=true) = size(hpparams.crp, 1) + (include_nn && hasnn(hpparams) ? size(hpparams.nn, 1) : 0)
 modeldimension(hyperparams::AbstractFCHyperparams; include_nn=true) = modeldimension(hyperparams._, include_nn=include_nn)
 # function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
 #     dim = size(hyperparams._, 1)
@@ -64,9 +64,9 @@ transform(hparray::ComponentArray) = transform!(copy(hparray))
 backtransform(transformedhparray::ComponentArray) = backtransform!(copy(transformedhparray))
 
 function transform!(hparray::ComponentArray)
-    hparray.pyp.alpha = log(hparray.pyp.alpha)
-    hparray.niw.lambda = log(hparray.niw.lambda)
-    hparray.niw.nu = log(hparray.niw.nu - datadimension(hparray) + 1)
+    hparray.crp.alpha = log(hparray.crp.alpha)
+    hparray.crp.niw.lambda = log(hparray.crp.niw.lambda)
+    hparray.crp.niw.nu = log(hparray.crp.niw.nu - datadimension(hparray) + 1)
     # if hasnn(hparray)
     #     hparray.nn.prior[(:lambda0, :alpha0, :beta0)] .= log.(hparray.nn.prior[(:lambda0, :alpha0, :beta0)])
     # end
@@ -74,9 +74,9 @@ function transform!(hparray::ComponentArray)
 end
 
 function backtransform!(transformedhparray::ComponentArray)
-    transformedhparray.pyp.alpha = exp(transformedhparray.pyp.alpha)
-    transformedhparray.niw.lambda = exp(transformedhparray.niw.lambda)
-    transformedhparray.niw.nu = exp(transformedhparray.niw.nu) + datadimension(transformedhparray) - 1
+    transformedhparray.crp.alpha = exp(transformedhparray.crp.alpha)
+    transformedhparray.crp.niw.lambda = exp(transformedhparray.crp.niw.lambda)
+    transformedhparray.crp.niw.nu = exp(transformedhparray.crp.niw.nu) + datadimension(transformedhparray) - 1
     # if hasnn(transformedhparray)
     #     transformedhparray.nn.prior[(:lambda0, :alpha0, :beta0)] .= exp.(transformedhparray.nn.prior[(:lambda0, :alpha0, :beta0)])
     # end
@@ -137,19 +137,19 @@ end
 
 function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
     println(io, "$(typeof(hyperparams))(model dimension: $(modeldimension(hyperparams)))")
-    println(io, "  pyp")
-    println(io, "    alpha: $(round(hyperparams._.pyp.alpha, digits=3))")
-    # println(io, "    sigma: $(round(hyperparams._.pyp.sigma, digits=3))")
-    println(io, "  niw")
-    println(io, "    mu: $(round.(hyperparams._.niw.mu, digits=3))")
-    println(io, "    lambda: $(round(hyperparams._.niw.lambda, digits=3))")
-    println(io, "    flatL: $(round.(hyperparams._.niw.flatL, digits=3))")
-    println(io, "    psi: $(round.(foldpsi(hyperparams._.niw.flatL), digits=3))")
-    print(io,   "    nu: $(round(hyperparams._.niw.nu, digits=3))")
+    println(io, "  crp")
+    println(io, "    alpha: $(round(hyperparams._.crp.alpha, digits=3))")
+    # println(io, "    sigma: $(round(hyperparams._.crp.sigma, digits=3))")
+    println(io, "    niw")
+    println(io, "      mu: $(round.(hyperparams._.crp.niw.mu, digits=3))")
+    println(io, "      lambda: $(round(hyperparams._.crp.niw.lambda, digits=3))")
+    println(io, "      flatL: $(round.(hyperparams._.crp.niw.flatL, digits=3))")
+    println(io, "      psi: $(round.(foldpsi(hyperparams._.crp.niw.flatL), digits=3))")
+    print(io,   "      nu: $(round(hyperparams._.crp.niw.nu, digits=3))")
     if hasnn(hyperparams)
         println(io)
         println(io, "  nn")
-        print(io, "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
+        print(io,   "    params: $(map(x->round(x, digits=3), hyperparams._.nn.params))")
         # println(io, "    prior")
         # println(io, "              mu0: $(round(hyperparams._.nn.prior.mu0, digits=3))")
         # println(io, "      log lambda0: $(round(hyperparams._.nn.prior.lambda0, digits=3))")
@@ -158,8 +158,8 @@ function Base.show(io::IO, hyperparams::AbstractFCHyperparams)
     end
 end
 
-function perturb!(hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3) where {T, D}
-    return perturb!(default_rng(), hyperparams, logstep=logstep)
+function perturb!(hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3, rng=default_rng()) where {T, D}
+    return perturb!(rng, hyperparams, logstep=logstep)
 end
 
 function perturb!(rng::AbstractRNG, hyperparams::AbstractFCHyperparams{T, D}; logstep::T=one(T)/3) where {T, D}
@@ -169,16 +169,16 @@ end
 
 function niwparams(hyperparams::AbstractFCHyperparams{T, D}; psi=true) where {T, D}
     if psi
-        return hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu
+        return hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu
     else
-        return hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.flatL, hyperparams._.niw.nu
+        return hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, hyperparams._.crp.niw.flatL, hyperparams._.crp.niw.nu
     end
 end
 
 function niwparams(hyperparamsarray::ComponentArray{T}; psi=true) where T
     if psi
-        return hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, foldpsi(hyperparamsarray.niw.flatL), hyperparamsarray.niw.nu
+        return hyperparamsarray.crp.niw.mu, hyperparamsarray.crp.niw.lambda, foldpsi(hyperparamsarray.crp.niw.flatL), hyperparamsarray.crp.niw.nu
     else
-        return hyperparamsarray.niw.mu, hyperparamsarray.niw.lambda, hyperparamsarray.niw.flatL, hyperparamsarray.niw.nu
+        return hyperparamsarray.crp.niw.mu, hyperparamsarray.crp.niw.lambda, hyperparamsarray.crp.niw.flatL, hyperparamsarray.crp.niw.nu
     end
 end

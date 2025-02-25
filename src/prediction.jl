@@ -5,9 +5,9 @@ function predictive_distribution(
     ignore_empty=false
     ) where {T, D, E}
 
-    alpha = hyperparams._.pyp.alpha
-    mu, lambda, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.nu
-    psi = foldpsi(hyperparams._.niw.flatL)
+    alpha = hyperparams._.crp.alpha
+    mu, lambda, nu = hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, hyperparams._.crp.niw.nu
+    psi = foldpsi(hyperparams._.crp.niw.flatL)
 
     if ignore_weights
         weights = ones(T, length(clusters) + 1)
@@ -109,9 +109,9 @@ function tail_probability(
     ignore_empty=false
     ) where {T, D, E}
 
-    alpha = hyperparams._.pyp.alpha
-    mu, lambda, nu = hyperparams._.niw.mu, hyperparams._.niw.lambda, hyperparams._.niw.nu
-    psi = foldpsi(hyperparams._.niw.flatL)
+    alpha = hyperparams._.crp.alpha
+    mu, lambda, nu = hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, hyperparams._.crp.niw.nu
+    psi = foldpsi(hyperparams._.crp.niw.flatL)
 
     if ignore_weights
         weights = ones(T, length(clusters) + 1)

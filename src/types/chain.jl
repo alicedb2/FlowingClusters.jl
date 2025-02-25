@@ -165,11 +165,6 @@ function FCChain(
     push!(chain.logprob_chain, lp)
     push!(chain.nbclusters_chain, length(chain.clusters))
     push!(chain.largestcluster_chain, maximum(length.(chain.clusters)))
-    
-    chain.diagnostics.crp_ram.previous_logprob = logprobgenerative(chain.clusters, chain.hyperparams, chain.rng, ignoreffjord=true, ignorehyperpriors=false)
-    if hasnn(chain.hyperparams)
-        chain.diagnostics.ffjord_ram.previous_logprob = logprobgenerative(chain.clusters, chain.hyperparams, chain.rng, ignoreffjord=false, ignorehyperpriors=true)
-    end
 
     chain.map_clusters = deepcopy(chain.clusters)
     chain.map_logprob = lp
@@ -182,25 +177,26 @@ function FCChain(
 
 end
 
+hasnn(chain::FCChain) = hasnn(chain.hyperparams)
 
-alpha_chain(chain::FCChain, burn=0) = [p._.pyp.alpha for p in chain.hyperparams_chain[burn+1:end]]
-mu_chain(chain::FCChain, burn=0) = [p._.niw.mu[:] for p in chain.hyperparams_chain[burn+1:end]]
+alpha_chain(chain::FCChain, burn=0) = [p._.crp.alpha for p in chain.hyperparams_chain[burn+1:end]]
+mu_chain(chain::FCChain, burn=0) = [p._.crp.niw.mu[:] for p in chain.hyperparams_chain[burn+1:end]]
 mu_chain(::Type{Matrix}, chain::FCChain, burn=0) = reduce(hcat, mu_chain(chain, burn))
-lambda_chain(chain::FCChain, burn=0) = [p._.niw.lambda for p in chain.hyperparams_chain[burn+1:end]]
+lambda_chain(chain::FCChain, burn=0) = [p._.crp.niw.lambda for p in chain.hyperparams_chain[burn+1:end]]
 function psi_chain(chain::FCChain, burn=0; flatten=false)
     if flatten
-        return [unfold(LowerTriangular(foldpsi(p._.niw.flatL))) for p in chain.hyperparams_chain[burn+1:end]]
+        return [unfold(LowerTriangular(foldpsi(p._.crp.niw.flatL))) for p in chain.hyperparams_chain[burn+1:end]]
     else
-        return [foldpsi(p._.niw.flatL)[:, :] for p in chain.hyperparams_chain[burn+1:end]]
+        return [foldpsi(p._.crp.niw.flatL)[:, :] for p in chain.hyperparams_chain[burn+1:end]]
     end
 end
 psi_chain(::Type{Matrix}, chain::FCChain, burn=0) = reduce(hcat, psi_chain(chain, burn, flatten=true))
 psi_chain(::Type{Array}, chain::FCChain, burn=0) = reduce((x,y)->cat(x, y, dims=3), psi_chain(chain, burn))
 
-flatL_chain(chain::FCChain, burn=0) = [p._.niw.flatL[:] for p in chain.hyperparams_chain[burn+1:end]]
+flatL_chain(chain::FCChain, burn=0) = [p._.crp.niw.flatL[:] for p in chain.hyperparams_chain[burn+1:end]]
 flatL_chain(::Type{Matrix}, chain::FCChain, burn=0) = reduce(hcat, flatL_chain(chain, burn))
 
-nu_chain(chain::FCChain, burn=0) = [p._.niw.nu for p in chain.hyperparams_chain[burn+1:end]]
+nu_chain(chain::FCChain, burn=0) = [p._.crp.niw.nu for p in chain.hyperparams_chain[burn+1:end]]
 
 logprob_chain(chain::FCChain, burn=0) = chain.logprob_chain[burn+1:end]
 nbclusters_chain(chain::FCChain, burn=0) = chain.nbclusters_chain[burn+1:end]
@@ -287,7 +283,7 @@ function ess_rhat(chain::FCChain, burn=0)
     N -= burn
 
     d = datadimension(chain.hyperparams)
-    flatL_d = size(chain.hyperparams._.niw.flatL, 1)
+    flatL_d = size(chain.hyperparams._.crp.niw.flatL, 1)
     nn_D = hasnn(chain.hyperparams) ? size(chain.hyperparams._.nn, 1) : 0
 
     return (;
@@ -308,12 +304,12 @@ function stats(chain::FCChain; burn=0)
     println("MAP state")
     println(" log prob: $(chain.map_logprob)")
     println(" #cluster: $(length(chain.map_clusters))")
-    println("    alpha: $(chain.map_hyperparams._.pyp.alpha)")
-    println("       mu: $(chain.map_hyperparams._.niw.mu)")
-    println("   lambda: $(chain.map_hyperparams._.niw.lambda)")
+    println("    alpha: $(chain.map_hyperparams._.crp.alpha)")
+    println("       mu: $(chain.map_hyperparams._.crp.niw.mu)")
+    println("   lambda: $(chain.map_hyperparams._.crp.niw.lambda)")
     println("      psi:")
-    display(chain.map_hyperparams._.niw.psi)
-    println("       nu: $(chain.map_hyperparams._.niw.nu)")
+    display(chain.map_hyperparams._.crp.niw.psi)
+    println("       nu: $(chain.map_hyperparams._.crp.niw.nu)")
     println()
 
 

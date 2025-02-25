@@ -1,5 +1,5 @@
 function updated_niw_hyperparams(cluster::AbstractCluster{T, D, E}, hyperparams::AbstractFCHyperparams{T, D})::@NamedTuple{mu_c::Vector{T}, lambda_c::T, psi_c::Matrix{T}, nu_c::T}  where {T, D, E}
-    return updated_niw_hyperparams(cluster, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu)
+    return updated_niw_hyperparams(cluster, hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu)
 end
 
 function updated_niw_hyperparams(::EmptyCluster{T, D, E}, mu::AbstractVector{T}, lambda::T, psi::Matrix{T}, nu::T)::@NamedTuple{mu_c::Vector{T}, lambda_c::T, psi_c::Matrix{T}, nu_c::T}  where {T, D, E}
@@ -131,5 +131,5 @@ function updated_mvstudent_params(
 end
 
 function updated_mvstudent_params(clusters::AbstractVector{<:AbstractCluster}, hyperparams::AbstractFCHyperparams; add_empty=true)
-    return updated_mvstudent_params(clusters, hyperparams._.niw.mu, hyperparams._.niw.lambda, foldpsi(hyperparams._.niw.flatL), hyperparams._.niw.nu, add_empty=add_empty)
+    return updated_mvstudent_params(clusters, hyperparams._.crp.niw.mu, hyperparams._.crp.niw.lambda, foldpsi(hyperparams._.crp.niw.flatL), hyperparams._.crp.niw.nu, add_empty=add_empty)
 end

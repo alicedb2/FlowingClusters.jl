@@ -4,7 +4,7 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
 
     hpa = hyperparamsarray
 
-    alpha = hpa.pyp.alpha
+    alpha = hpa.crp.alpha
     mu, lambda, psi, nu = niwparams(hpa)
 
     N = sum(length.(clusters))
