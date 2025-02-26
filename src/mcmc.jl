@@ -1,6 +1,7 @@
 function advance_chain!(chain::FCChain, nb_steps=100;
-    nb_gibbs=1, nb_splitmerge=1.0, splitmerge_t=3, 
-    nb_crp_ram=10, nb_ffjord_ram=1, regularizelatent=hasnn(chain),
+    nb_gibbs=1, nb_splitmerge=1.0, splitmerge_t=3,
+    nb_ram=1, ram_subsetsize=20, ram_alwayscrp=false,
+    nb_crp_ram=1, nb_ffjord_ram=1, regularizelatent=hasnn(chain),
     sample_every=:autocov, stop_criterion=nothing,
     checkpoint_every=-1, checkpoint_prefix="chain",
     attempt_map=true, progressoutput=:repl)
@@ -57,6 +58,17 @@ function advance_chain!(chain::FCChain, nb_steps=100;
     end
 
     for step in 1:_nb_steps
+
+        for i in 1:nb_ram
+            advance_ram!(
+                chain.rng,
+                chain.clusters,
+                chain.hyperparams,
+                chain.diagnostics,
+                regularizelatent=regularizelatent,
+                subsetsize=ram_subsetsize,
+                alwayscrp=ram_alwayscrp)
+        end
 
         for i in 1:nb_crp_ram
             advance_crp_ram!(

@@ -202,7 +202,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     return fig
 end
 
-function deformation_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=300, nblines=10, bounds_scaling_factor=1.5)
+function deformationplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=300, nblines=10, bounds_scaling_factor=1.5)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -271,16 +271,24 @@ function deformation_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)),
     return fig
 end
 
-function stream_plot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; proj=[1, 2], bounds=((-4, 4), (-4, 4)), zs=nothing, nbclusters=nothing, rev=false, showclusters=false) where {T, D}
+function streamplot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; proj=[1, 2], bounds=((-4, 4), (-4, 4)), zs=nothing, nbclusters=nothing, rev=false, showclusters=false, t=nothing, rng=default_rng()) where {T, D}
 
     @assert length(Set(proj)) == 2 "Specify exactly 2 different dimensions"
     @assert length(proj) + (isnothing(zs) ? 0 : length(zs)) == D "You must specify as many zs values as the number of dimensions minus 2"
 
-    orig_clusters = sort(project_clusters(clusters, proj, orig=true), by=length, rev=!rev)
-    base_clusters = sort(project_clusters(clusters, proj, orig=false), by=length, rev=!rev)
+    if !isnothing(clusters)
+        orig_clusters = sort(project_clusters(clusters, proj, orig=true), by=length, rev=!rev)
 
-    if nbclusters === nothing || nbclusters < 0
-        nbclusters = length(clusters)
+        if isnothing(t)
+            base_clusters = sort(project_clusters(clusters, proj, orig=false), by=length, rev=!rev)
+        elseif t > 0
+            base_clusters, _ = reflow(rng, clusters, hyperparams._, hyperparams.ffjord, t=t)
+            base_clusters = sort(project_clusters(base_clusters, proj, orig=false), by=length, rev=!rev)
+        end
+
+        if nbclusters === nothing || nbclusters < 0
+            nbclusters = length(clusters)
+        end
     end
 
     (xmin, xmax), (ymin, ymax) = bounds
@@ -292,7 +300,7 @@ function stream_plot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; p
             _X[negproj] .= zs
         end
         _X[proj] .= X
-        
+
         return _X
     end
 
@@ -301,10 +309,10 @@ function stream_plot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; p
         ax = Axis(fig[1, 1]);
         if !isnothing(clusters)
             for (i, cl) in enumerate(orig_clusters[1:nbclusters])
-                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 1), marker=:circle);
+                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 2), marker=:circle, alpha=0.5);
             end
             for (i, cl) in enumerate(base_clusters[1:nbclusters])
-                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 2), marker=:cross);
+                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 1), marker=:cross);
             end
         end
         streamplot!(ax, (x, y)->Point2(hyperparams.ffjord.nn(fillxy([x, y]), hyperparams._.nn.params, hyperparams.ffjord.nns.model)[1]...), xmin..xmax, ymin..ymax, alpha=0.4, arrow_size=10);
@@ -314,8 +322,7 @@ function stream_plot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; p
     return fig
 end
 
-function flow_plot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
-
+function flowplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")

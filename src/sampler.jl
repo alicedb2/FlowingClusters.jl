@@ -72,10 +72,10 @@ function advance_crp_ram!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractC
     end
     proposed_hparray.crp .+= SU
     backtransform!(proposed_hparray)
-    
+
     # Without rng this ignores ffjord
     proposed_logprob = logprobgenerative(clusters, proposed_hparray; ignorehyperpriors=false)
-    
+
     log_acceptance = proposed_logprob
     log_acceptance -= logprobgenerative(clusters, hparray; ignorehyperpriors=false)
 
@@ -93,27 +93,26 @@ function advance_crp_ram!(rng::AbstractRNG, clusters::AbstractVector{<:AbstractC
     log_acceptance += log(proposed_hparray.crp.niw.nu - D + 1) - log(hparray.crp.niw.nu - D + 1)
 
     acceptance = min(one(T), exp(log_acceptance))
-    
+
     if rand(rng, T) < acceptance
         hyperparams._ .= proposed_hparray
-        # di.crp_ram.previous_logprob = proposed_logprob
         di.accepted.crp .+= 1
     else
         di.rejected.crp .+= 1
     end
 
-    η = (di.crp_ram.i + 1)^-di.crp_ram.γ
+    η = di.crp_ram.i^-di.crp_ram.γ
+
     h = acceptance - di.crp_ram.acceptance_target
-    # di.crp_ram.i += 1
     di.crp_ram.i += (di.crp_ram.previous_h * h <= 0)
     di.crp_ram.previous_h = h
 
-    v = sqrt(η * abs(h)) * SU / norm(U)
+    ΔS = sqrt(η * abs(h)) * SU / norm(U)
 
     if h > 0
-        lowrankupdate!(di.crp_ramΣ , v)
+        lowrankupdate!(di.crp_ramΣ , ΔS)
     elseif h < 0
-        lowrankdowndate!(di.crp_ramΣ , v)
+        lowrankdowndate!(di.crp_ramΣ , ΔS)
     end
 
     return hyperparams
@@ -621,38 +620,19 @@ function advance_ffjord_ram!(
 
     # reflow() already computes the logprob coming
     # from the jacobian of the FFJORD transformation
-    # so we do it here to avoid recomputing it
-    # in logprobgenerative()
-    # Call logprobgenerative without ffjord
-
     proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
-    proposed_logprob = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
-    proposed_logprob -= sum(proposed_delta_logps)
+    # so we do it here to avoid recomputing it
+    # and add the contribution back ourselves
+    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=true)
+    log_acceptance -= sum(proposed_delta_logps)
 
-    # log_acceptance += log_nn_prior(proposed_hparray.nn.params, proposed_hparray.nn.prior...)
-    # log_acceptance += log_nn_hyperprior(proposed_hparray.nn.prior...)
-
-    log_acceptance = proposed_logprob
     log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=true)
-
-    # add back the nn hyperprior only (not the crp/niw hyperpriors)
-    # log_acceptance -= log_nn_hyperprior(hyperparams._.nn.prior...)
-
-    # Hastings factor on nn hyperprior
-    # remember than lambda0/alpha0/beta0 are actually
-    # log(lambda0), log(alpha0), log(beta0)
-    # log_acceptance += sum(proposed_hparray.nn.prior[(:lambda0, :alpha0, :beta0)] - hyperparams._.nn.prior[(:lambda0, :alpha0, :beta0)])
-
-    # log_acceptance /= T(temperature)
-
-    log_acceptance = isfinite(log_acceptance) ? log_acceptance : T(-Inf)
 
     acceptance = min(one(T), exp(log_acceptance))
 
     if rand(rng, T) < acceptance
         empty!(clusters)
         append!(clusters, proposed_clusters)
-        # di.ffjord_ram.previous_logprob = proposed_logprob
         hyperparams._ .= proposed_hparray
         di.accepted.nn += 1
     else
@@ -660,18 +640,112 @@ function advance_ffjord_ram!(
     end
 
 
-    η = (di.ffjord_ram.i + 1)^-di.ffjord_ram.γ
+    η = di.ffjord_ram.i^-di.ffjord_ram.γ
     h = acceptance - di.ffjord_ram.acceptance_target
-    # di.ffjord_ram.i += 1
+
     di.ffjord_ram.i += (di.ffjord_ram.previous_h * h <= 0)
     di.ffjord_ram.previous_h = h
 
-    v = sqrt(η * abs(h)) * SU / norm(U)
+    ΔS = sqrt(η * abs(h)) * SU / norm(U)
 
     if h > 0
-        lowrankupdate!(di.ffjord_ramΣ, v)
+        lowrankupdate!(di.ffjord_ramΣ, ΔS)
     elseif h < 0
-        lowrankdowndate!(di.ffjord_ramΣ, v)
+        lowrankdowndate!(di.ffjord_ramΣ, ΔS)
+    end
+
+    return hyperparams
+
+end
+
+function advance_ram!(
+    rng::AbstractRNG,
+    clusters::AbstractVector{C},
+    hyperparams::AbstractFCHyperparams{T, D},
+    diagnostics::AbstractDiagnostics{T, D};
+    subsetsize=16, alwayscrp=false,
+    regularizelatent=true
+    ) where {T, D, C <:AbstractCluster{T, D, E}} where E
+
+    !hasnn(hyperparams) && return hyperparams
+
+    di = diagnostics
+
+    modelD = modeldimension(hyperparams)
+
+    hparray = hyperparams._
+    proposed_hparray = transform(hparray)
+
+    U = randn(rng, modelD)
+    SU = ComponentArray(di.ramΣ.L * U, getaxes(hparray))
+
+    noproposalset = 1:modelD
+    if alwayscrp
+        noproposalset = setdiff(noproposalset, label2index(hparray, "crp"))
+    end
+    if regularizelatent
+        SU.crp.niw.mu .= zero(T)
+        # we'll sample the proposal set out of
+        # noproposalset, mu should not be part
+        # of it
+        noproposalset = setdiff(noproposalset, label2index(hparray, "crp.niw.mu"))
+    end
+    proposalset = sample(rng, noproposalset, min(subsetsize, length(noproposalset)), replace=false)
+    noproposalset = setdiff(noproposalset, proposalset)
+    SU[noproposalset] .= zero(T)
+
+    proposed_hparray .+= SU
+    backtransform!(proposed_hparray)
+
+    # reflow() already computes the logprob coming
+    # from the jacobian of the FFJORD transformation
+    proposed_clusters, proposed_delta_logps = reflow(rng, clusters, proposed_hparray, hyperparams.ffjord)
+    # so we do it here to avoid recomputing it
+    # and add the contribution back ourselves
+    log_acceptance = logprobgenerative(proposed_clusters, proposed_hparray, ignorehyperpriors=false)
+    log_acceptance -= sum(proposed_delta_logps)
+
+    log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=false)
+
+    # crp log alpha hastings
+    log_acceptance += log(proposed_hparray.crp.alpha) - log(hparray.crp.alpha)
+
+    # niw log lambda hastings
+    log_acceptance += log(proposed_hparray.crp.niw.lambda) - log(hparray.crp.niw.lambda)
+
+    # niw L hastings
+    proposed_L = LowerTriangular(proposed_hparray.crp.niw.flatL)
+    L = LowerTriangular(hparray.crp.niw.flatL)
+    log_acceptance += sum((D:-1:1) .* (log.(abs.(diag(proposed_L)))))
+    log_acceptance -= sum((D:-1:1) .* (log.(abs.(diag(L)))))
+
+    # niw log(nu - D + 1) hastings
+    log_acceptance += log(proposed_hparray.crp.niw.nu - D + 1) - log(hparray.crp.niw.nu - D + 1)
+
+    acceptance = min(one(T), exp(log_acceptance))
+
+    if rand(rng, T) < acceptance
+        empty!(clusters)
+        append!(clusters, proposed_clusters)
+        hyperparams._ .= proposed_hparray
+        di.accepted .+= 1
+    else
+        di.rejected .+= 1
+    end
+
+
+    η = di.ram.i^-di.ram.γ
+    h = acceptance - di.ram.acceptance_target
+
+    di.ram.i += (di.ram.previous_h * h <= 0)
+    di.ram.previous_h = h
+
+    ΔS = sqrt(η * abs(h)) * SU / norm(U)
+
+    if h > 0
+        lowrankupdate!(di.ramΣ, ΔS)
+    elseif h < 0
+        lowrankdowndate!(di.ramΣ, ΔS)
     end
 
     return hyperparams

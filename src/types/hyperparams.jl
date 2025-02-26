@@ -49,13 +49,6 @@ datadimension(hyperparamsarray::ComponentArray) = size(hyperparamsarray.crp.niw.
 
 modeldimension(hpparams::ComponentArray; include_nn=true) = size(hpparams.crp, 1) + (include_nn && hasnn(hpparams) ? size(hpparams.nn, 1) : 0)
 modeldimension(hyperparams::AbstractFCHyperparams; include_nn=true) = modeldimension(hyperparams._, include_nn=include_nn)
-# function modeldimension(hyperparams::FCHyperparamsFFJORD; include_nn=true)
-#     dim = size(hyperparams._, 1)
-#     if !include_nn
-#         dim -= size(hyperparams._.nn, 1)
-#     end
-#     return dim
-# end
 
 hasnn(hyperparams::AbstractFCHyperparams) = hyperparams isa FCHyperparamsFFJORD
 hasnn(hyperparamsarray::ComponentArray) = :nn in keys(hyperparamsarray)
@@ -67,9 +60,7 @@ function transform!(hparray::ComponentArray)
     hparray.crp.alpha = log(hparray.crp.alpha)
     hparray.crp.niw.lambda = log(hparray.crp.niw.lambda)
     hparray.crp.niw.nu = log(hparray.crp.niw.nu - datadimension(hparray) + 1)
-    # if hasnn(hparray)
-    #     hparray.nn.prior[(:lambda0, :alpha0, :beta0)] .= log.(hparray.nn.prior[(:lambda0, :alpha0, :beta0)])
-    # end
+
     return hparray
 end
 
@@ -77,9 +68,7 @@ function backtransform!(transformedhparray::ComponentArray)
     transformedhparray.crp.alpha = exp(transformedhparray.crp.alpha)
     transformedhparray.crp.niw.lambda = exp(transformedhparray.crp.niw.lambda)
     transformedhparray.crp.niw.nu = exp(transformedhparray.crp.niw.nu) + datadimension(transformedhparray) - 1
-    # if hasnn(transformedhparray)
-    #     transformedhparray.nn.prior[(:lambda0, :alpha0, :beta0)] .= exp.(transformedhparray.nn.prior[(:lambda0, :alpha0, :beta0)])
-    # end
+
     return transformedhparray
 end
 

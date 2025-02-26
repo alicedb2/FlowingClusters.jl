@@ -3,6 +3,8 @@ abstract type AbstractDiagnostics{T, D} end
 struct Diagnostics{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
+    ram::ComponentArray{T}
+    ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     crp_ram::ComponentArray{T}
     crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     splitmerge::ComponentArray{T}
@@ -11,6 +13,8 @@ end
 struct DiagnosticsFFJORD{T, D} <: AbstractDiagnostics{T, D}
     accepted::ComponentArray{Int}
     rejected::ComponentArray{Int}
+    ram::ComponentArray{T}
+    ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     crp_ram::ComponentArray{T}
     crp_ramΣ::Cholesky{T, <: AbstractMatrix{T}}
     ffjord_ram::ComponentArray{T}
@@ -45,36 +49,47 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
                                         )
                         )
 
+    ram = ComponentArray{T}(i=1.0,
+                            γ=0.501,
+                            previous_h=0.0,
+                            acceptance_target=0.44,
+                        )
+
+    modelD = modeldimension(hpparams, include_nn=true)
+    ramL0 = 2.38 / sqrt(modelD) / 4 * I(modelD)
+    ramΣ = Cholesky(LowerTriangular(Matrix{T}(ramL0)))
+
+
     crp_ram = ComponentArray{T}(i=1.0,
-                                γ=0.6,
+                                γ=0.7,
                                 previous_h=0.0,
-                                acceptance_target=0.234,
+                                acceptance_target=0.44,
                             )
-    
+
     crpD = modeldimension(hpparams, include_nn=false)
     crp_ramL0 = 2.38 / sqrt(crpD) / 10 * I(crpD)
-    crp_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(crp_ramL0)), 'L', 0)
+    crp_ramΣ = Cholesky(LowerTriangular(Matrix{T}(crp_ramL0)))
 
     if !hasnn(hpparams)
 
-        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), crp_ram, crp_ramΣ, splitmerge)
+        return Diagnostics{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, crp_ram, crp_ramΣ, splitmerge)
 
     else
 
         accepted = vcat(accepted, ComponentArray(nn=0))
 
         ffjordD = modeldimension(hpparams, include_nn=true) - modeldimension(hpparams, include_nn=false)
-        
+
         ffjord_ram = ComponentArray{T}(i=1.0,
-                                       γ=0.6,
+                                       γ=0.501,
                                        previous_h=0.0,
                                        acceptance_target=0.234,
                                    )
 
-        ffjord_ramL0 = 2.38 / sqrt(ffjordD) / 10 * I(ffjordD)
-        ffjord_ramΣ = Cholesky(LowerTriangular{T}(Matrix{T}(ffjord_ramL0)))
+        ffjord_ramL0 = 2.38 / sqrt(ffjordD) / 8 * I(ffjordD)
+        ffjord_ramΣ = Cholesky(LowerTriangular(Matrix{T}(ffjord_ramL0)))
 
-        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
+        return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)
 
     end
 end
