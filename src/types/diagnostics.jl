@@ -51,23 +51,22 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
 
     ram = ComponentArray{T}(i=1.0,
                             γ=0.501,
-                            previous_h=0.0,
-                            acceptance_target=0.44,
+                            previous_h=0.234,
+                            acceptance_target=0.234,
                         )
 
     modelD = modeldimension(hpparams, include_nn=true)
-    ramL0 = 2.38 / sqrt(modelD) / 4 * I(modelD)
+    ramL0 = 2.38 / sqrt(modelD - 1) * I(modelD)
     ramΣ = Cholesky(LowerTriangular(Matrix{T}(ramL0)))
 
-
     crp_ram = ComponentArray{T}(i=1.0,
-                                γ=0.7,
-                                previous_h=0.0,
-                                acceptance_target=0.44,
+                                γ=0.501,
+                                previous_h=0.234,
+                                acceptance_target=0.234,
                             )
 
     crpD = modeldimension(hpparams, include_nn=false)
-    crp_ramL0 = 2.38 / sqrt(crpD) / 10 * I(crpD)
+    crp_ramL0 = 2.38 / sqrt(crpD - 1) / 10 * I(crpD)
     crp_ramΣ = Cholesky(LowerTriangular(Matrix{T}(crp_ramL0)))
 
     if !hasnn(hpparams)
@@ -79,14 +78,16 @@ function Diagnostics(::Type{T}, D, hpparams::Union{Nothing, ComponentArray{T}}=n
         accepted = vcat(accepted, ComponentArray(nn=0))
 
         ffjordD = modeldimension(hpparams, include_nn=true) - modeldimension(hpparams, include_nn=false)
+        # we're not including log(t) for now
+        ffjordD -= 1
 
         ffjord_ram = ComponentArray{T}(i=1.0,
                                        γ=0.501,
-                                       previous_h=0.0,
+                                       previous_h=0.234,
                                        acceptance_target=0.234,
                                    )
 
-        ffjord_ramL0 = 2.38 / sqrt(ffjordD) / 8 * I(ffjordD)
+        ffjord_ramL0 = 2.38 / sqrt(ffjordD - 1) * I(ffjordD)
         ffjord_ramΣ = Cholesky(LowerTriangular(Matrix{T}(ffjord_ramL0)))
 
         return DiagnosticsFFJORD{T, D}(accepted, fill!(similar(accepted), 0), ram, ramΣ, crp_ram, crp_ramΣ, ffjord_ram, ffjord_ramΣ, splitmerge)

@@ -19,7 +19,9 @@ module FlowingClusters
                  lines!, scatter, scatter!, vlines!, hlines!,
                  hist!, barplot!, streamplot!,
                  xlims!, ylims!, hidespines!, hidedecorations!,
-                 with_theme, theme_minimal, :.., Point2
+                 with_theme, theme_minimal, :.., Point2,
+                 @lift, Observable
+
     import Makie: plot, plot!, streamplot
 
     using JLD2: jldsave, load
@@ -76,7 +78,7 @@ module FlowingClusters
     include("model/hyperpriors.jl")
 
     include("model/modelprobabilities.jl")
-    export logprobgenerative
+    export logprobgenerative, loghastings
 
     include("model/ffjord.jl")
     export forwardffjord, backwardffjord, reflow, dense_nn

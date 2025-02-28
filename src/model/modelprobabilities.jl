@@ -82,3 +82,25 @@ function logprobgenerative(clusters::AbstractVector{<:AbstractCluster{T, D, E}},
         return logprobgenerative(clusters, hyperparams._, ignorehyperpriors=ignorehyperpriors)
     end
 end
+
+loghastings(hyperparams::AbstractFCHyperparams) = loghastings(hyperparams._)
+
+function loghastings(hparray::ComponentArray)
+
+        D = datadimension(hparray)
+
+        # crp log alpha hastings
+        log_g = log(hparray.crp.alpha)
+
+        # niw log lambda hastings
+        log_g += log(hparray.crp.niw.lambda)
+
+        # niw L hastings
+        L = LowerTriangular(hparray.crp.niw.flatL)
+        log_g += sum((D:-1:1) .* (log.(abs.(diag(L)))))
+
+        # niw log(nu - D + 1) hastings
+        log_g += log(hparray.crp.niw.nu - D + 1)
+
+        return log_g
+end

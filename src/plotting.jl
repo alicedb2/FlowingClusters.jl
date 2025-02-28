@@ -111,7 +111,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     end
 
     ac = alpha_chain(chain, burn)
-    alpha_axis = Axis(fig[offset + 4, 2], title="α", aspect=3)
+    alpha_axis = Axis(fig[offset + 4, 2], title="CRP concentration parameter α", aspect=3)
     _deco!(alpha_axis, hide=(:t, :r))
     lines!(alpha_axis, burn+1:N, ac, label=nothing)
     if map_idx > 0
@@ -119,7 +119,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     end
 
     muc = mu_chain(Matrix, chain, burn)
-    mu_axis = Axis(fig[offset + 5, 1], title="μ", aspect=3)
+    mu_axis = Axis(fig[offset + 5, 1], title="NIW mean μ₀ ", aspect=3)
     _deco!(mu_axis, hide=(:t, :r))
     for mucomponent in eachrow(muc)
         lines!(mu_axis, burn+1:N, mucomponent, label=nothing)
@@ -129,7 +129,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     end
 
     lc = lambda_chain(chain, burn)
-    lambda_axis = Axis(fig[offset + 5, 2], title="λ", aspect=3)
+    lambda_axis = Axis(fig[offset + 5, 2], title="NIW scale λ₀", aspect=3)
     _deco!(lambda_axis, hide=(:t, :r))
     lines!(lambda_axis, burn+1:N, lc, label=nothing)
     if map_idx > 0
@@ -137,7 +137,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     end
 
     pc = psi_chain(Matrix, chain, burn)
-    psi_axis = Axis(fig[offset + 6, 1], title="Ψ", aspect=3)
+    psi_axis = Axis(fig[offset + 6, 1], title="NIW scale matrix Ψ₀", aspect=3)
     _deco!(psi_axis, hide=(:t, :r))
     for psicomponent in eachrow(pc)
         lines!(psi_axis, burn+1:N, psicomponent, label=nothing)
@@ -147,7 +147,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     end
 
     nc = nu_chain(chain, burn)
-    nu_axis = Axis(fig[offset + 6, 2], title="ν", aspect=3)
+    nu_axis = Axis(fig[offset + 6, 2], title="NIW degree of freedom ν₀", aspect=3)
     _deco!(nu_axis, hide=(:t, :r))
     lines!(nu_axis, burn+1:N, nc, label=nothing)
     if map_idx > 0
@@ -156,7 +156,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
 
     if hasnn(chain.hyperparams)
         nnc = nn_params_chain(Matrix, chain, burn)
-        nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network prior")
+        nn_axis = Axis(fig[9:10, 1:2], title="FFJORD neural network")
         _deco!(nn_axis, hide=(:t, :r))
         for p in eachrow(nnc)
             # scatter!(nn_axis, burn+1:N, collect(p), label=nothing, markersize=2, alpha=0.5)
@@ -202,7 +202,7 @@ function plot(chain::FCChain; proj=[1, 2], burn=0, rev=false, nbclusters=nothing
     return fig
 end
 
-function deformationplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=300, nblines=10, bounds_scaling_factor=1.5)
+function deformationplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=exp(hyperparams._.nn.logt), nbpoints=300, nblines=10, bounds_scaling_factor=1.5)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -271,7 +271,7 @@ function deformationplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), 
     return fig
 end
 
-function streamplot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; proj=[1, 2], bounds=((-4, 4), (-4, 4)), zs=nothing, nbclusters=nothing, rev=false, showclusters=false, t=nothing, rng=default_rng()) where {T, D}
+function streamplot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; recompute=true, proj=[1, 2], bounds=((-4, 4), (-4, 4)), zs=nothing, nbclusters=nothing, rev=false, showclusters=false, t=exp(hyperparams._.nn.logt), rng=default_rng()) where {T, D}
 
     @assert length(Set(proj)) == 2 "Specify exactly 2 different dimensions"
     @assert length(proj) + (isnothing(zs) ? 0 : length(zs)) == D "You must specify as many zs values as the number of dimensions minus 2"
@@ -281,8 +281,12 @@ function streamplot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; pr
 
         if isnothing(t)
             base_clusters = sort(project_clusters(clusters, proj, orig=false), by=length, rev=!rev)
-        elseif t > 0
-            base_clusters, _ = reflow(rng, clusters, hyperparams._, hyperparams.ffjord, t=t)
+        elseif t > 0 || recompute
+            if recompute
+                base_clusters, _ = reflow(rng, clusters, hyperparams._, hyperparams.ffjord)
+            else
+                base_clusters, _ = reflow(rng, clusters, hyperparams._, hyperparams.ffjord, t=t)
+            end
             base_clusters = sort(project_clusters(base_clusters, proj, orig=false), by=length, rev=!rev)
         end
 
@@ -293,7 +297,7 @@ function streamplot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; pr
 
     (xmin, xmax), (ymin, ymax) = bounds
 
-    function fillxy(X)
+    function _fillxy(X)
         negproj = setdiff(1:D, proj)
         _X = zeros(D)
         if !isnothing(zs)
@@ -304,25 +308,43 @@ function streamplot(hyperparams::FCHyperparamsFFJORD{T, D}, clusters=nothing; pr
         return _X
     end
 
-    fig = with_theme(theme_minimal()) do
+    fig, vecfield = with_theme(theme_minimal()) do
         fig = Figure();
         ax = Axis(fig[1, 1]);
         if !isnothing(clusters)
             for (i, cl) in enumerate(orig_clusters[1:nbclusters])
-                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 2), marker=:circle, alpha=0.5);
+                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 6), marker=:cross, alpha=0.5);
             end
             for (i, cl) in enumerate(base_clusters[1:nbclusters])
-                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 1), marker=:cross);
+                scatter!(ax, Tuple.(cl), markersize=5, color=Cycled(showclusters ? i : 1), marker=:circle, alpha=1);
             end
         end
-        streamplot!(ax, (x, y)->Point2(hyperparams.ffjord.nn(fillxy([x, y]), hyperparams._.nn.params, hyperparams.ffjord.nns.model)[1]...), xmin..xmax, ymin..ymax, alpha=0.4, arrow_size=10);
-        fig
+
+        nn = hyperparams.ffjord.nn
+        model = hyperparams.ffjord.nns.model
+        nnparams = hyperparams._.nn.params
+
+        function _vecfield(p)
+            return (x, y) -> Point2(first(nn(_fillxy([x, y]), p, model))...)
+        end
+
+        vecfield = Observable(_vecfield(nnparams))
+
+        streamplot!(ax, vecfield,
+                    xmin..xmax,
+                    ymin..ymax,
+                    alpha=0.3,
+                    arrow_size=10,
+                    gridsize=(50, 50, 50));
+
+        return fig, vecfield
     end
 
     return fig
+
 end
 
-function flowplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=1.0, nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
+function flowplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=nothing, basezs=realzs, rng=default_rng(), t=exp(hyperparams._.nn.logt), nbpoints=50, nblines=20, bounds_scaling_factor=1.02)
 
     if !hasnn(hyperparams)
         @error("Hyperparameters do not contain a FFJORD neural network")
@@ -362,7 +384,7 @@ function flowplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=
     ax1 = Axis(fig[1, 1], xlabel="Real axis $(proj[1]) -> Base axis $(proj[1])", ylabel="Real axis $(proj[2]) -> Base axis $(proj[2])")
     basespace = nothing
     scatter!(ax1, realprobgrid[proj[1], :], realprobgrid[proj[2], :], color=:grey, markersize=6, alpha=0.2, label=nothing);
-    for _t in LinRange(0, 1, 50)
+    for _t in LinRange(0, t, 50)
         _, basespace = forwardffjord(rng, realprobgrid, hyperparams, t=_t)
         scatter!(ax1, basespace[proj[1], :], basespace[proj[2], :], markersize=2, color=Cycled(1), label=nothing);
     end
@@ -382,7 +404,7 @@ function flowplot(hyperparams; proj=[1, 2], gridlims=((-4, 4), (-4, 4)), realzs=
 
     scatter!(ax2, baseprobgrid[proj[1], :], baseprobgrid[proj[2], :], color=:grey, alpha=0.2, markersize=6, label=nothing);
     realspace = nothing
-    for _t in LinRange(0, 1, nbpoints)
+    for _t in LinRange(0, t, nbpoints)
         realspace = backwardffjord(rng, baseprobgrid, hyperparams, t=_t)
         scatter!(ax2, realspace[proj[1], :], realspace[proj[2], :], markersize=2, color=Cycled(1), label=nothing);
     end

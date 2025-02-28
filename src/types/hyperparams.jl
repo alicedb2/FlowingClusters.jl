@@ -36,9 +36,8 @@ function FCHyperparams(::Type{T}, D::Int, nn=nothing; rng::Union{Nothing, Abstra
         nn_state = (model=nn_state, regularize=false, monte_carlo=false)
         ffjord = (nn=nn, nns=nn_state)
         nn_params = ComponentArray{T}(nn_params)
-        # nn_params, perm, signs = canonicalize(ComponentArray{T}(nn_params))
 
-        hpparams = vcat(hpparams, ComponentArray{T}(nn=(params=nn_params,)))
+        hpparams = vcat(hpparams, ComponentArray{T}(nn=(params=nn_params, logt=zero(T))))
 
         return FCHyperparamsFFJORD{T, D}(hpparams, ffjord)
     end

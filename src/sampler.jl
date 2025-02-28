@@ -603,19 +603,34 @@ function advance_ffjord_ram!(
     clusters::AbstractVector{C},
     hyperparams::AbstractFCHyperparams{T, D},
     diagnostics::AbstractDiagnostics{T, D};
-    # temperature=one(T)
+    subsetsize=nothing,
+    # alwayslogt=false
     ) where {T, D, C <:AbstractCluster{T, D, E}} where E
 
     !hasnn(hyperparams) && return hyperparams
 
     di = diagnostics
 
-    nnD = size(hyperparams._.nn.params, 1)
 
     proposed_hparray = copy(hyperparams._)
 
-    U = ComponentArray(randn(rng, nnD), getaxes(proposed_hparray.nn.params))
+    nnD = size(hyperparams._.nn.params, 1)
+    U = randn(rng, nnD)
     SU = di.ffjord_ramΣ.L * U
+    # SU = ComponentArray(di.ffjord_ramΣ.L * U, getaxes(proposed_hparray.nn))
+
+
+    if !isnothing(subsetsize) && subsetsize > 0
+        subsetsize = min(subsetsize, nnD)
+        proposalset = sample(rng, 1:nnD, subsetsize, replace=false)
+        nullset = setdiff(1:nnD, proposalset)
+        SU[nullset] .= zero(T)
+        # subsetsize = min(subsetsize, nnD - (alwayslogt ? 1 : 0))
+        # proposalset = sample(rng, 1:(nnD - (alwayslogt ? 1 : 0)), subsetsize, replace=false)
+        # nullset = setdiff(1:nnD, proposalset, alwayslogt ? [nnD] : Int[])
+        # SU[nullset] .= zero(T)
+    end
+
     proposed_hparray.nn.params .+= SU
 
     # reflow() already computes the logprob coming
@@ -679,20 +694,28 @@ function advance_ram!(
     U = randn(rng, modelD)
     SU = ComponentArray(di.ramΣ.L * U, getaxes(hparray))
 
-    noproposalset = 1:modelD
-    if alwayscrp
-        noproposalset = setdiff(noproposalset, label2index(hparray, "crp"))
+    if !isnothing(subsetsize) && subsetsize > 0
+        noproposalset = 1:modelD
+        if alwayscrp
+            noproposalset = setdiff(noproposalset, label2index(hparray, "crp"))
+        end
+        if regularizelatent
+            SU.crp.niw.mu .= zero(T)
+            # we'll sample the proposal set out of
+            # noproposalset, mu should not be part
+            # of it
+            noproposalset = setdiff(noproposalset, label2index(hparray, "crp.niw.mu"))
+        end
+        proposalset = sample(rng, noproposalset, min(subsetsize, length(noproposalset)), replace=false)
+        noproposalset = setdiff(noproposalset, proposalset)
+        SU[noproposalset] .= zero(T)
+    else
+        subsetsize = modeldimension(hyperparams)
+        if regularizelatent
+            SU.crp.niw.mu .= zero(T)
+            subsetsize -= datadimension(hyperparams)
+        end
     end
-    if regularizelatent
-        SU.crp.niw.mu .= zero(T)
-        # we'll sample the proposal set out of
-        # noproposalset, mu should not be part
-        # of it
-        noproposalset = setdiff(noproposalset, label2index(hparray, "crp.niw.mu"))
-    end
-    proposalset = sample(rng, noproposalset, min(subsetsize, length(noproposalset)), replace=false)
-    noproposalset = setdiff(noproposalset, proposalset)
-    SU[noproposalset] .= zero(T)
 
     proposed_hparray .+= SU
     backtransform!(proposed_hparray)
@@ -707,20 +730,22 @@ function advance_ram!(
 
     log_acceptance -= logprobgenerative(rng, clusters, hyperparams._, hyperparams.ffjord, ignorehyperpriors=false)
 
-    # crp log alpha hastings
-    log_acceptance += log(proposed_hparray.crp.alpha) - log(hparray.crp.alpha)
+    # # crp log alpha hastings
+    # log_acceptance += log(proposed_hparray.crp.alpha) - log(hparray.crp.alpha)
 
-    # niw log lambda hastings
-    log_acceptance += log(proposed_hparray.crp.niw.lambda) - log(hparray.crp.niw.lambda)
+    # # niw log lambda hastings
+    # log_acceptance += log(proposed_hparray.crp.niw.lambda) - log(hparray.crp.niw.lambda)
 
-    # niw L hastings
-    proposed_L = LowerTriangular(proposed_hparray.crp.niw.flatL)
-    L = LowerTriangular(hparray.crp.niw.flatL)
-    log_acceptance += sum((D:-1:1) .* (log.(abs.(diag(proposed_L)))))
-    log_acceptance -= sum((D:-1:1) .* (log.(abs.(diag(L)))))
+    # # niw L hastings
+    # proposed_L = LowerTriangular(proposed_hparray.crp.niw.flatL)
+    # L = LowerTriangular(hparray.crp.niw.flatL)
+    # log_acceptance += sum((D:-1:1) .* (log.(abs.(diag(proposed_L)))))
+    # log_acceptance -= sum((D:-1:1) .* (log.(abs.(diag(L)))))
 
-    # niw log(nu - D + 1) hastings
-    log_acceptance += log(proposed_hparray.crp.niw.nu - D + 1) - log(hparray.crp.niw.nu - D + 1)
+    # # niw log(nu - D + 1) hastings
+    # log_acceptance += log(proposed_hparray.crp.niw.nu - D + 1) - log(hparray.crp.niw.nu - D + 1)
+
+    log_acceptance += loghastings(proposed_hparray) - loghastings(hparray)
 
     acceptance = min(one(T), exp(log_acceptance))
 
@@ -734,7 +759,7 @@ function advance_ram!(
     end
 
 
-    η = di.ram.i^-di.ram.γ
+    η = (div(di.ram.i, subsetsize) + 1)^-di.ram.γ
     h = acceptance - di.ram.acceptance_target
 
     di.ram.i += (di.ram.previous_h * h <= 0)

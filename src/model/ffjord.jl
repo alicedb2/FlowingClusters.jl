@@ -8,7 +8,7 @@
 ## forwardffjord pushes the data in the original space
 ## through the neural network and returns the data in the
 ## base space where the clustering happens
-function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::@NamedTuple{deltalogpxs::T, z::Vector{T}} where {T, D}
+function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparams::AbstractFCHyperparams{T, D}; t=exp(hyperparams._.nn.logt))::@NamedTuple{deltalogpxs::T, z::Vector{T}} where {T, D}
     D === size(x, 1) || throw(ArgumentError("The dimension of the data must be the same as the dimension of the hyperparameters"))
     if hasnn(hyperparams)
         return forwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
@@ -17,7 +17,7 @@ function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparams::Abst
     end
 end
 
-function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::@NamedTuple{deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, D, N}
+function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D}; t=exp(hyperparams._.nn.logt))::@NamedTuple{deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, D, N}
     D === size(x, 1) || throw(ArgumentError("The dimension of the data must be the same as the dimension of the hyperparameters"))
     if hasnn(hyperparams)
         return forwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
@@ -27,13 +27,13 @@ function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::Ab
     end
 end
 
-function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{deltalogpxs::T, z::Vector{T}} where {T}
-    ret = forwardffjord(rng, reshape(x, :, 1), hyperparamsarray, ffjord, t=t)
+function forwardffjord(rng::AbstractRNG, x::AbstractVector{T}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=exp(hyperparamsarray.nn.logt))::@NamedTuple{deltalogpxs::T, z::Vector{T}} where {T}
+    ret = forwardffjord(rng, reshape(x, :, 1), hyperparamsarray.nn.params, ffjord, t=t)
     return (; deltalogpxs=first(ret.deltalogpxs),
               z=reshape(ret.z, :))
 end
 
-function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::@NamedTuple{deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, N}
+function forwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=exp(hyperparamsarray.nn.logt))::@NamedTuple{deltalogpxs::Array{T, N-1}, z::Array{T, N}} where {T, N}
     hasnn(hyperparamsarray) || return (;logpx=zeros(T, size(x)[2:end]), deltalogpxs=zeros(T, size(x)[2:end]), z=x)
     D = size(x, 1)
     # D == first(ffjord.nn.layers).in_dims == last(ffjord.nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
@@ -60,7 +60,7 @@ end
 ## backwardffjord pulls the data from the base space
 ## through the neural network and returns the data in
 ## the original space.
-function backwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1))::Array{T, N} where {T, N}
+function backwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=exp(hyperparamsarray.nn.logt))::Array{T, N} where {T, N}
     hasnn(hyperparamsarray) || return x
     D = size(x, 1)
     D == first(ffjord.nn.layers).in_dims == last(ffjord.nn.layers).out_dims || throw(ArgumentError("The input and output dimensions of the neural network must be the same as the dimension of the data"))
@@ -79,12 +79,12 @@ function backwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparamsarr
 
 end
 
-function backwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D}; t=T(1))::Array{T, N} where {T, D, N}
+function backwardffjord(rng::AbstractRNG, x::AbstractArray{T, N}, hyperparams::AbstractFCHyperparams{T, D}; t=exp(hyperparams._.nn.logt))::Array{T, N} where {T, D, N}
     hasnn(hyperparams) || return x
     return backwardffjord(rng, x, hyperparams._, hyperparams.ffjord, t=t)
 end
 
-function reflow(rng::AbstractRNG, clusters::AbstractVector{SetCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1)) where {T, D, E}
+function reflow(rng::AbstractRNG, clusters::AbstractVector{SetCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=exp(hyperparamsarray.nn.logt)) where {T, D, E}
 
     cluster_sizes = length.(clusters)
     base2original = first(clusters).b2o
@@ -99,7 +99,7 @@ function reflow(rng::AbstractRNG, clusters::AbstractVector{SetCluster{T, D, E}},
 
     return (clusters=new_clusters, deltalogpxs=deltalogpxs)
 end
-function reflow(rng::AbstractRNG, clusters::AbstractVector{BitCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1)) where {T, D, E}
+function reflow(rng::AbstractRNG, clusters::AbstractVector{BitCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=exp(hyperparamsarray.nn.logt)) where {T, D, E}
     base2original = first(clusters).b2o
 
     deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray.nn.params, ffjord, t=t)
@@ -108,7 +108,7 @@ function reflow(rng::AbstractRNG, clusters::AbstractVector{BitCluster{T, D, E}},
 
     return (clusters=[BitCluster(cluster.mask, new_base2original) for cluster in clusters], deltalogpxs=deltalogpxs)
 end
-function reflow(rng::AbstractRNG, clusters::AbstractVector{IndexCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=T(1)) where {T, D, E}
+function reflow(rng::AbstractRNG, clusters::AbstractVector{IndexCluster{T, D, E}}, hyperparamsarray::ComponentArray{T}, ffjord::NamedTuple; t=exp(hyperparamsarray.nn.logt)) where {T, D, E}
     base2original = first(clusters).b2o
 
     deltalogpxs, new_basedata = forwardffjord(rng, base2original[:, :, O], hyperparamsarray.nn.params, ffjord, t=t)
